@@ -1,0 +1,17 @@
+name: fincore_design_system
+resolution: workspace
+description: Shared UI components, visual tokens, and themes for the FINCORE Platform.
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '^3.7.2'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  meta: ^1.11.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

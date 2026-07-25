@@ -1,0 +1,14 @@
+name: fincore_workspace
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '^3.7.2'
+
+workspace:
+  - packages/fincore_core
+  - packages/fincore_shared
+  - packages/fincore_design_system
+  - products/fincore-food/fincore_food_server
+  - products/fincore-food/fincore_food_client
+  - products/fincore-food/fincore_food_flutter

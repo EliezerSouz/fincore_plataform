@@ -1,0 +1,14 @@
+name: fincore_shared
+resolution: workspace
+description: Shared utilities, extensions, and pure helper functions for the FINCORE Platform.
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '^3.7.2'
+
+dependencies:
+  meta: ^1.11.0
+
+dev_dependencies:
+  test: ^1.24.0

@@ -24,6 +24,12 @@ Toda base de código escrita sob a FINCORE deve respeitar o desacoplamento de Cl
 * **Domain Layer**: Regras de negócio puras (Use Cases e Entities) em Dart puro, sem dependências de infraestrutura de banco de dados ou frameworks.
 * **Data Layer**: Repositórios concretos e conexões SQLite/Postgres (Serverpod e Drift).
 
+### 2.1 Regra da Abstração Compartilhada (Abstração Tardia)
+
+> [!IMPORTANT]
+> **Toda abstração compartilhada deve surgir da necessidade comprovada em pelo menos dois pontos distintos da plataforma.**
+> Antes disso, a implementação deve permanecer local ao domínio que a utiliza. É expressamente proibido criar frameworks internos, classes bases globais (ex: `Command`, `CommandHandler`, `Repository`, `Entity`) ou componentes de infraestrutura compartilhados de forma preemptiva em `/packages/fincore_core/` ou `/packages/fincore_shared/` sem uma demanda real comprovada pela repetição física do código.
+
 ---
 
 ## 3. Padrões Obrigatórios de Robustez Distribuída

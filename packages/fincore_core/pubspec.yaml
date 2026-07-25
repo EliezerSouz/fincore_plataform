@@ -1,0 +1,14 @@
+name: fincore_core
+resolution: workspace
+description: Core abstractions, Clean Architecture contracts, and domain primitives for the FINCORE Platform.
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '^3.7.2'
+
+dependencies:
+  meta: ^1.11.0
+
+dev_dependencies:
+  test: ^1.24.0
