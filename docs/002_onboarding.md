@@ -1,6 +1,6 @@
 # Integração (Onboarding) — Bem-vindo à FINCORE
 
-> **Document ID**: PLT-002  
+> **Document ID**: 002  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >
@@ -53,7 +53,7 @@ Para compreender a filosofia da empresa, o design de interface e a engenharia di
 * **[ENG-001: Engineering Guide](file:///f:/Eigent/fincore_platform/docs/003_engineering_guide.md)**
 * **[PLT-004: Monorepo Structure](file:///f:/Eigent/fincore_platform/docs/004_monorepo_structure.md)**
 * **[PLT-006: Non-Functional Requirements](file:///f:/Eigent/fincore_platform/docs/006_non_functional_requirements.md)**
-* **[ADR-001: Technology Stack](file:///f:/Eigent/fincore_platform/docs/decisions/301_adr_001_official_technology_stack.md)**
+* **[ADR-001: Technology Stack](file:///f:/Eigent/fincore_platform/docs/300_decisions/301_adr_001_official_technology_stack.md)**
 * **[PLT-005: Platform Capabilities](file:///f:/Eigent/fincore_platform/docs/005_platform_capabilities.md)**
 * **[products/README.md](file:///f:/Eigent/fincore_platform/products/README.md)**
 * **[products/fincore-food/README.md](file:///f:/Eigent/fincore_platform/products/fincore-food/README.md)**

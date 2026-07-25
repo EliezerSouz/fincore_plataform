@@ -1,6 +1,6 @@
 # Manifesto do Produto (Product Manifesto)
 
-> **Document ID**: PRD-003  
+> **Document ID**: 103  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >

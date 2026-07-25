@@ -1,6 +1,6 @@
 # ADR-001: Stack Tecnológica Oficial da Plataforma
 
-> **Document ID**: ADR-001  
+> **Document ID**: 301  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado) / APPROVED  
 > **Owner**: Comitê de Engenharia & Arquitetura FINCORE  

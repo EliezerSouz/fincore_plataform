@@ -1,6 +1,6 @@
 # Estrutura do Monorepo (Monorepo Structure)
 
-> **Document ID**: PLT-004  
+> **Document ID**: 004  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >

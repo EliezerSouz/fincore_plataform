@@ -1,6 +1,6 @@
 # Mapa de Capacidades (Platform Capabilities Map)
 
-> **Document ID**: PLT-005  
+> **Document ID**: 005  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 > **Owner**: Principal Product Officer & CTO  

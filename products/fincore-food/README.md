@@ -27,6 +27,7 @@ Todas as diretrizes que definem a visão estratégica, os requisitos de UX, a mo
 * **[PRD-006: Product Reset Fase 2](file:///f:/Eigent/fincore_platform/docs/106_product_reset_fase2.md)** ➔ Personas, fluxos e interfaces do PDV Express.
 * **[PRD-007: Product Reset Fase 3](file:///f:/Eigent/fincore_platform/docs/107_product_reset_fase3.md)** ➔ Arquitetura técnica (Sync, Outbox, CQRS e RLS).
 * **[PRD-008: Product Reset Fase 4](file:///f:/Eigent/fincore_platform/docs/108_product_reset_fase4.md)** ➔ Backlog de Tasks, Roadmap de Versões e Riscos.
+* **[ADR-001: Stack Tecnológica Oficial](file:///f:/Eigent/fincore_platform/docs/300_decisions/301_adr_001_official_technology_stack.md)** ➔ A stack tecnológica oficial de desenvolvimento.
 
 ---
 

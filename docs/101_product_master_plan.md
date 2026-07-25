@@ -1,6 +1,6 @@
 # Plano Mestre de Produto (Product Master Plan) — FINCORE Food
 
-> **Document ID**: PRD-001  
+> **Document ID**: 101  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 > **Owner**: Comitê de Produto & Engenharia FINCORE Food  
@@ -57,7 +57,7 @@ Todo o ecossistema do FINCORE Food está consolidado nos documentos listados aba
 
 Para compreender as escolhas de tecnologias e as decisões de engenharia compartilhadas que dão sustentação ao produto, consulte:
 
-* **[ADR-001: Stack Tecnológica Oficial](file:///f:/Eigent/fincore_platform/docs/decisions/301_adr_001_official_technology_stack.md)** ➔ Definição da stack de linguagens, IDEs, bancos e o Princípio de Evolução Tecnológica.
+* **[ADR-001: Stack Tecnológica Oficial](file:///f:/Eigent/fincore_platform/docs/300_decisions/301_adr_001_official_technology_stack.md)** ➔ Definição da stack de linguagens, IDEs, bancos e o Princípio de Evolução Tecnológica.
 
 ---
 

@@ -1,6 +1,6 @@
 # Comportamento de Interface: UX, Personas, Estados e Exceções (Fase 2)
 
-> **Document ID**: PRD-006  
+> **Document ID**: 106  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >

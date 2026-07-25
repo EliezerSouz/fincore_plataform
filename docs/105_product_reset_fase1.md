@@ -1,6 +1,6 @@
 # Escopo do Produto: Domínios, Workspaces e Control Center (Fase 1)
 
-> **Document ID**: PRD-005  
+> **Document ID**: 105  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >

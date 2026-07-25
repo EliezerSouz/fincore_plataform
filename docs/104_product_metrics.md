@@ -1,6 +1,6 @@
 # Métricas do Produto (Product Metrics)
 
-> **Document ID**: PRD-004  
+> **Document ID**: 104  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >
