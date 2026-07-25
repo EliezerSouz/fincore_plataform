@@ -27,22 +27,23 @@ Para compreender a filosofia da empresa, o design de interface e a engenharia di
 │  ④ [docs/MONOREPO_STRUCT] ➔ Matriz de acoplamento e dependências.      │
 │  ⑤ [docs/NON_FUNC_REQS]   ➔ Performance, RTO/RPO e SLAs de latência.   │
 │  ⑥ [docs/decisions/ADR-001]➔ Stack Tecnológica Oficial (Postgres/Dart).│
+│  ⑦ [docs/PLATFORM_CAPABS] ➔ Mapa executivo de capabilities da empresa. │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              3. PRODUTOS                               │
 │                                                                        │
-│  ⑦ [products/README.md]   ➔ Catálogo de produtos da plataforma.        │
-│  ⑧ [products/fincore-food]➔ Landing do vertical FINCORE Food.          │
+│  ⑧ [products/README.md]   ➔ Catálogo de produtos da plataforma.        │
+│  ⑨ [products/fincore-food]➔ Landing do vertical FINCORE Food.          │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              4. GOVERNANÇA                             │
 │                                                                        │
-│  ⑨ [docs/PRODUCT_MASTER]  ➔ Fonte oficial de verdade do Food.          │
-│  ⑩ [docs/DESIGN_CHECKLIST]➔ Checklist mandatório de PRs de interface.  │
+│  ⑩ [docs/PRODUCT_MASTER]  ➔ Fonte oficial de verdade do Food.          │
+│  ⑪ [docs/DESIGN_CHECKLIST]➔ Checklist mandatório de PRs de interface.  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,6 +53,7 @@ Para compreender a filosofia da empresa, o design de interface e a engenharia di
 * **[docs/MONOREPO_STRUCTURE.md](file:///f:/Eigent/fincore_platform/docs/MONOREPO_STRUCTURE.md)**
 * **[docs/NON_FUNCTIONAL_REQUIREMENTS.md](file:///f:/Eigent/fincore_platform/docs/NON_FUNCTIONAL_REQUIREMENTS.md)**
 * **[docs/decisions/ADR-001_official_technology_stack.md](file:///f:/Eigent/fincore_platform/docs/decisions/ADR-001_official_technology_stack.md)**
+* **[docs/PLATFORM_CAPABILITIES.md](file:///f:/Eigent/fincore_platform/docs/PLATFORM_CAPABILITIES.md)**
 * **[products/README.md](file:///f:/Eigent/fincore_platform/products/README.md)**
 * **[products/fincore-food/README.md](file:///f:/Eigent/fincore_platform/products/fincore-food/README.md)**
 * **[docs/PRODUCT_MASTER_PLAN.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_MASTER_PLAN.md)**
