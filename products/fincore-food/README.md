@@ -20,13 +20,13 @@
 
 Todas as diretrizes que definem a visão estratégica, os requisitos de UX, a modelagem de banco de dados e as metas comerciais do FINCORE Food estão arquivadas no diretório de documentação da plataforma:
 
-* **[PRODUCT_MASTER_PLAN.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_MASTER_PLAN.md)** ➔ O índice central e fonte de verdade (SSOT) do produto.
-* **[PRODUCT_PRINCIPLES.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_PRINCIPLES.md)** ➔ Os 12 princípios operacionais e arquiteturais.
-* **[PRODUCT_MANIFESTO.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_MANIFESTO.md)** ➔ As 7 diretrizes filosóficas.
-* **[PRODUCT_RESET_FASE1.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_RESET_FASE1.md)** ➔ Escopo de domínios, workspaces e Control Center.
-* **[PRODUCT_RESET_FASE2.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_RESET_FASE2.md)** ➔ Personas, fluxos e interfaces do PDV Express.
-* **[PRODUCT_RESET_FASE3.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_RESET_FASE3.md)** ➔ Arquitetura técnica (Sync, Outbox, CQRS e RLS).
-* **[PRODUCT_RESET_FASE4.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_RESET_FASE4.md)** ➔ Backlog de Tasks, Roadmap de Versões e Riscos.
+* **[PRD-001: Product Master Plan](file:///f:/Eigent/fincore_platform/docs/101_product_master_plan.md)** ➔ O índice central e fonte de verdade (SSOT) do produto.
+* **[PRD-002: Product Principles](file:///f:/Eigent/fincore_platform/docs/102_product_principles.md)** ➔ Os 12 princípios operacionais e arquiteturais.
+* **[PRD-003: Product Manifesto](file:///f:/Eigent/fincore_platform/docs/103_product_manifesto.md)** ➔ As 7 diretrizes filosóficas.
+* **[PRD-005: Product Reset Fase 1](file:///f:/Eigent/fincore_platform/docs/105_product_reset_fase1.md)** ➔ Escopo de domínios, workspaces e Control Center.
+* **[PRD-006: Product Reset Fase 2](file:///f:/Eigent/fincore_platform/docs/106_product_reset_fase2.md)** ➔ Personas, fluxos e interfaces do PDV Express.
+* **[PRD-007: Product Reset Fase 3](file:///f:/Eigent/fincore_platform/docs/107_product_reset_fase3.md)** ➔ Arquitetura técnica (Sync, Outbox, CQRS e RLS).
+* **[PRD-008: Product Reset Fase 4](file:///f:/Eigent/fincore_platform/docs/108_product_reset_fase4.md)** ➔ Backlog de Tasks, Roadmap de Versões e Riscos.
 
 ---
 

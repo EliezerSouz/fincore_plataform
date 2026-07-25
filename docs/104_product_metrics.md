@@ -1,8 +1,10 @@
-# PRODUCT METRICS
+# Métricas do Produto (Product Metrics)
 
-> O produto é guiado por **resultados**, não por funcionalidades.
-> Toda feature deve mover pelo menos uma métrica listada aqui.
-> Se uma feature não move nenhuma métrica, ela não deveria existir.
+> **Document ID**: PRD-004  
+> **Version**: 1.0.0  
+> **Status**: ❄️ Frozen (Congelado)  
+>
+> O produto é guiado por resultados, não por funcionalidades. Toda feature deve mover pelo menos uma métrica listada aqui.
 
 ---
 

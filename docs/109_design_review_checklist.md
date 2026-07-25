@@ -1,5 +1,6 @@
-# DESIGN REVIEW CHECKLIST
+# Homologação Visual: Checklist de Revisão de Design (Design Review Checklist)
 
+> **Document ID**: PRD-009  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >

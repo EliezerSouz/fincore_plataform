@@ -1,6 +1,9 @@
-# QUALITY ATTRIBUTES
+# Atributos de Qualidade (Quality Attributes)
 
-> [!NOTE]
+> **Document ID**: PLT-007  
+> **Version**: 1.0.0  
+> **Status**: ❄️ Frozen (Congelado)  
+>
 > Os atributos de qualidade definem as restrições técnicas não-funcionais que cada capacidade de negócio precisa respeitar. Eles servem como critério de aceitação de arquitetura e código antes de qualquer funcionalidade entrar em homologação.
 
 ---

@@ -1,5 +1,9 @@
-# PRODUCT MANIFESTO
+# Manifesto do Produto (Product Manifesto)
 
+> **Document ID**: PRD-003  
+> **Version**: 1.0.0  
+> **Status**: ❄️ Frozen (Congelado)  
+>
 > "A clareza sobre o que o produto NÃO é é tão importante quanto o que ele é. Este manifesto estabelece as fronteiras éticas, conceituais e operacionais que protegem a integridade do sistema à medida que crescemos para centenas de clientes."
 
 ---

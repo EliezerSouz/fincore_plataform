@@ -1,5 +1,6 @@
-# ONBOARDING — Bem-vindo à FINCORE
+# Integração (Onboarding) — Bem-vindo à FINCORE
 
+> **Document ID**: PLT-002  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >
@@ -15,57 +16,57 @@ Para compreender a filosofia da empresa, o design de interface e a engenharia di
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              1. EMPRESA                                │
 │                                                                        │
-│  ① [PLATFORM_CHARTER.md]  ➔ Visão estratégica e verticais da FINCORE. │
-│  ② [docs/CONTRIBUTING.md] ➔ Padrões de branch, DoR, commits e PRs.     │
-│  ③ [ENGINEERING_GUIDE.md] ➔ Regras de engenharia e uso ético de IA.     │
+│  ① [PLT-001: Platform Charter]➔ Visão estratégica e verticais.        │
+│  ② [ENG-002: Contributing]    ➔ Padrões de branch, DoR e PR flow.     │
+│  ③ [ENG-001: Engineering Guide]➔ Regras de engenharia e uso de IA.     │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              2. PLATAFORMA                             │
 │                                                                        │
-│  ④ [docs/MONOREPO_STRUCT] ➔ Matriz de acoplamento e dependências.      │
-│  ⑤ [docs/NON_FUNC_REQS]   ➔ Performance, RTO/RPO e SLAs de latência.   │
-│  ⑥ [docs/decisions/ADR-001]➔ Stack Tecnológica Oficial (Postgres/Dart).│
-│  ⑦ [docs/PLATFORM_CAPABS] ➔ Mapa executivo de capabilities da empresa. │
+│  ④ [PLT-004: Monorepo Struct] ➔ Matriz de acoplamento e dependências.  │
+│  ⑤ [PLT-006: Non-Func Reqs]   ➔ Performance, RTO/RPO e SLAs de lat.    │
+│  ⑥ [ADR-001: Tech Stack]      ➔ Stack Tecnológica Oficial Postgres/Dart.│
+│  ⑦ [PLT-005: Platform Capabs] ➔ Mapa executivo de capabilities.        │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              3. PRODUTOS                               │
 │                                                                        │
-│  ⑧ [products/README.md]   ➔ Catálogo de produtos da plataforma.        │
-│  ⑨ [products/fincore-food]➔ Landing do vertical FINCORE Food.          │
+│  ⑧ [products/README.md]       ➔ Catálogo de produtos da plataforma.    │
+│  ⑨ [products/fincore-food]    ➔ Landing do vertical FINCORE Food.      │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              4. GOVERNANÇA                             │
 │                                                                        │
-│  ⑩ [docs/PRODUCT_MASTER]  ➔ Fonte oficial de verdade do Food.          │
-│  ⑪ [docs/DESIGN_CHECKLIST]➔ Checklist mandatório de PRs de interface.  │
+│  ⑩ [PRD-001: Master Plan Food]➔ Fonte oficial de verdade do Food.      │
+│  ⑪ [PRD-009: Design Checklist]➔ Checklist mandatório de PRs visual.    │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-* **[PLATFORM_CHARTER.md](file:///f:/Eigent/fincore_platform/PLATFORM_CHARTER.md)**
-* **[docs/CONTRIBUTING.md](file:///f:/Eigent/fincore_platform/docs/CONTRIBUTING.md)**
-* **[ENGINEERING_GUIDE.md](file:///f:/Eigent/fincore_platform/ENGINEERING_GUIDE.md)**
-* **[docs/MONOREPO_STRUCTURE.md](file:///f:/Eigent/fincore_platform/docs/MONOREPO_STRUCTURE.md)**
-* **[docs/NON_FUNCTIONAL_REQUIREMENTS.md](file:///f:/Eigent/fincore_platform/docs/NON_FUNCTIONAL_REQUIREMENTS.md)**
-* **[docs/decisions/ADR-001_official_technology_stack.md](file:///f:/Eigent/fincore_platform/docs/decisions/ADR-001_official_technology_stack.md)**
-* **[docs/PLATFORM_CAPABILITIES.md](file:///f:/Eigent/fincore_platform/docs/PLATFORM_CAPABILITIES.md)**
+* **[PLT-001: Platform Charter](file:///f:/Eigent/fincore_platform/docs/001_platform_charter.md)**
+* **[ENG-002: Contributing](file:///f:/Eigent/fincore_platform/docs/401_contributing.md)**
+* **[ENG-001: Engineering Guide](file:///f:/Eigent/fincore_platform/docs/003_engineering_guide.md)**
+* **[PLT-004: Monorepo Structure](file:///f:/Eigent/fincore_platform/docs/004_monorepo_structure.md)**
+* **[PLT-006: Non-Functional Requirements](file:///f:/Eigent/fincore_platform/docs/006_non_functional_requirements.md)**
+* **[ADR-001: Technology Stack](file:///f:/Eigent/fincore_platform/docs/decisions/301_adr_001_official_technology_stack.md)**
+* **[PLT-005: Platform Capabilities](file:///f:/Eigent/fincore_platform/docs/005_platform_capabilities.md)**
 * **[products/README.md](file:///f:/Eigent/fincore_platform/products/README.md)**
 * **[products/fincore-food/README.md](file:///f:/Eigent/fincore_platform/products/fincore-food/README.md)**
-* **[docs/PRODUCT_MASTER_PLAN.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_MASTER_PLAN.md)**
-* **[docs/DESIGN_REVIEW_CHECKLIST.md](file:///f:/Eigent/fincore_platform/docs/DESIGN_REVIEW_CHECKLIST.md)**
+* **[PRD-001: Product Master Plan](file:///f:/Eigent/fincore_platform/docs/101_product_master_plan.md)**
+* **[PRD-009: Design Review Checklist](file:///f:/Eigent/fincore_platform/docs/109_design_review_checklist.md)**
 
 ---
 
 ## 🛠️ Passo Inicial para Começar
 
 Após ler os documentos acima:
-1. Acesse o **Backlog Mestre** localizado no item **⑧ [PRODUCT_MASTER_PLAN.md]** ou no sistema de gestão de projetos (Jira/GitHub Projects).
+1. Acesse o **Backlog Mestre** localizado no item **⑩ [PRD-001: Product Master Plan]** ou no sistema de gestão de projetos (Jira/GitHub Projects).
 2. Localize a sua tarefa prioritária e certifique-se de que ela atende à **Definition of Ready (DoR)** antes de arrastá-la para desenvolvimento.
-3. Crie o seu branch local a partir da `main` seguindo a convenção cadastrada no `CONTRIBUTING.md`.
+3. Crie o seu branch local a partir da `master` seguindo a convenção cadastrada no **[ENG-002: Contributing]**.
 
 *FINCORE Onboarding — Integrando talentos com governança de produto.*

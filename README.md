@@ -11,7 +11,7 @@
 
 Se você é um novo colaborador ou Inteligência Artificial integrada ao time, **é obrigatório** ler o documento de boas-vindas e seguir a trilha sequencial de leitura de governança antes de fazer qualquer alteração ou escrever código:
 
-👉 **[ONBOARDING.md](file:///f:/Eigent/fincore_platform/ONBOARDING.md)**
+👉 **[PLT-002: Onboarding](file:///f:/Eigent/fincore_platform/docs/002_onboarding.md)**
 
 ---
 
@@ -23,7 +23,9 @@ O monorepo é organizado para separar de forma limpa a governança, as ferrament
 fincore_platform/
 │
 ├── .github/                   ← Templates estruturados de Issues e Pull Requests
-├── docs/                      ← Documentação congelada e ADRs da plataforma (SSOT)
+├── docs/                      ← Documentação e ADRs organizados por Document IDs
+│   └── decisions/             ← Architecture Decision Records (ADRs)
+│
 ├── products/                  ← Verticais de produto comercializáveis
 │   ├── README.md              ➔ Catálogo de produtos (Food, Finance, CRM)
 │   └── fincore-food/          ➔ FINCORE Food (aplicativo para food service)
@@ -31,11 +33,9 @@ fincore_platform/
 ├── packages/                  ← Componentes e bibliotecas compartilhadas
 ├── tools/                     ← Scripts de build e ferramentas de desenvolvimento
 │
-├── ONBOARDING.md              ➔ Guia de onboarding e trilha de leitura
-├── PLATFORM_CHARTER.md        ➔ Missão, padrões e governança da FINCORE
-├── ENGINEERING_GUIDE.md       ➔ Diretrizes de engenharia e regras de uso de IA
-├── CHANGELOG.md               ➔ Log de entregas e versões da plataforma
-└── LICENSE                    ← Licença de uso MIT
+├── README.md                  ← Este arquivo de entrada
+├── LICENSE                    ← Licença de uso MIT
+└── CHANGELOG.md               ← Histórico de releases
 ```
 
 ---

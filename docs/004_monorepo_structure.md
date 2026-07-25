@@ -1,5 +1,6 @@
-# MONOREPO STRUCTURE & DEPENDENCY CONTRACT
+# Estrutura do Monorepo (Monorepo Structure)
 
+> **Document ID**: PLT-004  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >

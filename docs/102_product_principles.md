@@ -1,9 +1,10 @@
-# PRODUCT PRINCIPLES
+# Princípios do Produto (Product Principles)
 
-> [!CAUTION]
-> **Nenhum código deve ser escrito antes da leitura deste documento.**
-> Nenhuma funcionalidade deve ser implementada sem que atenda a pelo menos um princípio.
-> Nenhuma exceção deve ser feita sem aprovação explícita do fundador.
+> **Document ID**: PRD-002  
+> **Version**: 1.0.0  
+> **Status**: ❄️ Frozen (Congelado)  
+>
+> Nenhum código deve ser escrito antes da leitura deste documento. Nenhuma funcionalidade deve ser implementada sem que atenda a pelo menos um princípio.
 
 ---
 

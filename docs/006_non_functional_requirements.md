@@ -1,5 +1,9 @@
-# NON-FUNCTIONAL REQUIREMENTS (NFR)
+# Requisitos Não-Funcionais (Non-Functional Requirements - NFR)
 
+> **Document ID**: PLT-006  
+> **Version**: 1.0.0  
+> **Status**: ❄️ Frozen (Congelado)  
+>
 > Este documento define os requisitos de engenharia não-funcionais que governam o comportamento e a infraestrutura da plataforma, garantindo a viabilidade do produto para comercialização SaaS.
 
 ---
@@ -11,7 +15,7 @@
 | **Tempo de Inicialização** | Boot do app local | < 1.5s até renderizar a tela de Login/Shell (se logado) |
 | **Latência de Renderização**| Mudança de estado da UI | < 50ms (sem travamento no main isolate do Flutter) |
 | **Tempo de Impressão** | Envio de comando térmica | < 200ms entre clicar e iniciar o spooler físico |
-| **Latência de API Cloud** | Tempo de resposta Serverpod | < 300ms em requisições de leitura de catálogo/preços |
+| **Latência de API Cloud** | Tempo de resposta Serverpod | < 300ms in requisições de leitura de catálogo/preços |
 
 ---
 

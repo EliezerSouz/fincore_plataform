@@ -1,5 +1,6 @@
-# ENGINEERING GUIDE — Diretrizes de Engenharia da FINCORE
+# Guia de Engenharia (Engineering Guide)
 
+> **Document ID**: ENG-001  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >
@@ -38,14 +39,14 @@ Como a FINCORE adota o desenvolvimento acelerado com suporte de IAs (como Claude
 
 ### 4.1 O Contrato de Prompt de IA
 Toda IA atuante no projeto é considerada um membro pleno da equipe de arquitetura e deve obedecer à **Single Source of Truth (SSOT)**.
-* **Leitura Prévia**: A IA deve ler a trilha de onboarding descrita no `ONBOARDING.md` antes de sugerir refatorações.
+* **Leitura Prévia**: A IA deve ler a trilha de onboarding descrita no **[PLT-002: Onboarding](file:///f:/Eigent/fincore_platform/docs/002_onboarding.md)** antes de sugerir refatorações.
 * **Proibição de Código Fora do Escopo**: É estritamente proibido criar features fantasmas ou códigos que não sirvam a uma Capability e Feature prioritária descrita no backlog.
 * **Consistência de Estado**: IAs devem modelar telas baseadas em máquinas de estados finitos descritas no State Design, em vez de espalhar estados mutáveis reativos em views.
 
 ### 4.2 Como Referenciar Decisões
 Toda sugestão de código ou Pull Request gerado por ferramentas de IA deve listar no rodapé da descrição:
 1. Quais documentos de governança em `docs/` serviram de base.
-2. A atestação de que a entrega atende a 100% dos requisitos do `DESIGN_REVIEW_CHECKLIST.md`.
+2. A atestação de que a entrega atende a 100% dos requisitos do **[PRD-009: Design Review Checklist](file:///f:/Eigent/fincore_platform/docs/109_design_review_checklist.md)**.
 
 ---
 

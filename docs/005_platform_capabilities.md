@@ -1,5 +1,6 @@
-# PLATFORM CAPABILITIES MAP — FINCORE
+# Mapa de Capacidades (Platform Capabilities Map)
 
+> **Document ID**: PLT-005  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 > **Owner**: Principal Product Officer & CTO  

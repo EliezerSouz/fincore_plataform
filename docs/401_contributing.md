@@ -1,5 +1,6 @@
-# CONTRIBUTING — Diretrizes de Contribuição Técnica
+# Diretrizes de Contribuição (Contributing Guidelines)
 
+> **Document ID**: ENG-002  
 > **Version**: 1.0.0  
 > **Status**: ❄️ Frozen (Congelado)  
 >
@@ -37,8 +38,8 @@ Uma funcionalidade está pronta para desenvolvimento apenas quando:
 ### 3.2 PR Gate Requirements
 Para que um Pull Request seja aprovado e mesclado:
 * Todos os testes automáticos devem passar com 100% de sucesso.
-* O PR deve responder afirmativamente a todos os itens do `DESIGN_REVIEW_CHECKLIST.md` se possuir alterações visuais.
-* O código deve estar alinhado com o `ENGINEERING_GUIDE.md` (inclusive o Princípio da Reimplementação Consciente).
+* O PR deve responder afirmativamente a todos os itens do **[PRD-009: Design Review Checklist](file:///f:/Eigent/fincore_platform/docs/109_design_review_checklist.md)** se possuir alterações visuais.
+* O código deve estar alinhado com o **[ENG-001: Engineering Guide](file:///f:/Eigent/fincore_platform/docs/003_engineering_guide.md)** (inclusive o Princípio da Reimplementação Consciente).
 
 ---
 
