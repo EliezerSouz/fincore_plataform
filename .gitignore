@@ -1,0 +1,38 @@
+# IDE e Sistemas
+.idea/
+.vscode/
+*.suo
+*.ntvsca
+*.ntvscomp
+*.tvsconfig
+*.suo.user
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.log
+*.tmp
+*.bak
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Flutter e Dart (previstos)
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+*.g.dart
+*.mocks.dart
+
+# Node (previsto)
+node_modules/
+npm-debug.log*
+
+# Serverpod (previsto)
+web/
+config/passwords.yaml
+config/development.yaml
+config/staging.yaml
+config/production.yaml
