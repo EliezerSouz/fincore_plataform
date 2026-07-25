@@ -60,7 +60,8 @@ O software local deve gerenciar comandos diretos (ESC/POS) enviados ao spooler d
 
 ## 5. Governança da Plataforma
 
-* **ADR First**: Qualquer alteração estrutural na arquitetura compartilhada da plataforma deve ser formalizada previamente através de um registro de decisão arquitetural (ADR - Architecture Decision Record).
+* **ADR First**: Qualquer alteração estrutural ou de stack na arquitetura compartilhada da plataforma deve ser formalizada previamente através de um registro de decisão arquitetural (ADR - Architecture Decision Record).
+* **Stack Tecnológica**: A stack tecnológica oficial da plataforma é canônica e regulada por meio do documento **[ADR-001: Stack Tecnológica Oficial](file:///f:/Eigent/fincore_platform/docs/decisions/ADR-001_official_technology_stack.md)**. Alterações ou inclusões de novos componentes exigem nova versão do ADR.
 * **Mudança Controlada**: Documentos marcados como `Frozen` (Congelados) não podem ser alterados de forma direta. Evoluções exigem nova versão semântica e aprovação do comitê.
 * **PR Gates**: O merge de novos branches exige conformidade com as diretrizes do guia de contribuição e aprovação nos testes automatizados locais.
 

@@ -26,23 +26,24 @@ Para compreender a filosofia da empresa, o design de interface e a engenharia di
 │                                                                        │
 │  ④ [docs/MONOREPO_STRUCT] ➔ Matriz de acoplamento e dependências.      │
 │  ⑤ [docs/NON_FUNC_REQS]   ➔ Performance, RTO/RPO e SLAs de latência.   │
+│  ⑥ [docs/decisions/ADR-001]➔ Stack Tecnológica Oficial (Postgres/Dart).│
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              3. PRODUTOS                               │
 │                                                                        │
-│  ⑥ [products/README.md]   ➔ Catálogo de produtos da plataforma.        │
-│  ⑦ [products/fincore-food]➔ Landing do vertical FINCORE Food.          │
+│  ⑦ [products/README.md]   ➔ Catálogo de produtos da plataforma.        │
+│  ⑧ [products/fincore-food]➔ Landing do vertical FINCORE Food.          │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              4. GOVERNANÇA                             │
 │                                                                        │
-│  ⑧ [docs/PRODUCT_MASTER]  ➔ Fonte oficial de verdade do Food.          │
-│  ⑨ [docs/DESIGN_CHECKLIST]➔ Checklist mandatório de PRs de interface.  │
-└────────────────────────────────────────────────────────────────┘
+│  ⑨ [docs/PRODUCT_MASTER]  ➔ Fonte oficial de verdade do Food.          │
+│  ⑩ [docs/DESIGN_CHECKLIST]➔ Checklist mandatório de PRs de interface.  │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 * **[PLATFORM_CHARTER.md](file:///f:/Eigent/fincore_platform/PLATFORM_CHARTER.md)**
@@ -50,6 +51,7 @@ Para compreender a filosofia da empresa, o design de interface e a engenharia di
 * **[ENGINEERING_GUIDE.md](file:///f:/Eigent/fincore_platform/ENGINEERING_GUIDE.md)**
 * **[docs/MONOREPO_STRUCTURE.md](file:///f:/Eigent/fincore_platform/docs/MONOREPO_STRUCTURE.md)**
 * **[docs/NON_FUNCTIONAL_REQUIREMENTS.md](file:///f:/Eigent/fincore_platform/docs/NON_FUNCTIONAL_REQUIREMENTS.md)**
+* **[docs/decisions/ADR-001_official_technology_stack.md](file:///f:/Eigent/fincore_platform/docs/decisions/ADR-001_official_technology_stack.md)**
 * **[products/README.md](file:///f:/Eigent/fincore_platform/products/README.md)**
 * **[products/fincore-food/README.md](file:///f:/Eigent/fincore_platform/products/fincore-food/README.md)**
 * **[docs/PRODUCT_MASTER_PLAN.md](file:///f:/Eigent/fincore_platform/docs/PRODUCT_MASTER_PLAN.md)**
