@@ -47,7 +47,12 @@ class LocalEntregaRepository extends SyncableRepository<LocalEntrega> {
   @override
   Future<LocalEntrega?> findById(String id) async {
     final row = await (db.select(db.locaisEntregaTable)
-          ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.id.equals(id) &
+                t.tenantId.equals(activeTenantId) &
+                t.deletedAt.isNull(),
+          ))
         .getSingleOrNull();
     if (row == null) return null;
     return _mapToDomain(row);
@@ -56,14 +61,22 @@ class LocalEntregaRepository extends SyncableRepository<LocalEntrega> {
   @override
   Future<List<LocalEntrega>> findAll() async {
     final rows = await (db.select(db.locaisEntregaTable)
-          ..where((t) => t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.tenantId.equals(activeTenantId) & t.deletedAt.isNull(),
+          ))
         .get();
     return rows.map(_mapToDomain).toList();
   }
 
   Future<List<LocalEntrega>> findByClienteId(String clienteId) async {
     final rows = await (db.select(db.locaisEntregaTable)
-          ..where((t) => t.clienteId.equals(clienteId) & t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.clienteId.equals(clienteId) &
+                t.tenantId.equals(activeTenantId) &
+                t.deletedAt.isNull(),
+          ))
         .get();
     return rows.map(_mapToDomain).toList();
   }

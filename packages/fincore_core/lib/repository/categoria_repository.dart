@@ -43,7 +43,12 @@ class CategoriaRepository extends SyncableRepository<Categoria> {
   @override
   Future<Categoria?> findById(String id) async {
     final row = await (db.select(db.categoriasTable)
-          ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.id.equals(id) &
+                t.tenantId.equals(activeTenantId) &
+                t.deletedAt.isNull(),
+          ))
         .getSingleOrNull();
     if (row == null) return null;
     return _mapToDomain(row);
@@ -52,7 +57,10 @@ class CategoriaRepository extends SyncableRepository<Categoria> {
   @override
   Future<List<Categoria>> findAll() async {
     final rows = await (db.select(db.categoriasTable)
-          ..where((t) => t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.tenantId.equals(activeTenantId) & t.deletedAt.isNull(),
+          ))
         .get();
     return rows.map(_mapToDomain).toList();
   }

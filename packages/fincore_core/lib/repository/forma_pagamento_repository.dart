@@ -43,7 +43,12 @@ class FormaPagamentoRepository extends SyncableRepository<FormaPagamento> {
   @override
   Future<FormaPagamento?> findById(String id) async {
     final row = await (db.select(db.formasPagamentoTable)
-          ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.id.equals(id) &
+                t.tenantId.equals(activeTenantId) &
+                t.deletedAt.isNull(),
+          ))
         .getSingleOrNull();
     if (row == null) return null;
     return _mapToDomain(row);
@@ -52,7 +57,10 @@ class FormaPagamentoRepository extends SyncableRepository<FormaPagamento> {
   @override
   Future<List<FormaPagamento>> findAll() async {
     final rows = await (db.select(db.formasPagamentoTable)
-          ..where((t) => t.tenantId.equals(activeTenantId))
+          ..where(
+            (t) =>
+                t.tenantId.equals(activeTenantId) & t.deletedAt.isNull(),
+          )
           ..orderBy([(t) => OrderingTerm(expression: t.ordem)]))
         .get();
     return rows.map(_mapToDomain).toList();

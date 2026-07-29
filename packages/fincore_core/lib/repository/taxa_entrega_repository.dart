@@ -45,7 +45,12 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
   @override
   Future<TaxaEntrega?> findById(String id) async {
     final row = await (db.select(db.taxasEntregaTable)
-          ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.id.equals(id) &
+                t.tenantId.equals(activeTenantId) &
+                t.deletedAt.isNull(),
+          ))
         .getSingleOrNull();
     if (row == null) return null;
     return _mapToDomain(row);
@@ -54,7 +59,10 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
   @override
   Future<List<TaxaEntrega>> findAll() async {
     final rows = await (db.select(db.taxasEntregaTable)
-          ..where((t) => t.tenantId.equals(activeTenantId)))
+          ..where(
+            (t) =>
+                t.tenantId.equals(activeTenantId) & t.deletedAt.isNull(),
+          ))
         .get();
     return rows.map(_mapToDomain).toList();
   }
