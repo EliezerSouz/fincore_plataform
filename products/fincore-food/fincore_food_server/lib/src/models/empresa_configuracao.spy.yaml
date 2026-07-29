@@ -1,0 +1,70 @@
+class: EmpresaConfiguracao
+table: empresa_configuracao
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  timezone: String
+  locale: String
+  currency: String
+  printerConfig: String?
+  pixKey: String?
+  taxaServico: double
+  usarWhatsApp: bool
+  logoUrl: String?
+  tema: String
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+  # CAP.PRINTING: Impressoras por Via
+  printerCaixa: String?
+  printerCozinha: String?
+  printerBalcao: String?
+  printerExpedicao: String?
+
+  # CAP.PRINTING: Auto-print por Via
+  autoPrintCaixa: bool
+  autoPrintCozinha: bool
+  autoPrintBalcao: bool
+  autoPrintExpedicao: bool
+
+  # CAP.PRINTING: Número de Vias (Cópias)
+  viasCliente: int
+  viasCozinha: int
+  viasBalcao: int
+  viasExpedicao: int
+
+  # CAP.PRINTING: Papel e Hardware
+  larguraPapel: int
+  cortarPapel: bool
+  abrirGaveta: bool
+
+  # CAP.PRINTING: QR Code e Layout
+  imprimirQRCode: bool
+  imprimirCopiaCola: bool
+  imprimirLogo: bool
+  imprimirRodape: bool
+  mensagemRodape: String
+
+  # CAP.PRINTING: PIX Expandido
+  pixFavorecido: String?
+  pixBanco: String?
+  pixTipo: String
+  pixCidade: String
+
+  # CAP.PRINTING: Dados do Cupom
+  nomeEmpresaCupom: String?
+  telefoneEmpresa: String?
+  cnpjEmpresa: String?
+  enderecoEmpresa: String?

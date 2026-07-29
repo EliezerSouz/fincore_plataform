@@ -1,0 +1,114 @@
+import 'package:uuid/uuid.dart';
+
+class PedidoDraft {
+  final String id;
+  final String tenantId;
+  final String? clienteId;
+  final String tipoLogistica; // 'Entrega' ou 'Retirada'
+  final String canalVenda; // 'PDV'
+  final String status; // 'Criado'
+  final int valorSubtotalCentavos;
+  final int valorTaxaEntregaCentavos;
+  final int valorDescontoCentavos;
+  final int valorTotalCentavos;
+  final String? formaPagamentoId;
+  final int? trocoParaCentavos;
+  final List<ItemPedidoDraft> itens;
+  final DateTime dataHoraCriacao;
+  final String operadorId;
+
+  PedidoDraft({
+    String? id,
+    required this.tenantId,
+    this.clienteId,
+    required this.tipoLogistica,
+    this.canalVenda = 'PDV',
+    this.status = 'Criado',
+    required this.valorSubtotalCentavos,
+    required this.valorTaxaEntregaCentavos,
+    this.valorDescontoCentavos = 0,
+    required this.valorTotalCentavos,
+    this.formaPagamentoId,
+    this.trocoParaCentavos,
+    required this.itens,
+    DateTime? dataHoraCriacao,
+    required this.operadorId,
+  })  : id = id ?? const Uuid().v4(),
+        dataHoraCriacao = dataHoraCriacao ?? DateTime.now();
+
+  PedidoDraft copyWith({
+    String? id,
+    String? tenantId,
+    String? Function()? clienteId,
+    String? tipoLogistica,
+    String? canalVenda,
+    String? status,
+    int? valorSubtotalCentavos,
+    int? valorTaxaEntregaCentavos,
+    int? valorDescontoCentavos,
+    int? valorTotalCentavos,
+    String? Function()? formaPagamentoId,
+    int? Function()? trocoParaCentavos,
+    List<ItemPedidoDraft>? itens,
+    DateTime? dataHoraCriacao,
+    String? operadorId,
+  }) {
+    return PedidoDraft(
+      id: id ?? this.id,
+      tenantId: tenantId ?? this.tenantId,
+      clienteId: clienteId != null ? clienteId() : this.clienteId,
+      tipoLogistica: tipoLogistica ?? this.tipoLogistica,
+      canalVenda: canalVenda ?? this.canalVenda,
+      status: status ?? this.status,
+      valorSubtotalCentavos: valorSubtotalCentavos ?? this.valorSubtotalCentavos,
+      valorTaxaEntregaCentavos: valorTaxaEntregaCentavos ?? this.valorTaxaEntregaCentavos,
+      valorDescontoCentavos: valorDescontoCentavos ?? this.valorDescontoCentavos,
+      valorTotalCentavos: valorTotalCentavos ?? this.valorTotalCentavos,
+      formaPagamentoId: formaPagamentoId != null ? formaPagamentoId() : this.formaPagamentoId,
+      trocoParaCentavos: trocoParaCentavos != null ? trocoParaCentavos() : this.trocoParaCentavos,
+      itens: itens ?? this.itens,
+      dataHoraCriacao: dataHoraCriacao ?? this.dataHoraCriacao,
+      operadorId: operadorId ?? this.operadorId,
+    );
+  }
+}
+
+class ItemPedidoDraft {
+  final String id;
+  final String produtoId;
+  final String nome;
+  final double quantidade;
+  final int valorUnitarioCentavos;
+  final int valorTotalCentavos;
+  final String? observacoes;
+
+  ItemPedidoDraft({
+    String? id,
+    required this.produtoId,
+    required this.nome,
+    required this.quantidade,
+    required this.valorUnitarioCentavos,
+    required this.valorTotalCentavos,
+    this.observacoes,
+  }) : id = id ?? const Uuid().v4();
+
+  ItemPedidoDraft copyWith({
+    String? id,
+    String? produtoId,
+    String? nome,
+    double? quantidade,
+    int? valorUnitarioCentavos,
+    int? valorTotalCentavos,
+    String? Function()? observacoes,
+  }) {
+    return ItemPedidoDraft(
+      id: id ?? this.id,
+      produtoId: produtoId ?? this.produtoId,
+      nome: nome ?? this.nome,
+      quantidade: quantidade ?? this.quantidade,
+      valorUnitarioCentavos: valorUnitarioCentavos ?? this.valorUnitarioCentavos,
+      valorTotalCentavos: valorTotalCentavos ?? this.valorTotalCentavos,
+      observacoes: observacoes != null ? observacoes() : this.observacoes,
+    );
+  }
+}

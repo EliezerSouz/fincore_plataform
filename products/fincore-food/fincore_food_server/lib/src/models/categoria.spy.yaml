@@ -1,0 +1,32 @@
+class: Categoria
+table: categoria
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  parentId: UuidValue?, relation(parent=categoria)
+  nome: String
+  descricao: String
+  ordemExibicao: int
+  ativo: bool
+  icone: String?
+  cor: String?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  categoria_tenant_idx:
+    fields: tenantId
+  categoria_parent_idx:
+    fields: tenantId, parentId

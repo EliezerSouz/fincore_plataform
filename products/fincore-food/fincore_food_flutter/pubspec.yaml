@@ -28,11 +28,34 @@ dependencies:
   serverpod_flutter: 2.9.3
   fincore_food_client:
     path: ../fincore_food_client
+  fincore_design_system:
+    path: ../../../packages/fincore_design_system
+  fincore_core:
+    path: ../../../packages/fincore_core
+  fincore_shared:
+    path: ../../../packages/fincore_shared
+  fincore_pricing:
+    path: ../../../packages/fincore_pricing
+  drift: ^2.20.0
+  sqlite3_flutter_libs: ^0.5.0
+  flutter_dotenv: ^5.2.1
+  supabase_flutter: ^2.9.0
+  path_provider: ^2.1.0
+  path: ^1.9.0
+  uuid: ^4.3.3
+  intl: ^0.19.0
+  shared_preferences: ^2.2.0
+  mask_text_input_formatter: ^2.5.0
+  brasil_fields: ^1.15.0
+  pdf: ^3.11.1
+  printing: ^5.13.2
+  esc_pos_utils_plus: ^2.0.4
 
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.5
+  drift_db_viewer: ^2.1.0
 
 dev_dependencies:
   flutter_lints: '>=3.0.0 <7.0.0'
@@ -45,15 +68,10 @@ dev_dependencies:
 # The following section is specific to Flutter.
 flutter:
 
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  assets:
+    - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware.

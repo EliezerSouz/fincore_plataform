@@ -1,0 +1,32 @@
+class: LocalEntrega
+table: local_entrega
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  clienteId: UuidValue, relation(parent=cliente)
+  nomeIdentificador: String
+  logradouro: String
+  numero: String
+  bairro: String
+  cidade: String
+  cep: String
+  referencia: String
+  ativo: bool
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  local_entrega_cliente_idx:
+    fields: tenantId, clienteId

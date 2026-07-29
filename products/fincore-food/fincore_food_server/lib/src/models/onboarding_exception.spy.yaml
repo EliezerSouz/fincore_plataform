@@ -1,0 +1,3 @@
+exception: OnboardingException
+fields:
+  message: String

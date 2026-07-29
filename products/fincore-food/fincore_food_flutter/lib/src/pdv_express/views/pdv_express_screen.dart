@@ -1,42 +1,57 @@
 import 'package:flutter/material.dart';
+import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:flutter/services.dart';
 import '../controllers/pdv_express_controller.dart';
 import 'widgets/pix_payment_modal.dart';
+import 'widgets/stepper_header.dart';
+import 'widgets/customer_step.dart';
+import 'widgets/product_catalog_step.dart';
+import 'widgets/payment_step.dart';
+import 'widgets/order_summary_panel.dart';
+import 'comprovante_pedido_page.dart';
 
 class PdvExpressScreen extends StatefulWidget {
-  const PdvExpressScreen({super.key});
+  final bool isEmbedded;
+  const PdvExpressScreen({super.key, this.isEmbedded = false});
 
   @override
   State<PdvExpressScreen> createState() => _PdvExpressScreenState();
 }
 
-class _PdvExpressScreenState extends State<PdvExpressScreen> {
+class _PdvExpressScreenState extends State<PdvExpressScreen>
+    with TickerProviderStateMixin {
   late final PdvExpressController _controller;
   final FocusNode _keyboardFocusNode = FocusNode();
   final FocusNode _searchFocusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
+  bool _wasCompleted = false;
 
-  // Produtos Mockados para o Catálogo (Conforme o MVP da Salgaderia)
-  final List<Map<String, dynamic>> _catalogProducts = [
-    {'id': '101', 'name': 'Coxinha de Frango', 'price': 600, 'category': 'Salgados'},
-    {'id': '102', 'name': 'Kibe Especial', 'price': 550, 'category': 'Salgados'},
-    {'id': '103', 'name': 'Bolinho de Queijo', 'price': 500, 'category': 'Salgados'},
-    {'id': '104', 'name': 'Empada de Palmito', 'price': 650, 'category': 'Salgados'},
-    {'id': '201', 'name': 'Coca-Cola 350ml', 'price': 500, 'category': 'Bebidas'},
-    {'id': '202', 'name': 'Suco de Laranja 500ml', 'price': 700, 'category': 'Bebidas'},
-    {'id': '301', 'name': 'Mini Churros Lote 10', 'price': 1200, 'category': 'Doces'},
-  ];
+  // ── Animação de Shake (atalho inválido — PRD-006) ────────────────
+  late final AnimationController _shakeController;
+  late final Animation<double> _shakeAnimation;
 
-  List<Map<String, dynamic>> _filteredProducts = [];
+  // ── Tecla ativa para feedback visual no footer ────────────────────
+  String? _activaKeyLabel;
 
   @override
   void initState() {
     super.initState();
     _controller = PdvExpressController();
-    _filteredProducts = List.from(_catalogProducts);
     _controller.addListener(_onControllerChanged);
-    
-    // Focar teclado automaticamente para escutar atalhos
+
+    // Shake: 200ms horizontal (conforme Motion Guidelines PRD-006)
+    _shakeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _shakeAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: -8.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -8.0, end: 8.0), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 8.0, end: -6.0), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: -6.0, end: 6.0), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 6.0, end: 0.0), weight: 1),
+    ]).animate(_shakeController);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _keyboardFocusNode.requestFocus();
     });
@@ -49,125 +64,180 @@ class _PdvExpressScreenState extends State<PdvExpressScreen> {
     _keyboardFocusNode.dispose();
     _searchFocusNode.dispose();
     _searchController.dispose();
+    _shakeController.dispose();
     super.dispose();
   }
 
   void _onControllerChanged() {
     setState(() {});
     if (_controller.state == PdvState.completed) {
-      _showSuccessNotification();
+      if (!_wasCompleted) {
+        _wasCompleted = true;
+        _showSuccessNotification();
+      }
+    } else {
+      _wasCompleted = false;
     }
   }
 
-  void _filterProducts(String query) {
-    setState(() {
-      if (query.isEmpty) {
-        _filteredProducts = List.from(_catalogProducts);
-      } else {
-        _filteredProducts = _catalogProducts
-            .where((p) => p['name'].toString().toLowerCase().contains(query.toLowerCase()) || p['id'].toString() == query)
-            .toList();
-      }
+  // ── Feedback visual temporário de tecla pressionada ──────────────
+  void _flashKeyLabel(String label) {
+    setState(() => _activaKeyLabel = label);
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) setState(() => _activaKeyLabel = null);
     });
   }
 
-  void _handleKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent) {
-      final logicalKey = event.logicalKey;
+  // ── Shake de feedback para ação inválida (PRD-006) ────────────────
+  void _triggerShake() {
+    _shakeController.forward(from: 0.0);
+  }
 
-      if (logicalKey == LogicalKeyboardKey.f1) {
-        // Atalho F1: Pesquisa de Itens
-        _searchFocusNode.requestFocus();
-      } else if (logicalKey == LogicalKeyboardKey.f2) {
-        // Atalho F2: Inserir Cliente
-        _showCustomerDialog();
-      } else if (logicalKey == LogicalKeyboardKey.f3) {
-        // Atalho F3: Fluxo de Pagamento
-        if (_controller.cart.isNotEmpty) {
-          _controller.startCheckout();
-        }
-      } else if (logicalKey == LogicalKeyboardKey.f9) {
-        // Atalho F9: Reimprimir Cupom
-        _showReimprimirToast();
-      } else if (logicalKey == LogicalKeyboardKey.f12) {
-        // Atalho F12: Confirmar Venda
-        if (_controller.state == PdvState.selectingPayment) {
-          _controller.confirmPayment();
-        }
-      } else if (logicalKey == LogicalKeyboardKey.escape) {
-        // Atalho ESC: Cancelar / Resetar
-        _controller.reset();
-        _keyboardFocusNode.requestFocus();
+  // ── Handler Central de Atalhos de Teclado ────────────────────────
+  // Mapa de atalhos conforme Épico I — Task 1.2 (PRD-008) e PRD-006
+  void _handleKeyEvent(KeyEvent event) async {
+    if (event is! KeyDownEvent) return;
+
+    final key = event.logicalKey;
+
+    // F1 — Ir para Catálogo de Produtos e focar busca
+    if (key == LogicalKeyboardKey.f1) {
+      _flashKeyLabel('F1');
+      _controller.setPassoAtual(1);
+      _searchFocusNode.requestFocus();
+    }
+    // F2 — Ir para Identificação do Cliente
+    else if (key == LogicalKeyboardKey.f2) {
+      _flashKeyLabel('F2');
+      _controller.setPassoAtual(0);
+      _keyboardFocusNode.requestFocus();
+    }
+    // F3 — Ir direto para Pagamento
+    else if (key == LogicalKeyboardKey.f3) {
+      _flashKeyLabel('F3');
+      _controller.setPassoAtual(2);
+      _keyboardFocusNode.requestFocus();
+    }
+    // F4 — Avançar para próxima etapa (sequencial)
+    else if (key == LogicalKeyboardKey.f4) {
+      _flashKeyLabel('F4');
+      _avancarPasso();
+    }
+    // F5 — Voltar para etapa anterior
+    else if (key == LogicalKeyboardKey.f5) {
+      _flashKeyLabel('F5');
+      _voltarPasso();
+    }
+    // F9 — Reimprimir cupom do último pedido
+    else if (key == LogicalKeyboardKey.f9) {
+      _flashKeyLabel('F9');
+      _showReimprimirToast();
+    }
+    // F12 — Confirmar Venda / Finalizar pagamento (PRD-006: F12 dispara AguardandoPIX)
+    else if (key == LogicalKeyboardKey.f12) {
+      _flashKeyLabel('F12');
+      if (_controller.passoAtual == 2 || _controller.state == PdvState.selectingPayment) {
+        _controller.confirmPayment();
+      } else if (!_controller.podeAvancar()) {
+        _triggerShake();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: FincoreColors.danger,
+            content: Text('F12: Preencha a etapa atual antes de confirmar.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        _avancarPasso();
       }
+    }
+    // ESC — Resetar completamente o PDV com confirmação
+    else if (key == LogicalKeyboardKey.escape) {
+      _flashKeyLabel('ESC');
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2E),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Limpar Pedido', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          content: const Text('Tem certeza que deseja cancelar e limpar o pedido atual?', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar', style: TextStyle(color: Color(0xFF6B7280))),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEF4444),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Limpar Tudo', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+      if (ok == true) {
+        _controller.reset();
+      }
+      _keyboardFocusNode.requestFocus();
     }
   }
 
-  void _showCustomerDialog() {
-    final nameCont = TextEditingController(text: _controller.customerName);
-    final phoneCont = TextEditingController(text: _controller.customerPhone);
+  void _avancarPasso() {
+    if (_controller.podeAvancar()) {
+      if (_controller.passoAtual < 2) {
+        _controller.setPassoAtual(_controller.passoAtual + 1);
+      } else {
+        _controller.confirmPayment();
+      }
+    } else {
+      _triggerShake();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: FincoreColors.danger,
+          content: Text('Por favor, preencha as informações obrigatórias da etapa atual.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E24),
-          title: const Text('IDENTIFICAR CLIENTE (F2)', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCont,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Nome do Cliente',
-                  labelStyle: TextStyle(color: Color(0xFF9CA3AF)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: phoneCont,
-                style: const TextStyle(color: Colors.white),
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Telefone (Ex: 11999999999)',
-                  labelStyle: TextStyle(color: Color(0xFF9CA3AF)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('CANCELAR', style: TextStyle(color: Colors.red)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF97316)),
-              onPressed: () {
-                if (phoneCont.text.isNotEmpty) {
-                  _controller.selectCustomer(nameCont.text.isEmpty ? 'Consumidor' : nameCont.text, phoneCont.text);
-                }
-                Navigator.pop(context);
-                _keyboardFocusNode.requestFocus();
-              },
-              child: const Text('CONFIRMAR'),
-            )
-          ],
-        );
-      },
-    );
+  void _voltarPasso() {
+    if (_controller.passoAtual > 0) {
+      _controller.setPassoAtual(_controller.passoAtual - 1);
+    }
   }
 
   void _showSuccessNotification() {
+    // Abre a tela de comprovante/impressão
+    final lastVenda = _controller.lastVenda;
+    if (lastVenda != null && context.mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ComprovantePedidoPage(
+            pedidoId: lastVenda.id,
+            cliente: _controller.cliente,
+            entrega: _controller.entrega,
+            itens: _controller.cart.toList(),
+            totalCentavos: _controller.totalInCents,
+            formaPagamento: _controller.paymentMethod,
+          ),
+        ),
+      );
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: const Color(0xFF10B981), // Verde Esmeralda
+        backgroundColor: FincoreColors.success,
         content: Row(
           children: [
             const Icon(Icons.check_circle, color: Colors.white),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Venda de R\$ ${(_controller.totalInCents / 100).toStringAsFixed(2)} processada e enviada ao Spooler Térmico USB!',
+                'Venda de R\$ ${(_controller.totalInCents / 100).toStringAsFixed(2)} processada!',
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
@@ -178,24 +248,40 @@ class _PdvExpressScreenState extends State<PdvExpressScreen> {
           label: 'DESFAZER',
           textColor: Colors.white,
           onPressed: () {
-            _controller.reset();
+            _controller.undoLastVenda();
             _keyboardFocusNode.requestFocus();
           },
         ),
       ),
     );
-    _controller.reset();
     _keyboardFocusNode.requestFocus();
   }
 
   void _showReimprimirToast() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        backgroundColor: Color(0xFF06B6D4), // Cyan
+        backgroundColor: FincoreColors.accent,
         content: Text('Comando de Reimpressão enviado para a impressora USB de etiquetas!'),
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  Widget _buildStepView() {
+    switch (_controller.passoAtual) {
+      case 0:
+        return CustomerStep(controller: _controller);
+      case 1:
+        return ProductCatalogStep(
+          controller: _controller,
+          searchFocusNode: _searchFocusNode,
+          searchController: _searchController,
+        );
+      case 2:
+        return PaymentStep(controller: _controller);
+      default:
+        return const SizedBox.shrink();
+    }
   }
 
   @override
@@ -203,446 +289,226 @@ class _PdvExpressScreenState extends State<PdvExpressScreen> {
     return KeyboardListener(
       focusNode: _keyboardFocusNode,
       onKeyEvent: _handleKeyEvent,
-      child: Scaffold(
-        backgroundColor: const Color(0xFF121214), // Dark background
-        appBar: _buildAppBar(),
-        body: Stack(
-          children: [
-            Row(
-              children: [
-                // Painel Esquerdo: Catálogo de Produtos
-                Expanded(
-                  flex: 3,
-                  child: _buildCatalogPanel(),
-                ),
-                // Divisor Vertical Estético
-                Container(
-                  width: 2,
-                  color: const Color(0xFF1E1E24),
-                ),
-                // Painel Direito: Carrinho de Compras e Finalização
-                Expanded(
-                  flex: 2,
-                  child: _buildCartPanel(),
-                ),
-              ],
-            ),
-            
-            // Modal de Pagamento PIX (Sobreposição se aguardando PIX)
-            if (_controller.state == PdvState.awaitingPix)
-              PixPaymentModal(controller: _controller),
-          ],
+      // Shake aplica-se ao corpo principal (AnimatedBuilder, PRD-006 Motion)
+      child: AnimatedBuilder(
+        animation: _shakeAnimation,
+        builder: (context, child) => Transform.translate(
+          offset: Offset(_shakeAnimation.value, 0),
+          child: child,
         ),
-        bottomNavigationBar: _buildShortcutFooter(),
+        child: Scaffold(
+          backgroundColor: widget.isEmbedded ? Colors.transparent : FincoreColors.background,
+          appBar: widget.isEmbedded ? null : _buildAppBar(),
+          body: Stack(
+            children: [
+              Row(
+                children: [
+                  // ── Coluna Esquerda: Wizard de Etapas ──────────────
+                  Expanded(
+                    flex: 3,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // StepperHeader com borda de foco Laranja Forno (PRD-006)
+                          _FocusedBorderWrapper(
+                            isActive: _keyboardFocusNode.hasFocus,
+                            child: StepperHeader(controller: _controller),
+                          ),
+                          const SizedBox(height: 20),
+                          Expanded(
+                            child: _buildStepView(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // ── Divisor Vertical ──────────────────────────────
+                  Container(
+                    width: 1.5,
+                    color: FincoreColors.border,
+                  ),
+
+                  // ── Coluna Direita: Painel Operacional Persistente ─
+                  OrderSummaryPanel(
+                    controller: _controller,
+                    onBack: _voltarPasso,
+                    onNext: _avancarPasso,
+                  ),
+                ],
+              ),
+
+              // ── Modal PIX (sobreposição quando aguardando PIX) ──────
+              if (_controller.state == PdvState.awaitingPix)
+                PixPaymentModal(controller: _controller),
+            ],
+          ),
+          bottomNavigationBar: _buildShortcutFooter(),
+        ),
       ),
     );
   }
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      backgroundColor: const Color(0xFF1E1E24),
+      backgroundColor: FincoreColors.surface,
       elevation: 0,
       title: Row(
         children: [
           Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF97316), // Laranja Forno
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                'FINCORE',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: Colors.white),
-              ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: FincoreColors.primary,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'FINCORE',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: Colors.white),
+            ),
           ),
           const SizedBox(width: 8),
           const Text(
             'Food service PDV Express',
-            style: TextStyle(fontSize: 16, color: Color(0xFFF3F4F6), fontWeight: FontWeight.w300),
+            style: TextStyle(fontSize: 16, color: FincoreColors.textPrimary, fontWeight: FontWeight.w300),
           ),
         ],
       ),
       actions: [
-        // Badge reativo de Conectividade (Offline-First)
+        // Badge de Conectividade Offline-First (PRD-006)
         Container(
           margin: const EdgeInsets.only(right: 16),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0xFF121214),
+            color: FincoreColors.background,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF10B981)), // Green
+            border: Border.all(color: FincoreColors.success),
           ),
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.wifi, color: Color(0xFF10B981), size: 16),
+              Icon(Icons.wifi, color: FincoreColors.success, size: 16),
               SizedBox(width: 6),
               Text(
                 'LOCAL - SYNC OK',
-                style: TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
-              )
+                style: TextStyle(color: FincoreColors.success, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
-        )
+        ),
       ],
     );
   }
 
-  Widget _buildCatalogPanel() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'CATÁLOGO DE PRODUTOS',
-            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.1),
-          ),
-          const SizedBox(height: 12),
-          
-          // Campo de Busca com foco Laranja Forno (2px se ativo)
-          Focus(
-            onFocusChange: (hasFocus) {
-              setState(() {});
-            },
-            child: Container(
+  // ── Footer de Atalhos (PRD-006 — Navegação por Teclado) ──────────
+  Widget _buildShortcutFooter() {
+    final shortcuts = [
+      _ShortcutEntry(key: 'F1', label: 'Catálogo / Buscar'),
+      _ShortcutEntry(key: 'F2', label: 'Dados Cliente'),
+      _ShortcutEntry(key: 'F3', label: 'Ir p/ Pagamento'),
+      _ShortcutEntry(key: 'F4', label: 'Avançar Etapa'),
+      _ShortcutEntry(key: 'F5', label: 'Voltar Etapa'),
+      _ShortcutEntry(key: 'F9', label: 'Reimprimir'),
+      _ShortcutEntry(key: 'F12', label: 'Confirmar Venda'),
+      _ShortcutEntry(key: 'ESC', label: 'Limpar/Sair'),
+    ];
+
+    return Container(
+      color: FincoreColors.surface,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+      child: Row(
+        children: shortcuts.map((s) {
+          final isActive = _activaKeyLabel == s.key;
+          return Expanded(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
+                // Borda Laranja Forno 2px no atalho ativo (PRD-006)
                 border: Border.all(
-                  color: _searchFocusNode.hasFocus ? const Color(0xFFF97316) : const Color(0xFF2E2E38),
+                  color: isActive ? FincoreColors.primary : Colors.transparent,
                   width: 2,
                 ),
+                borderRadius: BorderRadius.circular(6),
+                color: isActive
+                    ? FincoreColors.primary.withValues(alpha: 0.15)
+                    : Colors.transparent,
               ),
-              child: TextField(
-                controller: _searchController,
-                focusNode: _searchFocusNode,
-                style: const TextStyle(color: Colors.white),
-                onChanged: _filterProducts,
-                decoration: const InputDecoration(
-                  hintText: 'Digite o nome ou ID do produto [F1]',
-                  hintStyle: TextStyle(color: Color(0xFF4B5563)),
-                  prefixIcon: Icon(Icons.search, color: Color(0xFF4B5563)),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 20),
-          
-          // Grid de Cards de Produtos
-          Expanded(
-            child: GridView.builder(
-              itemCount: _filteredProducts.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.25,
-              ),
-              itemBuilder: (context, index) {
-                final product = _filteredProducts[index];
-                return InkWell(
-                  onTap: () {
-                    _controller.addItem(
-                      product['id'].toString(),
-                      product['name'].toString(),
-                      product['price'] as int,
-                      1.0,
-                    );
-                    _keyboardFocusNode.requestFocus();
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E24), // Surface slate
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF2E2E38)),
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF121214),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                product['id'].toString(),
-                                style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            Text(
-                              product['category'].toString().toUpperCase(),
-                              style: const TextStyle(color: Color(0xFFF97316), fontSize: 10, fontWeight: FontWeight.bold),
-                            )
-                          ],
-                        ),
-                        Text(
-                          product['name'].toString(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          'R\$ ${((product['price'] as int) / 100).toStringAsFixed(2)}',
-                          style: const TextStyle(color: Color(0xFF06B6D4), fontSize: 15, fontWeight: FontWeight.w900), // Cyan
-                        )
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCartPanel() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'CARRINHO DE COMPRAS',
-            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.1),
-          ),
-          const SizedBox(height: 16),
-          
-          // Cliente Identificado
-          if (_controller.customerPhone != null)
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E1E24),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFF97316), width: 1),
-              ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.person, color: Color(0xFFF97316), size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _controller.customerName ?? 'Consumidor',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                        Text(
-                          _controller.customerPhone!,
-                          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
-                        )
-                      ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isActive ? FincoreColors.primary : FincoreColors.border,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      s.key,
+                      style: TextStyle(
+                        color: isActive ? Colors.white : FincoreColors.textSecondary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                      ),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.red, size: 18),
-                    onPressed: () {
-                      setState(() {
-                        _controller.clearCustomer();
-                      });
-                    },
-                  )
+                  const SizedBox(height: 3),
+                  Text(
+                    s.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isActive ? FincoreColors.primary : FincoreColors.textMuted,
+                      fontSize: 9,
+                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
                 ],
               ),
             ),
-          
-          // Itens no Carrinho
-          Expanded(
-            child: _controller.cart.isEmpty
-                ? const Center(
-                    child: Text(
-                      'Carrinho vazio.\nAdicione produtos pelo catálogo.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Color(0xFF4B5563), fontSize: 14),
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _controller.cart.length,
-                    itemBuilder: (context, index) {
-                      final item = _controller.cart[index];
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E1E24),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.name,
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${item.quantity.toInt()}x R\$ ${(item.priceInCents / 100).toStringAsFixed(2)}',
-                                    style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
-                                  )
-                                ],
-                              ),
-                            ),
-                            Row(
-                              children: [
-                                Text(
-                                  'R\$ ${(item.totalInCents / 100).toStringAsFixed(2)}',
-                                  style: const TextStyle(color: Color(0xFF06B6D4), fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 20),
-                                  onPressed: () {
-                                    _controller.updateQuantity(item.productId, item.quantity - 1);
-                                  },
-                                )
-                              ],
-                            )
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          
-          const Divider(color: Color(0xFF1E1E24), thickness: 2, height: 32),
-          
-          // Seção de Total e Finalização
-          if (_controller.state == PdvState.selectingPayment) ...[
-            const Text(
-              'FORMA DE PAGAMENTO (F12 para Confirmar)',
-              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _buildPaymentOption('Dinheiro', Icons.money),
-                const SizedBox(width: 8),
-                _buildPaymentOption('PIX', Icons.qr_code),
-                const SizedBox(width: 8),
-                _buildPaymentOption('Cartão', Icons.credit_card),
-              ],
-            ),
-            const SizedBox(height: 20),
-          ],
-          
-          // Painel de Total Geral
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF121214),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF1E1E24)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'TOTAL GERAL',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                Text(
-                  'R\$ ${(_controller.totalInCents / 100).toStringAsFixed(2)}',
-                  style: const TextStyle(color: Color(0xFF06B6D4), fontWeight: FontWeight.w900, fontSize: 24),
-                )
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 16),
-          
-          // Botão de Finalizar Venda
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFF97316), // Laranja Forno
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () {
-                if (_controller.state == PdvState.selectingPayment) {
-                  _controller.confirmPayment();
-                } else if (_controller.cart.isNotEmpty) {
-                  _controller.startCheckout();
-                }
-              },
-              child: Text(
-                _controller.state == PdvState.selectingPayment ? 'CONFIRMAR PAGAMENTO [F12]' : 'FINALIZAR VENDA [F3]',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.1),
-              ),
-            ),
-          )
-        ],
+          );
+        }).toList(),
       ),
     );
   }
+}
 
-  Widget _buildPaymentOption(String method, IconData icon) {
-    final isSelected = _controller.paymentMethod == method;
-    return Expanded(
-      child: InkWell(
-        onTap: () {
-          _controller.setPaymentMethod(method);
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFF97316) : const Color(0xFF1E1E24),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: isSelected ? const Color(0xFFF97316) : const Color(0xFF2E2E38)),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: isSelected ? Colors.white : const Color(0xFF9CA3AF), size: 20),
-              const SizedBox(height: 4),
-              Text(
-                method,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : const Color(0xFF9CA3AF),
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              )
-            ],
-          ),
+// ── Wrapper de Borda de Foco Laranja Forno 2px (PRD-006) ───────────
+// Exibe a borda laranja ao redor do elemento quando o teclado está ativo,
+// sinalizando ao operador que os atalhos estão prontos para uso.
+class _FocusedBorderWrapper extends StatelessWidget {
+  final bool isActive;
+  final Widget child;
+
+  const _FocusedBorderWrapper({
+    required this.isActive,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          // Borda Laranja Forno 2px no modo de teclado ativo (PRD-006)
+          color: isActive ? FincoreColors.primary : Colors.transparent,
+          width: 2,
         ),
       ),
+      child: child,
     );
   }
+}
 
-  Widget _buildShortcutFooter() {
-    return Container(
-      color: const Color(0xFF1E1E24),
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text('[F1] Buscar Item', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-          Text('[F2] Add Cliente', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-          Text('[F3] Pagamento', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-          Text('[F9] Reimprimir Spooler', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-          Text('[F12] Confirmar Venda', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-          Text('[ESC] Limpar/Sair', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-        ],
-      ),
-    );
-  }
+// ── Model de dados do footer de atalhos ──────────────────────────────
+class _ShortcutEntry {
+  final String key;
+  final String label;
+  const _ShortcutEntry({required this.key, required this.label});
 }

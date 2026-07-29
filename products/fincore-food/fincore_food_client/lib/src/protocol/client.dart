@@ -11,8 +11,76 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 import 'dart:async' as _i2;
-import 'package:fincore_food_client/src/protocol/greeting.dart' as _i3;
-import 'protocol.dart' as _i4;
+import 'package:fincore_food_client/src/protocol/auth_user_info.dart' as _i3;
+import 'package:fincore_food_client/src/protocol/bootstrap_payload.dart' as _i4;
+import 'package:fincore_food_client/src/protocol/greeting.dart' as _i5;
+import 'package:fincore_food_client/src/protocol/workspace_setup_progress_info.dart'
+    as _i6;
+import 'package:fincore_food_client/src/protocol/sync_push_entry.dart' as _i7;
+import 'package:fincore_food_client/src/protocol/sync_pull_payload.dart' as _i8;
+import 'protocol.dart' as _i9;
+
+/// {@category Endpoint}
+class EndpointAdmin extends _i1.EndpointRef {
+  EndpointAdmin(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'admin';
+
+  /// Ativa uma empresa pendente de aprovação.
+  _i2.Future<bool> ativarEmpresa(String tenantId) =>
+      caller.callServerEndpoint<bool>(
+        'admin',
+        'ativarEmpresa',
+        {'tenantId': tenantId},
+      );
+
+  /// Retorna lista de empresas aguardando ativação
+  _i2.Future<List<String>> empresasPendentes() =>
+      caller.callServerEndpoint<List<String>>(
+        'admin',
+        'empresasPendentes',
+        {},
+      );
+}
+
+/// {@category Endpoint}
+class EndpointAuth extends _i1.EndpointRef {
+  EndpointAuth(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'auth';
+
+  /// Faz a validação da sessão autenticada por JWT e retorna as informações do usuário logado.
+  _i2.Future<_i3.AuthUserInfo?> login() =>
+      caller.callServerEndpoint<_i3.AuthUserInfo?>(
+        'auth',
+        'login',
+        {},
+      );
+
+  _i2.Future<void> logout() => caller.callServerEndpoint<void>(
+        'auth',
+        'logout',
+        {},
+      );
+}
+
+/// {@category Endpoint}
+class EndpointBootstrap extends _i1.EndpointRef {
+  EndpointBootstrap(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'bootstrap';
+
+  /// Retorna todos os dados necessários para inicializar o aplicativo no dispositivo do cliente.
+  _i2.Future<_i4.BootstrapPayload> bootstrapTenant() =>
+      caller.callServerEndpoint<_i4.BootstrapPayload>(
+        'bootstrap',
+        'bootstrapTenant',
+        {},
+      );
+}
 
 /// This is an example endpoint that returns a greeting message through
 /// its [hello] method.
@@ -24,11 +92,85 @@ class EndpointGreeting extends _i1.EndpointRef {
   String get name => 'greeting';
 
   /// Returns a personalized greeting message: "Hello {name}".
-  _i2.Future<_i3.Greeting> hello(String name) =>
-      caller.callServerEndpoint<_i3.Greeting>(
+  _i2.Future<_i5.Greeting> hello(String name) =>
+      caller.callServerEndpoint<_i5.Greeting>(
         'greeting',
         'hello',
         {'name': name},
+      );
+}
+
+/// {@category Endpoint}
+class EndpointOnboarding extends _i1.EndpointRef {
+  EndpointOnboarding(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'onboarding';
+
+  /// Cria uma nova empresa (tenant) e vincula o usuário autenticado como ADMIN.
+  _i2.Future<bool> criarEmpresa({
+    required String tenantId,
+    required String razaoSocial,
+    required String nomeFantasia,
+    required String documentoFiscal,
+    required String emailEmpresa,
+    required String telefoneEmpresa,
+    required String usuarioNome,
+    required String segmento,
+  }) =>
+      caller.callServerEndpoint<bool>(
+        'onboarding',
+        'criarEmpresa',
+        {
+          'tenantId': tenantId,
+          'razaoSocial': razaoSocial,
+          'nomeFantasia': nomeFantasia,
+          'documentoFiscal': documentoFiscal,
+          'emailEmpresa': emailEmpresa,
+          'telefoneEmpresa': telefoneEmpresa,
+          'usuarioNome': usuarioNome,
+          'segmento': segmento,
+        },
+      );
+
+  /// Consulta o status de ativação da empresa vinculada ao usuário
+  _i2.Future<String?> status() => caller.callServerEndpoint<String?>(
+        'onboarding',
+        'status',
+        {},
+      );
+
+  /// Calcula o progresso do setup do workspace (categorias, produtos, etc.)
+  _i2.Future<_i6.WorkspaceSetupProgressInfo> progressoSetup(String tenantId) =>
+      caller.callServerEndpoint<_i6.WorkspaceSetupProgressInfo>(
+        'onboarding',
+        'progressoSetup',
+        {'tenantId': tenantId},
+      );
+}
+
+/// {@category Endpoint}
+class EndpointSync extends _i1.EndpointRef {
+  EndpointSync(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'sync';
+
+  /// Recebe uma lista de alterações geradas no FincoreCore (Outbox)
+  /// e as aplica no banco Postgres usando Last-Write-Wins
+  _i2.Future<bool> push(List<_i7.SyncPushEntry> changes) =>
+      caller.callServerEndpoint<bool>(
+        'sync',
+        'push',
+        {'changes': changes},
+      );
+
+  /// Retorna as modificações que ocorreram no servidor desde a última sincronização local
+  _i2.Future<_i8.SyncPullPayload> pull(DateTime lastSyncAt) =>
+      caller.callServerEndpoint<_i8.SyncPullPayload>(
+        'sync',
+        'pull',
+        {'lastSyncAt': lastSyncAt},
       );
 }
 
@@ -48,7 +190,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
           host,
-          _i4.Protocol(),
+          _i9.Protocol(),
           securityContext: securityContext,
           authenticationKeyManager: authenticationKeyManager,
           streamingConnectionTimeout: streamingConnectionTimeout,
@@ -58,13 +200,35 @@ class Client extends _i1.ServerpodClientShared {
           disconnectStreamsOnLostInternetConnection:
               disconnectStreamsOnLostInternetConnection,
         ) {
+    admin = EndpointAdmin(this);
+    auth = EndpointAuth(this);
+    bootstrap = EndpointBootstrap(this);
     greeting = EndpointGreeting(this);
+    onboarding = EndpointOnboarding(this);
+    sync = EndpointSync(this);
   }
+
+  late final EndpointAdmin admin;
+
+  late final EndpointAuth auth;
+
+  late final EndpointBootstrap bootstrap;
 
   late final EndpointGreeting greeting;
 
+  late final EndpointOnboarding onboarding;
+
+  late final EndpointSync sync;
+
   @override
-  Map<String, _i1.EndpointRef> get endpointRefLookup => {'greeting': greeting};
+  Map<String, _i1.EndpointRef> get endpointRefLookup => {
+        'admin': admin,
+        'auth': auth,
+        'bootstrap': bootstrap,
+        'greeting': greeting,
+        'onboarding': onboarding,
+        'sync': sync,
+      };
 
   @override
   Map<String, _i1.ModuleEndpointCaller> get moduleLookup => {};

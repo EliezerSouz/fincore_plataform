@@ -1,0 +1,21 @@
+name: fincore_pricing
+resolution: workspace
+description: Pricing engine, pricing policy calculation, and billing structures for the FINCORE Platform.
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: '^3.7.2'
+
+dependencies:
+  meta: ^1.11.0
+  drift: ^2.20.0
+  sqlite3: ^2.4.0
+  serverpod_client: 2.9.3
+  uuid: ^4.3.3
+  fincore_core: ^1.0.0
+
+dev_dependencies:
+  test: ^1.24.0
+  build_runner: ^2.4.9
+  drift_dev: ^2.20.0

@@ -1,0 +1,28 @@
+class: ItemTabelaPrecificacao
+table: item_tabela_precificacao
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  tabelaPrecificacaoId: UuidValue, relation(parent=tabela_precificacao)
+  quantidadeMinima: int
+  quantidadeMaxima: int?
+  valorUnitarioCentavos: int
+  ordem: int
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  item_tabela_prec_idx:
+    fields: tenantId, tabelaPrecificacaoId

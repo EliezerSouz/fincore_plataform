@@ -1,0 +1,9 @@
+class: EventoEmpresa
+table: eventos_empresa
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: UuidValue, relation(parent=empresa, onDelete=Restrict)
+  tipo: String
+  payload: String?
+  geradoPor: String
+  ocorridoEm: DateTime

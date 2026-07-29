@@ -1,0 +1,42 @@
+class: Produto
+table: produto
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  codigo: String?
+  nome: String
+  descricao: String?
+  categoriaId: UuidValue, relation(parent=categoria)
+  unidadeVenda: String
+  statusComercial: String
+  tempoMedioMinutos: int
+  controlaEstoque: bool
+  ordemProducao: int
+  ativo: bool
+  sku: String?
+  codigoBarras: String?
+  imagem: String?
+  corEtiqueta: String?
+  metadata: String?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  produto_tenant_cat_idx:
+    fields: tenantId, categoriaId
+  produto_tenant_ativo_idx:
+    fields: tenantId, ativo
+  produto_tenant_cod_idx:
+    fields: tenantId, codigo

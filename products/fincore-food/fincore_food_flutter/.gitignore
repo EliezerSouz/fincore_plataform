@@ -45,3 +45,12 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# ─── Segredos e Variáveis de Ambiente ───────────────────────────────
+# NUNCA commitar estes arquivos — contêm credenciais de banco/API
+.env
+.env.*
+*.env
+
+# Serverpod config sensível
+config/passwords.yaml
+

@@ -1,0 +1,39 @@
+class: Cliente
+table: cliente
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  nome: String
+  telefone: String
+  email: String?
+  documento: String?
+  observacoes: String
+  ativo: bool
+  apelido: String?
+  dataNascimento: DateTime?
+  aceitaWhatsapp: bool
+  aceitaMarketing: bool
+  preferenciaEntrega: String?
+  limiteCredito: int?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  cliente_tenant_tel_idx:
+    fields: tenantId, telefone
+  cliente_tenant_doc_idx:
+    fields: tenantId, documento
+  cliente_tenant_ativo_idx:
+    fields: tenantId, ativo

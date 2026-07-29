@@ -1,0 +1,17 @@
+version: 1.0
+documents:
+  Architecture_Compliance_Report:
+    status: archived
+    version: 1.0
+    owner: architecture
+    path: docs/90_History/Architecture_Compliance_Report.md
+  Architecture_State_Report_v1.0:
+    status: archived
+    version: 1.0
+    owner: architecture
+    path: docs/90_History/Architecture_State_Report_v1.0.md
+  README:
+    status: archived
+    version: 1.0
+    owner: architecture
+    path: docs/90_History/README.md

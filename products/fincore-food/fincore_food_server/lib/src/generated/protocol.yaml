@@ -1,2 +1,17 @@
+admin:
+  - ativarEmpresa:
+  - empresasPendentes:
+auth:
+  - login:
+  - logout:
+bootstrap:
+  - bootstrapTenant:
 greeting:
   - hello:
+onboarding:
+  - criarEmpresa:
+  - status:
+  - progressoSetup:
+sync:
+  - push:
+  - pull:

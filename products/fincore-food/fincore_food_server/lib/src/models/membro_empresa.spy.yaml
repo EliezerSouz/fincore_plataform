@@ -1,0 +1,24 @@
+class: MembroEmpresa
+table: membro_empresa
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: UuidValue, relation(parent=empresa, onDelete=Restrict)
+  usuarioId: UuidValue, relation(parent=usuarios, onDelete=Restrict)
+  role: String
+  ativo: bool
+  convidadoEm: DateTime
+  aceitoEm: DateTime?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?

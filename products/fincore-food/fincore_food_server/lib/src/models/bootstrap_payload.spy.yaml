@@ -1,0 +1,8 @@
+class: BootstrapPayload
+fields:
+  schemaVersion: int
+  generatedAt: DateTime
+  empresa: Empresa
+  configuracao: EmpresaConfiguracao
+  usuario: Usuario
+  membros: List<MembroEmpresa>

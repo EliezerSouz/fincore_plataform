@@ -1,0 +1,6 @@
+class: WorkspaceSetupProgressInfo
+fields:
+  passos: int
+  concluidos: int
+  percentual: double
+  checklistJson: String

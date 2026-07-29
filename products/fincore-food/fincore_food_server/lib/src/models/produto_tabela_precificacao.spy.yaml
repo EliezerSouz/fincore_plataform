@@ -1,0 +1,29 @@
+class: ProdutoTabelaPrecificacao
+table: produto_tabela_precificacao
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  produtoId: UuidValue, relation(parent=produto, onDelete=Cascade)
+  tabelaPrecificacaoId: UuidValue, relation(parent=tabela_precificacao)
+  ativo: bool
+  prioridade: int
+  dataInicio: DateTime?
+  dataFim: DateTime?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  prod_tabela_prec_compound_idx:
+    fields: tenantId, produtoId, tabelaPrecificacaoId

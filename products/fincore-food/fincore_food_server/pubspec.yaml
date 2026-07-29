@@ -9,9 +9,13 @@ environment:
 
 dependencies:
   serverpod: 2.9.3
+  jaguar_jwt: ^3.0.0
+  fincore_core:
+    path: ../../../packages/fincore_core
+  postgres: ^3.0.0
+  yaml: ^3.1.2
 
 dev_dependencies:
   lints: '>=3.0.0 <7.0.0'
   test: '^1.24.2'
   serverpod_test: 2.9.3
-

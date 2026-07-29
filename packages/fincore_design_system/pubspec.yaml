@@ -11,6 +11,10 @@ dependencies:
   flutter:
     sdk: flutter
   meta: ^1.11.0
+  mask_text_input_formatter: ^2.5.0
+  brasil_fields: ^1.15.0
+  fincore_shared:
+    path: ../fincore_shared
 
 dev_dependencies:
   flutter_test:

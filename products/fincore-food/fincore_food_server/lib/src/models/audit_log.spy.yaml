@@ -1,0 +1,17 @@
+class: AuditLog
+table: audit_logs
+fields:
+  id: UuidValue, defaultModel=random
+  entityName: String
+  entityId: String
+  userId: String
+  action: String # CREATE, UPDATE, DELETE
+  timestamp: DateTime
+  diff: String? # JSON array with changes
+  deviceInfo: String?
+  origin: String?
+  reason: String?
+  syncVersion: int?
+  tenantId: String?
+
+

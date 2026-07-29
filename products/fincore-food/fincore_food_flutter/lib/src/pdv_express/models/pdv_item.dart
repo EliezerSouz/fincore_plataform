@@ -1,7 +1,7 @@
 class PdvItem {
   final String productId;
   final String name;
-  final int priceInCents;
+  int priceInCents;
   double quantity;
 
   PdvItem({

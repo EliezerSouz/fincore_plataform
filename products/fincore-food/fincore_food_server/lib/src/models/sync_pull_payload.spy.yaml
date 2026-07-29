@@ -1,0 +1,7 @@
+class: SyncPullPayload
+fields:
+  timestamp: DateTime
+  produtos: List<Produto>
+  clientes: List<Cliente>
+  configuracoes: List<EmpresaConfiguracao>
+  membros: List<MembroEmpresa>

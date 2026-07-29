@@ -1,0 +1,40 @@
+class: Empresa
+table: empresa
+fields:
+  id: UuidValue, defaultModel=random
+  razaoSocial: String
+  nomeFantasia: String
+  documentoFiscal: String
+  email: String
+  telefone: String
+  status: String
+  plano: String
+  timezone: String
+  locale: String
+  currency: String
+  country: String
+  createdFrom: String
+  vencimento: DateTime?
+  segmento: String?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  empresa_documento_fiscal_unique_idx:
+    fields: documentoFiscal
+    unique: true
+  empresa_email_unique_idx:
+    fields: email
+    unique: true

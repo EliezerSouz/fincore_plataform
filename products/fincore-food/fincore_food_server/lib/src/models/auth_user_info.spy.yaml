@@ -1,0 +1,7 @@
+class: AuthUserInfo
+fields:
+  usuarioId: String
+  email: String
+  tenantId: String?
+  role: String?
+  vencimento: DateTime?

@@ -7,6 +7,7 @@ environment:
 
 workspace:
   - packages/fincore_core
+  - packages/fincore_pricing
   - packages/fincore_shared
   - packages/fincore_design_system
   - products/fincore-food/fincore_food_server

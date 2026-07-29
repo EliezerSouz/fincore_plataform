@@ -9,6 +9,12 @@ environment:
 
 dependencies:
   meta: ^1.11.0
+  drift: ^2.20.0
+  sqlite3: ^2.4.0
+  serverpod_client: 2.9.3
+  uuid: ^4.3.3
 
 dev_dependencies:
   test: ^1.24.0
+  build_runner: ^2.4.9
+  drift_dev: ^2.20.0

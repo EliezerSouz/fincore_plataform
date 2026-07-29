@@ -1,0 +1,30 @@
+class: TaxaEntrega
+table: taxa_entrega
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  nome: String
+  tipoRegra: String
+  bairro: String?
+  cepInicial: String?
+  cepFinal: String?
+  valorCentavos: int
+  ativo: bool
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  taxa_ent_tenant_idx:
+    fields: tenantId

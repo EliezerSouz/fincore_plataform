@@ -1,0 +1,8 @@
+class: SyncPushEntry
+fields:
+  id: String
+  entity: String
+  entityId: String
+  action: String
+  payload: String
+  createdAt: DateTime

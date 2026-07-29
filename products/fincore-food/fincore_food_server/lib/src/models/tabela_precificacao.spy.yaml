@@ -1,0 +1,30 @@
+class: TabelaPrecificacao
+table: tabela_precificacao
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  nome: String
+  descricao: String
+  tipoPolitica: String
+  prioridade: int
+  ativo: bool
+  vigenciaInicio: DateTime?
+  vigenciaFim: DateTime?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  tabela_prec_tenant_idx:
+    fields: tenantId

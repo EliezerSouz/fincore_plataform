@@ -1,0 +1,8 @@
+class: Usuario
+table: usuarios
+fields:
+  id: UuidValue, defaultModel=random
+  email: String
+  nome: String
+  criadoEm: DateTime
+  atualizadoEm: DateTime

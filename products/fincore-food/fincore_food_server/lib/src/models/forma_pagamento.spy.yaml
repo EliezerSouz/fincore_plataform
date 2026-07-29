@@ -1,0 +1,28 @@
+class: FormaPagamento
+table: forma_pagamento
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  nome: String
+  tipo: String
+  ordem: int
+  ativo: bool
+  permiteTroco: bool
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  forma_pag_tenant_idx:
+    fields: tenantId
