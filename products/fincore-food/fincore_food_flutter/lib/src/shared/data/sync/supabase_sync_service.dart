@@ -55,6 +55,7 @@ class SupabaseSyncService {
     'locais_entrega': 'local_entrega',
     'taxas_entrega': 'taxa_entrega',
     'membros_empresa': 'membro_empresa',
+    'membro_empresa': 'membro_empresa',
     'tabelas_precificacao': 'tabela_precificacao',
     'itens_tabela_precificacao': 'item_tabela_precificacao',
     'produtos_tabelas_precificacao': 'produto_tabela_precificacao',
@@ -120,11 +121,6 @@ class SupabaseSyncService {
 
     try {
       final payload = jsonDecode(entry.payload) as Map<String, dynamic>;
-      
-      // Mapeamento de compatibilidade para registros antigos na fila local de audit_logs
-      if (tableName == 'audit_logs' && payload.containsKey('targetEntity')) {
-        payload['entityName'] = payload.remove('targetEntity');
-      }
 
       LogService.instance.debug(
         LogModule.sync,
@@ -185,6 +181,7 @@ class SupabaseSyncService {
       // para evitar FK violations no banco local durante o pull.
       await _pullTable('empresa_configuracao', tenantId, lastSyncAt, db);
       await _pullTable('categorias', tenantId, lastSyncAt, db);
+      await _pullTable('membros_empresa', tenantId, lastSyncAt, db);
       await _pullTable('tabelas_precificacao', tenantId, lastSyncAt, db);
       await _pullTable('taxas_entrega', tenantId, lastSyncAt, db);
       await _pullTable('formas_pagamento', tenantId, lastSyncAt, db);
@@ -664,6 +661,29 @@ class SupabaseSyncService {
                 prioridade: row['prioridade'] as int? ?? 1,
                 dataInicio: Value(_parseDate(row['dataInicio'] as String?)),
                 dataFim: Value(_parseDate(row['dataFim'] as String?)),
+                syncVersion: Value(row['syncVersion'] as int? ?? 1),
+                syncStatus: SyncStatus.synced,
+                lastSyncedAt: Value(DateTime.now().toUtc()),
+                createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+                updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+                createdBy: row['createdBy'] as String? ?? '',
+                updatedBy: row['updatedBy'] as String? ?? '',
+                deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+                deletedBy: const Value(null),
+              ),
+            );
+        break;
+
+      case 'membros_empresa':
+        await db.into(db.membrosEmpresaTable).insertOnConflictUpdate(
+              MembrosEmpresaTableCompanion.insert(
+                id: row['id'] as String,
+                tenantId: row['tenantId'] as String,
+                usuarioId: row['usuarioId'] as String,
+                role: row['role'] as String? ?? 'OPERADOR',
+                ativo: Value(row['ativo'] as bool? ?? true),
+                convidadoEm: _parseDate(row['convidadoEm'] as String?) ?? DateTime.now(),
+                aceitoEm: Value(_parseDate(row['aceitoEm'] as String?)),
                 syncVersion: Value(row['syncVersion'] as int? ?? 1),
                 syncStatus: SyncStatus.synced,
                 lastSyncedAt: Value(DateTime.now().toUtc()),

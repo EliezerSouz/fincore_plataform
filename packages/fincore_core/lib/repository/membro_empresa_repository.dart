@@ -75,7 +75,7 @@ class MembroEmpresaRepository extends BaseRepository<CoreMembroEmpresa, String> 
     // Registra a mutação no Outbox
     final outbox = DependencyInjection().get<OutboxService>();
     await outbox.enqueue(
-      entity: 'membro_empresa',
+      entity: 'membros_empresa',
       entityId: entity.id,
       action: 'UPSERT',
       payload: _toJson(entity, updatedMetadata),
@@ -89,7 +89,7 @@ class MembroEmpresaRepository extends BaseRepository<CoreMembroEmpresa, String> 
     if (entity != null) {
       final outbox = DependencyInjection().get<OutboxService>();
       await outbox.enqueue(
-        entity: 'membro_empresa',
+        entity: 'membros_empresa',
         entityId: id,
         action: 'DELETE',
         payload: {'id': id, 'tenantId': entity.tenantId},
