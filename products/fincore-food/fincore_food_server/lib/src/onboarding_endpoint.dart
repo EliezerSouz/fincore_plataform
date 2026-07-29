@@ -49,7 +49,25 @@ class OnboardingEndpoint extends Endpoint {
         final tenantUuid = UuidValue.fromString(tenantId);
         final userUuid = UuidValue.fromString(usuarioId);
 
-        // 1. Inserir na tabela empresa
+        // 1. Inserir na tabela usuario (global) - DEVE ser o primeiro devido às FKs nas outras tabelas
+        final existingUser = await Usuario.db.findById(session, userUuid);
+        if (existingUser == null) {
+          final user = Usuario(
+            id: userUuid,
+            email: usuarioEmail,
+            nome: usuarioNome,
+            criadoEm: now,
+            atualizadoEm: now,
+          );
+          await Usuario.db.insertRow(session, user);
+        } else {
+          existingUser.nome = usuarioNome;
+          existingUser.email = usuarioEmail;
+          existingUser.atualizadoEm = now;
+          await Usuario.db.updateRow(session, existingUser);
+        }
+
+        // 2. Inserir na tabela empresa
         final empresa = Empresa(
           id: tenantUuid,
           razaoSocial: razaoSocial,
@@ -74,7 +92,7 @@ class OnboardingEndpoint extends Endpoint {
         );
         await Empresa.db.insertRow(session, empresa);
 
-        // 1.2. Criar log imutável de auditoria (EventoEmpresa)
+        // 2.2. Criar log imutável de auditoria (EventoEmpresa)
         final evento = EventoEmpresa(
           id: UuidValue.fromString(Uuid().v4()),
           tenantId: tenantUuid,
@@ -90,7 +108,7 @@ class OnboardingEndpoint extends Endpoint {
         );
         await EventoEmpresa.db.insertRow(session, evento);
 
-        // 1.5. Criar configurações padrão (1:1 Obrigatório - CAP.CONFIGURATION)
+        // 2.5. Criar configurações padrão (1:1 Obrigatório - CAP.CONFIGURATION)
         final config = EmpresaConfiguracao(
           id: UuidValue.fromString(Uuid().v4()),
           tenantId: tenantId,
@@ -132,7 +150,7 @@ class OnboardingEndpoint extends Endpoint {
         );
         await EmpresaConfiguracao.db.insertRow(session, config);
 
-        // 1.6. Criar Cliente Padrão: "Consumidor Final"
+        // 2.6. Criar Cliente Padrão: "Consumidor Final"
         final clientePadrao = Cliente(
           id: UuidValue.fromString(Uuid().v4()),
           tenantId: tenantId,
@@ -149,24 +167,6 @@ class OnboardingEndpoint extends Endpoint {
           syncVersion: 1,
         );
         await Cliente.db.insertRow(session, clientePadrao);
-
-        // 2. Inserir na tabela usuario (global)
-        final existingUser = await Usuario.db.findById(session, userUuid);
-        if (existingUser == null) {
-          final user = Usuario(
-            id: userUuid,
-            email: usuarioEmail,
-            nome: usuarioNome,
-            criadoEm: now,
-            atualizadoEm: now,
-          );
-          await Usuario.db.insertRow(session, user);
-        } else {
-          existingUser.nome = usuarioNome;
-          existingUser.email = usuarioEmail;
-          existingUser.atualizadoEm = now;
-          await Usuario.db.updateRow(session, existingUser);
-        }
 
         // 3. Inserir na tabela membro_empresa
         final membro = MembroEmpresa(
