@@ -134,7 +134,6 @@ class MembroEmpresaRepository extends BaseRepository<CoreMembroEmpresa, String> 
       'convidadoEm': entity.convidadoEm.toIso8601String(),
       'aceitoEm': entity.aceitoEm?.toIso8601String(),
       'syncVersion': metadata.version,
-      'syncStatus': metadata.syncStatus.name,
       'createdAt': metadata.createdAt.toIso8601String(),
       'updatedAt': metadata.updatedAt.toIso8601String(),
       'createdBy': metadata.createdBy,
