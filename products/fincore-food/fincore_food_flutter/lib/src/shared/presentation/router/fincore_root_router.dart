@@ -156,14 +156,40 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint('Erro ao obter sessao: $e');
-      try {
-        await Supabase.instance.client.auth.signOut();
-      } catch (_) {}
-      setState(() {
-        _authUserInfo = null;
-        _isLoading = false;
-      });
+      LogService.instance.warning(
+        LogModule.api,
+        'Servidor backend local indisponível — operando com sessão local e banco SQLite',
+      );
+      final currentSupabaseUser = Supabase.instance.client.auth.currentUser;
+      if (currentSupabaseUser != null && localUser != null && empresas.isNotEmpty) {
+        setState(() {
+          _authUserInfo = AuthUserInfo(
+            usuarioId: localUser.id,
+            email: localUser.email,
+            role: 'owner',
+            tenantId: empresas.first.id,
+          );
+          _isLoading = false;
+        });
+      } else {
+        final isNetworkError = e is SocketException ||
+            e.toString().contains('SocketException') ||
+            e.toString().contains('recusou') ||
+            e.toString().contains('1225');
+        if (!isNetworkError) {
+          try {
+            await Supabase.instance.client.auth.signOut();
+          } catch (_) {}
+          setState(() {
+            _authUserInfo = null;
+            _isLoading = false;
+          });
+        } else {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
     }
   }
 
@@ -186,9 +212,7 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
 
         LogService.instance.info(
           LogModule.sync,
-          '[Router] 🚀 Inicializando Orquestração de Sync em Background...\n'
-          '  1. Verificando Outbox local...\n'
-          '  2. Executando PUSH de pendências locais...',
+          'Sincronização em segundo plano iniciada para tenant [${userInfo.tenantId}]',
         );
 
         // ── PASSO 1: PUSH ─────────────────────────────────────────────────────
@@ -198,9 +222,7 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
         if (result.hasPendingAfter) {
           LogService.instance.warning(
             LogModule.sync,
-            '[Router] ⚠️ MODO DEGRADADO ATIVADO: Outbox ainda possui ${result.failureCount} falha(s)/pendência(s).\n'
-            '  PULL suspenso para proteger dados locais.\n'
-            '  O sistema continuará funcionando 100% offline.',
+            'Modo de sincronização degradado: ${result.failureCount} falha(s) pendente(s) na fila. Recebimento suspenso.',
           );
           _syncTimer?.cancel();
           _syncTimer = Timer(const Duration(seconds: 30), () {
