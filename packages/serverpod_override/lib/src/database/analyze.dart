@@ -35,32 +35,24 @@ FROM pg_catalog.pg_tables
 WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema';
 ''');
 
-    return await Future.wait(tableSchemas.map((tableSchema) async {
-      var schemaName = tableSchema.first;
-      var tableName = tableSchema.last;
-
-      var columns = _getColumnDefinitions(database, schemaName, tableName);
-
-      var foreignKeys = _getForeignKeyDefinitions(
-        database,
-        schemaName,
-        tableName,
-      );
-
-      var indexes = _getIndexDefinitions(
-        database,
-        schemaName,
-        tableName,
-      );
-
-      return TableDefinition(
+    // FINCORE PATCH: sequencial em vez de Future.wait paralelo
+    // Evita TimeoutException: Failed to acquire pool lock com bancos remotos (Supabase)
+    final tables = <TableDefinition>[];
+    for (final tableSchema in tableSchemas) {
+      final schemaName = tableSchema.first as String;
+      final tableName = tableSchema.last as String;
+      final columns = await _getColumnDefinitions(database, schemaName, tableName);
+      final foreignKeys = await _getForeignKeyDefinitions(database, schemaName, tableName);
+      final indexes = await _getIndexDefinitions(database, schemaName, tableName);
+      tables.add(TableDefinition(
         name: tableName,
         schema: schemaName,
-        columns: await columns,
-        foreignKeys: await foreignKeys,
-        indexes: await indexes,
-      );
-    }));
+        columns: columns,
+        foreignKeys: foreignKeys,
+        indexes: indexes,
+      ));
+    }
+    return tables;
   }
 
   static Future<List<ColumnDefinition>> _getColumnDefinitions(
