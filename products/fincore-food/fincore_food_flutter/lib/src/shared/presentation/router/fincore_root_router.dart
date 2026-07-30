@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,9 +47,11 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
         });
       }
     } catch (e, st) {
-      debugPrint('═══ ERRO NO INIT STATE DO ROUTER ═══');
-      debugPrint('Erro: $e');
-      debugPrint('Stack: $st');
+      LogService.instance.error(
+        LogModule.app,
+        'Erro na inicialização do router de navegação',
+        exception: e.toString(),
+      );
       setState(() {
         _isLoading = false;
       });
@@ -63,29 +66,33 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
 
   void _listenToAuthChanges() {
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      final user = data.session?.user;
-      if (user != _currentUser) {
+      final AuthChangeEvent event = data.event;
+      if (event == AuthChangeEvent.signedIn) {
         setState(() {
-          _currentUser = user;
-          _authUserInfo = null;
-          _onboardingStatus = null;
+          _currentUser = data.session?.user;
           _isLoading = true;
         });
-        if (user != null) {
-          _fetchSessionInfo();
-        } else {
-          client.authenticationKeyManager?.remove();
-          setState(() {
-            _isLoading = false;
-          });
-        }
+        _fetchSessionInfo();
+      } else if (event == AuthChangeEvent.signedOut) {
+        _syncTimer?.cancel();
+        setState(() {
+          _currentUser = null;
+          _authUserInfo = null;
+          _onboardingStatus = null;
+          _isLoading = false;
+        });
       }
     });
   }
 
   Future<void> _fetchSessionInfo() async {
+    UsuarioEntity? localUser;
+    List<EmpresaEntity> empresas = [];
+
     try {
-      final token = Supabase.instance.client.auth.currentSession?.accessToken;
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken;
+
       if (token == null) {
         setState(() => _isLoading = false);
         return;
@@ -93,57 +100,41 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
 
       await client.authenticationKeyManager?.put(token);
 
-      // NOVO FLUXO OFFLINE FIRST
-      // 1. Tentar ler dados do SQLite usando o email/id localmente (se tivéssemos um cache local do userInfo).
-      // Como precisamos do AuthUserInfo completo, e já salvamos o setupCompleted no SharedPreferences usando o tenantId...
-      // Precisaremos do tenantId para saber qual empresa abrir.
-      // Vamos tentar carregar qualquer empresa/usuário existente no banco local para acelerar.
-      
       final usuarioRepo = DependencyInjection().get<UsuarioRepository>();
       final empresaRepo = DependencyInjection().get<EmpresaRepository>();
       
       final usuarios = await usuarioRepo.findAll();
-      final empresas = await empresaRepo.findAll();
+      empresas = await empresaRepo.findAll();
       
       final currentUserId = Supabase.instance.client.auth.currentUser?.id;
-      final localUser = usuarios.where((u) => u.id == currentUserId).firstOrNull;
+      localUser = usuarios.where((u) => u.id == currentUserId).firstOrNull;
       
       if (localUser != null && empresas.isNotEmpty) {
-        // Encontrou sessão local válida
         DependencyInjection().get<TenantContext>().setContext(
           empresa: empresas.first,
           usuario: localUser,
         );
-        
-        // Desbloqueia a UI instantaneamente — prefs serão lidas no _backgroundSync
 
         setState(() {
-          // Preenche localmente para não piscar a tela de Onboarding enquanto sincroniza em background
           _authUserInfo = AuthUserInfo(
-            usuarioId: localUser.id,
+            usuarioId: localUser!.id,
             email: localUser.email,
             role: 'owner',
             tenantId: empresas.first.id,
           );
-          _isLoading = false; // Desbloqueia a UI instantaneamente!
+          _isLoading = false;
         });
 
-        // 2. Continua em background para atualizar authUserInfo via nuvem e startar SyncEngine
         _backgroundSync(token);
         return;
       }
 
-      // 3. Se não tem dados locais, aguarda a nuvem (Primeiro Acesso)
       final userInfo = await client.auth.login();
       
       String? onboardingStatus;
       if (userInfo != null) {
         onboardingStatus = await client.onboarding.status();
-        if (userInfo.tenantId != null) {
-          // tenantId disponível — sessão será inicializada abaixo
-        }
         
-        // Inicializa a sessão local com os dados recém-baixados
         final sessionSvc = SessionInitializationService(client);
         await sessionSvc.initializeSession(userInfo);
       } else {
@@ -164,8 +155,8 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
       if (currentSupabaseUser != null && localUser != null && empresas.isNotEmpty) {
         setState(() {
           _authUserInfo = AuthUserInfo(
-            usuarioId: localUser.id,
-            email: localUser.email,
+            usuarioId: localUser!.id,
+            email: localUser!.email,
             role: 'owner',
             tenantId: empresas.first.id,
           );
