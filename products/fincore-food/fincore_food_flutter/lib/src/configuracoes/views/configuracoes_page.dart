@@ -121,7 +121,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         final tenantCtx = DependencyInjection().get<TenantContext>();
         final tenantId = tenantCtx.hasContext ? tenantCtx.empresa.id : 'unknown';
         config = CoreEmpresaConfiguracao(
-          id: 'cfg_$tenantId',
+          id: tenantId,
           tenantId: tenantId,
           timezone: 'America/Sao_Paulo',
           locale: 'pt_BR',

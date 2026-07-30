@@ -71,7 +71,7 @@ class _ClientesPageState extends State<ClientesPage> {
         final tenantCtx = DependencyInjection().get<TenantContext>();
         final defaults = [
           TaxaEntrega(
-            id: 'taxa_centro',
+            id: 'd06efd08-251c-43f1-bdfc-76e2730a8451', // ID do tipo UUID para sincronizar com Supabase
             tenantId: tenantCtx.tenantId,
             nome: 'Centro / Adjacências',
             tipoRegra: TipoRegraTaxaEntrega.bairro,
@@ -914,7 +914,7 @@ class _ClientesPageState extends State<ClientesPage> {
                             );
                       }
                       taxaMatch ??= _taxas.cast<TaxaEntrega?>().firstWhere(
-                            (t) => t?.id == 'taxa_centro',
+                            (t) => t?.id == 'd06efd08-251c-43f1-bdfc-76e2730a8451',
                             orElse: () => _taxas.isNotEmpty ? _taxas.first : null,
                           );
                       final taxaValor = taxaMatch != null ? (taxaMatch.valorCentavos / 100).toStringAsFixed(2) : '0,00';

@@ -124,7 +124,7 @@ class SupabaseSyncService {
 
       LogService.instance.debug(
         LogModule.sync,
-        'SupabaseSync enviando PUSH:\nTabela: $tableName\nAção: ${entry.action}\nID: ${entry.entityId}\nPayload: ${entry.payload}',
+        'Supabase PUSH: Tabela: $tableName | Ação: ${entry.action} | ID: ${entry.entityId}',
         tenantId: _context.hasContext ? _context.tenantId : null,
       );
 

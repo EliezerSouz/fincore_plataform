@@ -323,7 +323,7 @@ class _PdvPageState extends State<PdvPage> {
       }
       // 3) Fallback: Taxa Centro ou primeira taxa cadastrada
       match ??= _taxas.cast<TaxaEntrega?>().firstWhere(
-            (t) => t?.id == 'taxa_centro',
+            (t) => t?.id == 'd06efd08-251c-43f1-bdfc-76e2730a8451',
             orElse: () => _taxas.isNotEmpty ? _taxas.first : null,
           );
 

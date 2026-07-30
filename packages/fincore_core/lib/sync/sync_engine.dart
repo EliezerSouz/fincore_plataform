@@ -121,7 +121,7 @@ class SyncEngine {
         final startTime = DateTime.now();
         LogService.instance.debug(
           LogModule.sync,
-          'Iniciando [${entry.action}] da entidade [${entry.entity}] ID [${entry.entityId}]. Payload: ${entry.payload}',
+          'Iniciando [${entry.action}] da entidade [${entry.entity}] ID [${entry.entityId}]',
           tenantId: context.hasContext ? context.tenantId : null,
           traceId: traceId,
           context: logContext,
