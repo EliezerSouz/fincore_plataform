@@ -85,6 +85,9 @@ class SyncEngine {
       if (context.hasContext) 'usuario': context.usuario.nome,
       if (context.hasContext) 'empresa': context.empresa.nomeFantasia,
     };
+    final logCtxStr = context.hasContext
+        ? '${context.usuario.nome} @ ${context.empresa.nomeFantasia}'
+        : null;
 
     try {
       final entries = await outboxService.getPendingEntries();
@@ -101,10 +104,14 @@ class SyncEngine {
       });
 
       if (entries.isNotEmpty) {
+        await FincoreLogger.instance.beginCycle(
+          LogModule.sync,
+          'CICLO DE ENVIO (PUSH)',
+          context: logCtxStr,
+        );
         LogService.instance.info(
           LogModule.sync,
-          '[Router] 📤 PUSH iniciado — $initialCount registro(s) pendente(s) no Outbox',
-          tenantId: context.hasContext ? context.tenantId : null,
+          'Outbox: $initialCount registro(s) pendente(s) — iniciando envio ao Supabase',
           traceId: traceId,
           context: logContext,
         );
@@ -139,16 +146,14 @@ class SyncEngine {
         if (pushSuccess) {
           final duration = DateTime.now().difference(startTime).inMilliseconds;
           final shortId = entry.entityId.length > 8 ? entry.entityId.substring(0, 8) : entry.entityId;
-
           LogService.instance.info(
             LogModule.sync,
-            '✔ [${entry.entity}] ${entry.action}  id=${shortId}…  (${duration}ms  v${entry.version})',
+            '${entry.entity.padRight(28)} id=${shortId}...  ENVIADO   ${entry.action}  (${duration}ms)',
             tenantId: context.hasContext ? context.tenantId : null,
             traceId: traceId,
             context: logContext,
           );
           await outboxService.updateStatus(entry.id, SyncStatus.synced);
-          // Atualiza lastSyncedAt e syncStatus na tabela de ORIGEM
           await _updateSourceTableSyncStatus(entry);
           successCount++;
         } else {
@@ -156,15 +161,9 @@ class SyncEngine {
           final nextStatus = attempts >= 5 ? SyncStatus.failed : SyncStatus.retrying;
           final shortId = entry.entityId.length > 8 ? entry.entityId.substring(0, 8) : entry.entityId;
           final parsedReason = _parseSyncError(pushError ?? 'Desconhecido');
-
           LogService.instance.warning(
             LogModule.sync,
-            '''[PUSH]
-Falha ao sincronizar ${entry.entity}.
-Registro: $shortId...
-Motivo:
-$parsedReason
-Ação: Nova tentativa ($attempts/5).''',
+            '${entry.entity.padRight(28)} id=${shortId}...  FALHA     tentativa $attempts/5 — $parsedReason',
             tenantId: context.hasContext ? context.tenantId : null,
             traceId: traceId,
             context: logContext,
@@ -172,7 +171,7 @@ Ação: Nova tentativa ($attempts/5).''',
           if (pushError != null) {
             LogService.instance.error(
               LogModule.sync,
-              'Detalhes do erro de push',
+              'Detalhe do erro',
               traceId: traceId,
               context: logContext,
               exception: pushError,
@@ -193,17 +192,21 @@ Ação: Nova tentativa ($attempts/5).''',
     final durationMs = DateTime.now().difference(overallStart).inMilliseconds;
     final hasPendingAfter = !(await outboxService.isOutboxEmpty());
 
+    final statusStr = hasPendingAfter
+        ? 'Modo degradado — PULL suspenso (ainda há pendências)'
+        : 'OK — Outbox limpo, pronto para PULL';
+
     LogService.instance.info(
       LogModule.sync,
-      '''[PUSH] 📤 Ciclo concluído
-  Duração   : ${durationMs}ms
-  Pendentes : $initialCount → ${hasPendingAfter ? 'ainda há pendentes ⚠️' : '0 (outbox limpo ✔)'}
-  Sucesso   : $successCount   Falhas: $failureCount
-  Status    : ${hasPendingAfter ? 'Modo degradado — PULL suspenso' : 'OK — pronto para PULL'}''',
+      'Ciclo encerrado: $successCount enviado(s)  $failureCount falha(s)  ${durationMs}ms  $statusStr',
       tenantId: context.hasContext ? context.tenantId : null,
       traceId: traceId,
       context: logContext,
     );
+
+    if (entries.isNotEmpty) {
+      await FincoreLogger.instance.endCycle(LogModule.sync, 'FIM DO CICLO DE ENVIO');
+    }
 
     return SyncResult(
       successCount: successCount,

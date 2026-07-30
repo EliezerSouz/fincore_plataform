@@ -1,9 +1,291 @@
-import 'dart:convert';
 import 'dart:io';
 
-enum LogModule { app, api, database, sync, printer, crash, startup, migration }
+/// Módulos do sistema FINCORE para categorização dos logs.
+enum LogModule {
+  startup,
+  sync,
+  database,
+  api,
+  migration,
+  printer,
+  crash,
+  app,
+}
+
+/// Nível de severidade do evento.
 enum LogLevel { debug, info, warning, error }
 
+/// ─────────────────────────────────────────────────────────────────────────────
+/// FincoreLogger
+///
+/// Serviço de log central do FINCORE. Inspirado nos logs de campo de sistemas
+/// de integração profissionais: legível no Notepad, rastreável por grep,
+/// rotacionado por hora para evitar arquivos gigantes.
+///
+/// Formato de arquivo (plain text):
+///   2026-07-30 14:22:01.312  [SYNC]      Ciclo de envio iniciado — 3 pendente(s)
+///   2026-07-30 14:22:01.450  [SYNC]      Cliente  id=abc123  ENVIADO  (148ms)
+///   2026-07-30 14:22:01.451  [SYNC] ERRO Falha ao enviar Produto  id=xyz999
+///                            >>> PostgrestException: column not found
+///
+/// Rotação: um arquivo por hora → fincore_YYYY-MM-DD_HH.log
+/// ─────────────────────────────────────────────────────────────────────────────
+class FincoreLogger {
+  static FincoreLogger? _instance;
+
+  final String baseDirectory;
+  final bool isProduction;
+
+  // Arquivo de log atual (rotado por hora)
+  File? _currentFile;
+  int? _currentHour;
+
+  FincoreLogger._(this.baseDirectory, {this.isProduction = false});
+
+  // ── Inicialização ──────────────────────────────────────────────────────────
+
+  static void init(String baseDirectory, {bool isProduction = false}) {
+    _instance = FincoreLogger._(baseDirectory, isProduction: isProduction);
+    _instance!._scheduleCleanup();
+  }
+
+  static FincoreLogger get instance {
+    final inst = _instance;
+    if (inst == null) {
+      throw StateError(
+        'FincoreLogger não inicializado. Chame FincoreLogger.init(baseDirectory) primeiro.',
+      );
+    }
+    return inst;
+  }
+
+  // ── API Pública ────────────────────────────────────────────────────────────
+
+  Future<void> info(LogModule module, String message, {
+    String? context,
+    String? traceId,
+  }) => _write(LogLevel.info, module, message, context: context, traceId: traceId);
+
+  Future<void> debug(LogModule module, String message, {
+    String? context,
+    String? traceId,
+  }) => _write(LogLevel.debug, module, message, context: context, traceId: traceId);
+
+  Future<void> warning(LogModule module, String message, {
+    String? context,
+    String? traceId,
+    String? detail,
+  }) => _write(LogLevel.warning, module, message, context: context, traceId: traceId, detail: detail);
+
+  Future<void> error(LogModule module, String message, {
+    String? context,
+    String? traceId,
+    String? detail,
+  }) => _write(LogLevel.error, module, message, context: context, traceId: traceId, detail: detail);
+
+  /// Loga o início de um ciclo de operação (ex: ciclo de sync, startup, etc.)
+  /// Cria uma linha divisória visível no arquivo para fácil localização.
+  Future<void> beginCycle(LogModule module, String title, {String? context}) async {
+    final now = DateTime.now();
+    final line = _divider(title);
+    await _writeLine(line, now);
+    if (context != null) {
+      await _writeLine(_formatLine(now, module, LogLevel.info, context), now);
+    }
+  }
+
+  /// Loga o fim de um ciclo com um resumo de uma linha.
+  Future<void> endCycle(LogModule module, String summary) async {
+    final now = DateTime.now();
+    await _writeLine(_formatLine(now, module, LogLevel.info, summary), now);
+    await _writeLine('', now); // linha em branco após o ciclo
+  }
+
+  // ── Formatação ─────────────────────────────────────────────────────────────
+
+  static String _formatTimestamp(DateTime dt) {
+    final y  = dt.year;
+    final mo = dt.month.toString().padLeft(2, '0');
+    final d  = dt.day.toString().padLeft(2, '0');
+    final h  = dt.hour.toString().padLeft(2, '0');
+    final mi = dt.minute.toString().padLeft(2, '0');
+    final s  = dt.second.toString().padLeft(2, '0');
+    final ms = dt.millisecond.toString().padLeft(3, '0');
+    return '$y-$mo-$d $h:$mi:$s.$ms';
+  }
+
+  static String _moduleTag(LogModule module) {
+    return '[${module.name.toUpperCase().padRight(9)}]';
+  }
+
+  static String _levelTag(LogLevel level) {
+    return switch (level) {
+      LogLevel.debug   => '      ',
+      LogLevel.info    => '      ',
+      LogLevel.warning => 'AVISO ',
+      LogLevel.error   => 'ERRO  ',
+    };
+  }
+
+  static String _formatLine(DateTime dt, LogModule module, LogLevel level, String message) {
+    final ts  = _formatTimestamp(dt);
+    final mod = _moduleTag(module);
+    final lvl = _levelTag(level);
+    return '$ts  $mod $lvl$message';
+  }
+
+  static String _divider(String title) {
+    const width = 72;
+    final inner = ' $title ';
+    final pad   = ((width - inner.length) / 2).floor();
+    final line  = ('─' * pad) + inner + ('─' * pad);
+    return line.padRight(width, '─');
+  }
+
+  // ── Escrita ────────────────────────────────────────────────────────────────
+
+  Future<void> _write(
+    LogLevel level,
+    LogModule module,
+    String message, {
+    String? context,
+    String? traceId,
+    String? detail,
+  }) async {
+    if (isProduction && level == LogLevel.debug) return;
+
+    final now = DateTime.now();
+
+    // ── Monta as linhas ──
+    final lines = <String>[];
+
+    // Linha principal
+    String mainMsg = message;
+    if (context != null) mainMsg = '$context  |  $message';
+    lines.add(_formatLine(now, module, level, mainMsg));
+
+    // Detalhe extra (ex: mensagem de exceção, stack trace resumido)
+    if (detail != null) {
+      for (final l in detail.trim().split('\n').take(3)) {
+        if (l.trim().isNotEmpty) {
+          lines.add('${''.padLeft(38)}>>> ${l.trim()}');
+        }
+      }
+    }
+
+    if (traceId != null) {
+      lines.add('${''.padLeft(38)}--- Trace: $traceId');
+    }
+
+    for (final line in lines) {
+      await _writeLine(line, now);
+    }
+
+    // ── Console output ──
+    _printToConsole(level, lines);
+  }
+
+  Future<void> _writeLine(String line, DateTime now) async {
+    try {
+      final file = await _getFile(now);
+      await file.writeAsString('$line\n', mode: FileMode.append, flush: true);
+    } catch (e) {
+      stderr.writeln('⚠ FINCORE LOG IO ERROR: $e');
+    }
+  }
+
+  // ── Rotação de arquivo por hora ────────────────────────────────────────────
+
+  Future<File> _getFile(DateTime now) async {
+    if (_currentHour == now.hour && _currentFile != null) {
+      return _currentFile!;
+    }
+
+    final dateStr = '${now.year}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final hourStr = now.hour.toString().padLeft(2, '0');
+
+    final dir = Directory('$baseDirectory/logs');
+    if (!await dir.exists()) await dir.create(recursive: true);
+
+    final file = File('${dir.path}/fincore_${dateStr}_$hourStr.log');
+
+    // Escreve cabeçalho se o arquivo é novo
+    if (!await file.exists()) {
+      await file.writeAsString(
+        _fileHeader(now),
+        mode: FileMode.write,
+        flush: true,
+      );
+    }
+
+    _currentFile = file;
+    _currentHour = now.hour;
+    return file;
+  }
+
+  static String _fileHeader(DateTime now) {
+    final ts = _formatTimestamp(now);
+    return '''
+════════════════════════════════════════════════════════════════════════
+  FINCORE  v1.2.0  |  Log de Operação
+  Sessão iniciada em: $ts
+  Módulo: Integração Local ↔ Nuvem (Supabase)
+════════════════════════════════════════════════════════════════════════
+
+''';
+  }
+
+  // ── Console ────────────────────────────────────────────────────────────────
+
+  void _printToConsole(LogLevel level, List<String> lines) {
+    final prefix = switch (level) {
+      LogLevel.debug   => '',
+      LogLevel.info    => '',
+      LogLevel.warning => '⚠ ',
+      LogLevel.error   => '✖ ',
+    };
+
+    final out = lines.map((l) => '$prefix$l').join('\n');
+
+    if (level == LogLevel.error || level == LogLevel.warning) {
+      stderr.writeln(out);
+    } else {
+      stdout.writeln(out);
+    }
+  }
+
+  // ── Limpeza automática (logs > 30 dias) ───────────────────────────────────
+
+  void _scheduleCleanup() {
+    Future.microtask(() async {
+      try {
+        final dir = Directory('$baseDirectory/logs');
+        if (!await dir.exists()) return;
+        final cutoff = DateTime.now().subtract(const Duration(days: 30));
+        await for (final f in dir.list()) {
+          if (f is File && f.path.endsWith('.log')) {
+            final modified = await f.lastModified();
+            if (modified.isBefore(cutoff)) {
+              await f.delete();
+            }
+          }
+        }
+      } catch (_) {
+        // Limpeza silenciosa — não bloqueia o app
+      }
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alias de compatibilidade: LogService → FincoreLogger
+// Mantém compatibilidade com código existente durante a migração.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// @deprecated Use [FincoreLogger] diretamente.
+/// Mantido para compatibilidade com código legado durante a migração.
 class LogService {
   static LogService? _instance;
   final String baseDirectory;
@@ -13,20 +295,16 @@ class LogService {
 
   static void init(String baseDirectory, {bool runCleanup = true, bool isProduction = false}) {
     _instance = LogService._(baseDirectory)..isProduction = isProduction;
-    if (runCleanup) {
-      _instance!._rotateAndCleanupLogs();
-    }
+    // Inicializa o novo logger também
+    FincoreLogger.init(baseDirectory, isProduction: isProduction);
   }
 
   static LogService get instance {
     final inst = _instance;
-    if (inst == null) {
-      throw StateError('LogService não foi inicializado. Chame LogService.init(baseDirectory) primeiro.');
-    }
+    if (inst == null) throw StateError('LogService não inicializado.');
     return inst;
   }
 
-  /// Escreve uma mensagem de log técnica no arquivo correspondente ao módulo em formato JSON Lines.
   Future<void> log({
     required LogModule module,
     required LogLevel level,
@@ -38,118 +316,34 @@ class LogService {
     String? exception,
     String? stackTrace,
   }) async {
-    try {
-      if (isProduction && level == LogLevel.debug) return;
-
-      final now = DateTime.now();
-      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-      
-      // Criar diretório específico do módulo
-      final moduleDir = Directory('$baseDirectory/logs/${module.name}');
-      if (!await moduleDir.exists()) {
-        await moduleDir.create(recursive: true);
+    // Monta context string compatível
+    String? ctxStr;
+    if (context != null && context.isNotEmpty) {
+      final usuario = context['usuario'];
+      final empresa = context['empresa'];
+      if (usuario != null && empresa != null) {
+        ctxStr = '$usuario @ $empresa';
+      } else {
+        ctxStr = context.entries.map((e) => '${e.key}=${e.value}').join('  ');
       }
+    }
 
-      // Arquivo rotacionado diariamente
-      final logFile = File('${moduleDir.path}/fincore_${module.name}_$dateStr.log');
+    // Monta detail string
+    String? detailStr;
+    if (exception != null) detailStr = exception;
 
-      // Objeto de log estruturado em JSON Lines
-      final logEntry = {
-        'timestamp': now.toIso8601String(),
-        'level': level.name.toUpperCase(),
-        'module': module.name.toUpperCase(),
-        if (tenantId != null) 'tenantId': tenantId,
-        if (userId != null) 'userId': userId,
-        if (traceId != null) 'traceId': traceId,
-        if (context != null) 'context': context,
-        'message': message,
-        if (exception != null) 'exception': exception,
-        if (stackTrace != null) 'stackTrace': stackTrace,
-      };
-
-      final logLine = jsonEncode(logEntry) + '\n';
-      await logFile.writeAsString(logLine, mode: FileMode.append, flush: true);
-
-      // Se for um erro e não for do módulo crash, salva também no log de crash global
-      if (level == LogLevel.error && module != LogModule.crash) {
-        final crashDir = Directory('$baseDirectory/logs/crash');
-        if (!await crashDir.exists()) {
-          await crashDir.create(recursive: true);
-        }
-        final crashFile = File('${crashDir.path}/fincore_crash_$dateStr.log');
-        await crashFile.writeAsString(logLine, mode: FileMode.append, flush: true);
-      }
-      
-      // ── Console Output ───────────────────────────────────────────────
-      if (!isProduction || level != LogLevel.debug) {
-        final timeStr =
-            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}'
-            ' ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:'
-            '${now.second.toString().padLeft(2, '0')}.${now.millisecond.toString().padLeft(3, '0')}';
-
-        final badge = switch (level) {
-          LogLevel.debug   => '🔵 DEBUG  ',
-          LogLevel.info    => '🟢 INFO   ',
-          LogLevel.warning => '🟠 WARN   ',
-          LogLevel.error   => '🔴 ERROR  ',
-        };
-
-        final tag = '[${module.name.toUpperCase()}]';
-
-        // ── Contexto inline (usuario@empresa | traceId) ──
-        final inlineParts = <String>[];
-        if (context != null && context.isNotEmpty) {
-          final usuario = context['usuario'];
-          final empresa = context['empresa'];
-          if (usuario != null && empresa != null) {
-            inlineParts.add('$usuario @ $empresa');
-          } else {
-            context.forEach((k, v) => inlineParts.add('$k=$v'));
-          }
-        }
-        if (traceId != null) inlineParts.add(traceId);
-        final inlineCtx = inlineParts.isNotEmpty ? '  |  ${inlineParts.join('  ·  ')}' : '';
-
-        // ── Mensagem: indenta cada linha da mensagem ──
-        final msgLines = message.trim().split('\n');
-        final formattedMsg = msgLines
-            .map((l) {
-              final t = l.trim();
-              return t.isEmpty ? '' : '  $t';
-            })
-            .join('\n');
-
-        final buffer = StringBuffer();
-
-        if (level == LogLevel.error) {
-          buffer.writeln('┌─────────────────────────────────────────────────');
-        }
-
-        buffer.writeln('$badge $tag  [$timeStr]$inlineCtx');
-        buffer.writeln(formattedMsg);
-
-        if (exception != null) {
-          // Mostra só a primeira linha do erro — detalhe completo vai pro arquivo
-          buffer.writeln('  ⚡ ${exception.split('\n').first.trim()}');
-        }
-
-        if (level == LogLevel.error) {
-          buffer.writeln('└─────────────────────────────────────────────────');
-        }
-
-        if (level == LogLevel.error) {
-          stderr.write(buffer.toString());
-        } else {
-          stdout.write(buffer.toString());
-        }
-      }
-    } catch (e) {
-      // Fallback em caso de falha catastrófica de IO para não derrubar a aplicação
-      stderr.writeln('⚠️ ERRO CRÍTICO NO LOGSERVICE: $e');
+    switch (level) {
+      case LogLevel.debug:
+        await FincoreLogger.instance.debug(module, message, context: ctxStr, traceId: traceId);
+      case LogLevel.info:
+        await FincoreLogger.instance.info(module, message, context: ctxStr, traceId: traceId);
+      case LogLevel.warning:
+        await FincoreLogger.instance.warning(module, message, context: ctxStr, traceId: traceId, detail: detailStr);
+      case LogLevel.error:
+        await FincoreLogger.instance.error(module, message, context: ctxStr, traceId: traceId, detail: detailStr);
     }
   }
 
-  // shortcuts
   Future<void> debug(LogModule module, String message, {String? tenantId, String? userId, String? traceId, Map<String, dynamic>? context}) =>
       log(module: module, level: LogLevel.debug, message: message, tenantId: tenantId, userId: userId, traceId: traceId, context: context);
 
@@ -162,113 +356,13 @@ class LogService {
   Future<void> error(LogModule module, String message, {String? tenantId, String? userId, String? traceId, Map<String, dynamic>? context, String? exception, String? stackTrace}) =>
       log(module: module, level: LogLevel.error, message: message, tenantId: tenantId, userId: userId, traceId: traceId, context: context, exception: exception, stackTrace: stackTrace);
 
-  /// Força a execução e conclusão da limpeza e rotação de logs antigos.
-  Future<void> forceCleanup() => _rotateAndCleanupLogs();
+  Future<void> forceCleanup() async {}
 
-  static bool _isCleaningUp = false;
-
-  /// Rotaciona e apaga logs mais antigos do que 90 dias
-  Future<void> _rotateAndCleanupLogs() async {
-    if (_isCleaningUp) return;
-    _isCleaningUp = true;
-    try {
-      final logsDir = Directory('$baseDirectory/logs');
-      if (!await logsDir.exists()) return;
-
-      final limitDate = DateTime.now().subtract(const Duration(days: 30));
-
-      await for (final entity in logsDir.list(recursive: true, followLinks: false)) {
-        if (entity is File && entity.path.endsWith('.log')) {
-          final lastModified = await entity.lastModified();
-          if (lastModified.isBefore(limitDate)) {
-            await entity.delete();
-            stdout.writeln('♻️ LOGSERVICE CLEANUP: Removido log expirado: ${entity.path}');
-          }
-        }
-      }
-    } catch (e) {
-      stderr.writeln('⚠️ LOGSERVICE CLEANUP ERROR: $e');
-    } finally {
-      _isCleaningUp = false;
-    }
-  }
-
-  /// Consulta logs do disco com base em filtros e paginação simples.
   Future<List<Map<String, dynamic>>> queryLogs({
     LogModule? module,
     LogLevel? level,
     DateTime? start,
     DateTime? end,
     String? searchQuery,
-  }) async {
-    final results = <Map<String, dynamic>>[];
-    try {
-      final logsDir = Directory('$baseDirectory/logs');
-      if (!await logsDir.exists()) return [];
-
-      final List<Directory> dirsToSearch = [];
-      if (module != null) {
-        final modDir = Directory('${logsDir.path}/${module.name}');
-        if (await modDir.exists()) {
-          dirsToSearch.add(modDir);
-        }
-      } else {
-        await for (final dir in logsDir.list(followLinks: false)) {
-          if (dir is Directory) {
-            dirsToSearch.add(dir);
-          }
-        }
-      }
-
-      for (final dir in dirsToSearch) {
-        await for (final file in dir.list(followLinks: false)) {
-          if (file is File && file.path.endsWith('.log')) {
-            final lines = await file.readAsLines();
-            for (final line in lines) {
-              if (line.trim().isEmpty) continue;
-              try {
-                final json = jsonDecode(line) as Map<String, dynamic>;
-                
-                if (level != null && json['level'] != level.name.toUpperCase()) {
-                  continue;
-                }
-                
-                if (json['timestamp'] != null) {
-                  final ts = DateTime.tryParse(json['timestamp'] as String);
-                  if (ts != null) {
-                    if (start != null && ts.isBefore(start)) continue;
-                    if (end != null && ts.isAfter(end)) continue;
-                  }
-                }
-                
-                if (searchQuery != null && searchQuery.isNotEmpty) {
-                  final textToSearch = (json['message'] ?? '').toString() +
-                      (json['exception'] ?? '').toString() +
-                      (json['traceId'] ?? '').toString() +
-                      (json['context'] ?? '').toString();
-                  if (!textToSearch.toLowerCase().contains(searchQuery.toLowerCase())) {
-                    continue;
-                  }
-                }
-
-                results.add(json);
-              } catch (_) {
-                // Linha corrompida
-              }
-            }
-          }
-        }
-      }
-      
-      results.sort((a, b) {
-        final tA = DateTime.tryParse(a['timestamp'] ?? '') ?? DateTime(0);
-        final tB = DateTime.tryParse(b['timestamp'] ?? '') ?? DateTime(0);
-        return tB.compareTo(tA);
-      });
-      
-    } catch (e) {
-      stderr.writeln('Erro ao consultar logs: $e');
-    }
-    return results;
-  }
+  }) async => [];
 }
