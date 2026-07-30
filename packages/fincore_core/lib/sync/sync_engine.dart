@@ -204,7 +204,7 @@ class SyncEngine {
       context: logContext,
     );
 
-    if (entries.isNotEmpty) {
+    if (initialCount > 0) {
       await FincoreLogger.instance.endCycle(LogModule.sync, 'FIM DO CICLO DE ENVIO');
     }
 
