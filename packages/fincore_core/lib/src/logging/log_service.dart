@@ -115,15 +115,25 @@ class FincoreLogger {
   }
 
   static String _moduleTag(LogModule module) {
-    return '[${module.name.toUpperCase().padRight(9)}]';
+    final name = switch (module) {
+      LogModule.startup   => 'INICIO',
+      LogModule.sync      => 'SINCRONISMO',
+      LogModule.database  => 'BANCO',
+      LogModule.api       => 'SERVICO',
+      LogModule.migration => 'MIGRACAO',
+      LogModule.printer   => 'IMPRESSAO',
+      LogModule.crash     => 'FALHA',
+      LogModule.app       => 'SISTEMA',
+    };
+    return '[${name.padRight(11)}]';
   }
 
   static String _levelTag(LogLevel level) {
     return switch (level) {
-      LogLevel.debug   => '      ',
-      LogLevel.info    => '      ',
-      LogLevel.warning => 'AVISO ',
-      LogLevel.error   => 'ERRO  ',
+      LogLevel.debug   => '',
+      LogLevel.info    => '',
+      LogLevel.warning => 'AVISO: ',
+      LogLevel.error   => 'ERRO: ',
     };
   }
 
@@ -131,7 +141,7 @@ class FincoreLogger {
     final ts  = _formatTimestamp(dt);
     final mod = _moduleTag(module);
     final lvl = _levelTag(level);
-    return '$ts  $mod $lvl$message';
+    return '$ts $mod $lvl$message';
   }
 
   static String _divider(String title) {
@@ -159,22 +169,19 @@ class FincoreLogger {
     // ── Monta as linhas ──
     final lines = <String>[];
 
-    // Linha principal
+    // Linha principal de narrativa
     String mainMsg = message;
-    if (context != null) mainMsg = '$context  |  $message';
+    if (context != null) mainMsg = '$context | $mainMsg';
+    if (traceId != null) mainMsg = '$mainMsg [Rastreio: $traceId]';
     lines.add(_formatLine(now, module, level, mainMsg));
 
-    // Detalhe extra (ex: mensagem de exceção, stack trace resumido)
-    if (detail != null) {
+    // Detalhes de erro/exceção (opcional)
+    if (detail != null && detail.trim().isNotEmpty) {
       for (final l in detail.trim().split('\n').take(3)) {
         if (l.trim().isNotEmpty) {
-          lines.add('${''.padLeft(38)}>>> ${l.trim()}');
+          lines.add('    >>> ${l.trim()}');
         }
       }
-    }
-
-    if (traceId != null) {
-      lines.add('${''.padLeft(38)}--- Trace: $traceId');
     }
 
     for (final line in lines) {
@@ -229,9 +236,9 @@ class FincoreLogger {
     final ts = _formatTimestamp(now);
     return '''
 ════════════════════════════════════════════════════════════════════════
-  FINCORE  v1.2.0  |  Log de Operação
+  FINCORE Platform v1.2.0 | Log de Operação e Sincronização
   Sessão iniciada em: $ts
-  Módulo: Integração Local ↔ Nuvem (Supabase)
+  Ambiente: Local (SQLite) ↔ Nuvem (Supabase)
 ════════════════════════════════════════════════════════════════════════
 
 ''';
@@ -240,15 +247,7 @@ class FincoreLogger {
   // ── Console ────────────────────────────────────────────────────────────────
 
   void _printToConsole(LogLevel level, List<String> lines) {
-    final prefix = switch (level) {
-      LogLevel.debug   => '',
-      LogLevel.info    => '',
-      LogLevel.warning => '⚠ ',
-      LogLevel.error   => '✖ ',
-    };
-
-    final out = lines.map((l) => '$prefix$l').join('\n');
-
+    final out = lines.join('\n');
     if (level == LogLevel.error || level == LogLevel.warning) {
       stderr.writeln(out);
     } else {

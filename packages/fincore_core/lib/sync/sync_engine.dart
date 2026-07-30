@@ -106,12 +106,12 @@ class SyncEngine {
       if (entries.isNotEmpty) {
         await FincoreLogger.instance.beginCycle(
           LogModule.sync,
-          'CICLO DE ENVIO (PUSH)',
+          'CICLO DE ENVIO REMOTO',
           context: logCtxStr,
         );
         LogService.instance.info(
           LogModule.sync,
-          'Outbox: $initialCount registro(s) pendente(s) — iniciando envio ao Supabase',
+          'Fila de envio: $initialCount registro(s) pendente(s) — iniciando sincronização com a nuvem',
           traceId: traceId,
           context: logContext,
         );
@@ -121,7 +121,7 @@ class SyncEngine {
         final startTime = DateTime.now();
         LogService.instance.debug(
           LogModule.sync,
-          'Iniciando [${entry.action}] da entidade [${entry.entity}] ID [${entry.entityId}]',
+          'Processando [${entry.action}] da entidade [${entry.entity}] ID [${entry.entityId}]',
           tenantId: context.hasContext ? context.tenantId : null,
           traceId: traceId,
           context: logContext,
@@ -171,7 +171,7 @@ class SyncEngine {
           if (pushError != null) {
             LogService.instance.error(
               LogModule.sync,
-              'Detalhe do erro',
+              'Detalhe da falha',
               traceId: traceId,
               context: logContext,
               exception: pushError,
@@ -193,12 +193,12 @@ class SyncEngine {
     final hasPendingAfter = !(await outboxService.isOutboxEmpty());
 
     final statusStr = hasPendingAfter
-        ? 'Modo degradado — PULL suspenso (ainda há pendências)'
-        : 'OK — Outbox limpo, pronto para PULL';
+        ? 'Ainda há pendências locais — recebimento remoto suspenso'
+        : 'Fila local limpa, pronto para recebimento de atualizações da nuvem';
 
     LogService.instance.info(
       LogModule.sync,
-      'Ciclo encerrado: $successCount enviado(s)  $failureCount falha(s)  ${durationMs}ms  $statusStr',
+      'Ciclo de envio encerrado: $successCount enviado(s), $failureCount falha(s) em ${durationMs}ms | Status: $statusStr',
       tenantId: context.hasContext ? context.tenantId : null,
       traceId: traceId,
       context: logContext,

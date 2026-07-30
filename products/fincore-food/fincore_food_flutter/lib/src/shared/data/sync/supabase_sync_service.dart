@@ -273,41 +273,25 @@ class SupabaseSyncService {
       });
 
       if (rows.isNotEmpty) {
-        final total = rows.length;
-        final buffer = StringBuffer();
-        buffer.writeln('[PULL] 📥 $entityName ($pullType)');
-        buffer.writeln('Total alterados no servidor: $total');
-        buffer.writeln('✔ Aplicados: $appliedCount');
-        buffer.writeln('🛡️ Protegidos (Outbox pendente): $protectedCount');
-        buffer.writeln('⏭️ Ignorados (versão obsoleta): $stalledCount');
-
-        if (protectedDetails.isNotEmpty) {
-          buffer.writeln('');
-          buffer.writeln('── Registros Protegidos ──');
-          for (final d in protectedDetails) {
-            buffer.writeln(d);
-          }
-        }
-
-        if (stalledDetails.isNotEmpty) {
-          buffer.writeln('');
-          buffer.writeln('── Registros Ignorados (versão obsoleta) ──');
-          for (final d in stalledDetails) {
-            buffer.writeln(d);
-          }
-        }
-
         LogService.instance.info(
           LogModule.sync,
-          buffer.toString(),
+          'Atualização remota [$entityName]: $appliedCount aplicado(s) no banco local, $protectedCount protegido(s) por edições locais, $stalledCount mantidos ($pullType)',
           tenantId: tenantId,
         );
+
+        for (final d in protectedDetails) {
+          LogService.instance.info(
+            LogModule.sync,
+            '  🛡️ Registro protegido contra sobrescrita: $d',
+            tenantId: tenantId,
+          );
+        }
       }
     } on SocketException {
       _updateConnectivity(CloudConnectivity.offline);
-      LogService.instance.debug(LogModule.sync, '[PULL] Offline durante $pullType de $entityName — dados locais mantidos.');
+      LogService.instance.debug(LogModule.sync, 'Sem conexão durante atualização de $entityName — mantendo dados locais.');
     } catch (e) {
-      LogService.instance.error(LogModule.sync, '[PULL] Erro no $pullType de $entityName', exception: e.toString());
+      LogService.instance.error(LogModule.sync, 'Falha ao processar atualização remota de $entityName', exception: e.toString());
     }
   }
 
@@ -786,16 +770,12 @@ class SupabaseSyncService {
                 final serverVersion = (newRecord['syncVersion'] as num?)?.toInt() ?? 1;
                 LogService.instance.info(
                   LogModule.sync,
-                  '[REALTIME] ✔ Aplicado\n'
-                  '  Entidade: $entityName\n'
-                  '  ID: $shortId\n'
-                  '  Descrição: $desc\n'
-                  '  syncVersion: $serverVersion',
+                  'Sincronização em tempo real: Registro [$entityName] id=$shortId ("$desc") atualizado localmente (v$serverVersion)',
                 );
               } catch (e) {
                 LogService.instance.error(
                   LogModule.sync,
-                  '[REALTIME] Erro ao aplicar $entityName ($tableName)',
+                  'Falha ao aplicar alteração em tempo real para $entityName',
                   exception: e.toString(),
                 );
               }
@@ -803,13 +783,11 @@ class SupabaseSyncService {
           )
           .subscribe((status, [error]) {
             if (status == RealtimeSubscribeStatus.subscribed) {
-              LogService.instance.info(LogModule.sync, '[REALTIME] ✅ Canal WebSocket ativo: $tableName (Tempo real ligado)');
+              LogService.instance.info(LogModule.sync, 'Canal de tempo real ativado com sucesso: $tableName');
             } else if (status == RealtimeSubscribeStatus.channelError) {
               LogService.instance.debug(
                 LogModule.sync,
-                '[REALTIME] ℹ️ Canal WebSocket inativo para $tableName. '
-                '(Nota: Se desejar atualizações instantâneas sem aguardar o polling de 60s, '
-                'ative a opção "Realtime" para a tabela "$tableName" no Supabase Dashboard em Database -> Realtime).',
+                'Canal de tempo real inativo para $tableName — consulta periódica ativa.',
               );
             }
           });
@@ -817,7 +795,7 @@ class SupabaseSyncService {
       _channels.add(channel);
     }
 
-    LogService.instance.info(LogModule.sync, '[SupabaseSync] ${_channels.length} listeners Realtime iniciados.');
+    LogService.instance.info(LogModule.sync, 'Serviço de sincronização em tempo real ativo em ${_channels.length} tabela(s).');
   }
 
   /// Para todos os listeners Realtime e cancela o polling periódico. Deve ser chamado no logout.
@@ -829,7 +807,7 @@ class SupabaseSyncService {
     }
     _channels.clear();
     _connectivity = CloudConnectivity.unknown;
-    LogService.instance.info(LogModule.sync, '[SupabaseSync] Listeners Realtime e fallback polling encerrados.');
+    LogService.instance.info(LogModule.sync, 'Serviço de sincronização em tempo real encerrado.');
   }
 
   DateTime? _parseDate(String? s) {

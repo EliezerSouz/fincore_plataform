@@ -1,0 +1,26 @@
+════════════════════════════════════════════════════════════════════════
+  FINCORE Platform v1.2.0 | Log de Operação e Sincronização
+  Sessão iniciada em: 2026-07-30 01:15:00.120
+  Ambiente: Local (SQLite) ↔ Nuvem (Supabase)
+════════════════════════════════════════════════════════════════════════
+
+─────────────── INICIALIZACAO DO SISTEMA FINCORE v1.2.0 ────────────────
+2026-07-30 01:15:00.125 [INICIO     ] Banco SQLite local inicializado com sucesso (fincore_v3.db)
+2026-07-30 01:15:00.180 [INICIO     ] Conexão Supabase configurada (nlaxdeqbordmovukyypk.supabase.co)
+2026-07-30 01:15:00.210 [INICIO     ] Mecanismo de sincronização ativo (Fila de Envio + Tempo Real)
+2026-07-30 01:15:00.315 [INICIO     ] Inicialização do sistema concluída com sucesso em 0.42s
+2026-07-30 01:15:00.316 [INICIO     ] SISTEMA PRONTO PARA USO
+
+2026-07-30 01:15:05.412 [SISTEMA    ] Navegação: Tela de PDV aberta
+2026-07-30 01:15:10.890 [SINCRONISMO] Novo pedido criado localmente: #1004 (R$ 48,50)
+2026-07-30 01:15:10.895 [SINCRONISMO] Registro gravado na Fila de Envio local (Outbox)
+
+───────────────────── CICLO DE ENVIO REMOTO ──────────────────────
+2026-07-30 01:15:10.900 [SINCRONISMO] Fila de envio: 1 registro(s) pendente(s) — iniciando sincronização com a nuvem
+2026-07-30 01:15:10.905 [SINCRONISMO] Processando [INSERT] da entidade [pedidos] ID [a8f912c4...] [Rastreio: SYNC-19FB12918FD]
+2026-07-30 01:15:11.042 [SINCRONISMO] pedidos                       id=a8f912c4...  ENVIADO   INSERT  (137ms)
+2026-07-30 01:15:11.050 [SINCRONISMO] Ciclo de envio encerrado: 1 enviado(s), 0 falha(s) em 150ms | Status: Fila local limpa, pronto para recebimento de atualizações da nuvem
+2026-07-30 01:15:11.052 [SINCRONISMO] FIM DO CICLO DE ENVIO
+
+2026-07-30 01:15:11.100 [SINCRONISMO] Atualização remota [produtos]: 0 aplicado(s) no banco local, 0 protegido(s) por edições locais, 0 mantidos (ATUALIZACAO INCREMENTAL)
+2026-07-30 01:15:11.120 [SINCRONISMO] Serviço de sincronização em tempo real ativo em 11 tabela(s).

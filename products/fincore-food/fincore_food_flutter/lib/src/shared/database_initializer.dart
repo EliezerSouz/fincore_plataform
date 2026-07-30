@@ -253,18 +253,15 @@ class DatabaseInitializer {
           ? supabaseUrl.replaceFirst('https://', '').split('.').first + '.supabase.co'
           : 'nao configurado';
 
-      LogService.instance.info(
+      await FincoreLogger.instance.beginCycle(
         LogModule.startup,
-        '''
-╔═══════════════════════════════════════╗
-║  FINCORE  v1.2.0  |  STARTUP OK      ║
-╚═══════════════════════════════════════╝
-  ✔ SQLite local  fincore_v3.db
-  ✔ Supabase      $supabaseShort
-  ✔ Sync Engine   ativo (outbox + push/pull)
-  ✔ Bootstrap     $elapsedStr
-───────────────────────────────────────''',
+        'INICIALIZACAO DO SISTEMA FINCORE v1.2.0',
       );
+      await LogService.instance.info(LogModule.startup, 'Banco SQLite local inicializado com sucesso (fincore_v3.db)');
+      await LogService.instance.info(LogModule.startup, 'Conexão Supabase configurada ($supabaseShort)');
+      await LogService.instance.info(LogModule.startup, 'Mecanismo de sincronização ativo (Fila de Envio + Tempo Real)');
+      await LogService.instance.info(LogModule.startup, 'Inicialização do sistema concluída com sucesso em $elapsedStr');
+      await FincoreLogger.instance.endCycle(LogModule.startup, 'SISTEMA PRONTO PARA USO');
     }
   }
 }
