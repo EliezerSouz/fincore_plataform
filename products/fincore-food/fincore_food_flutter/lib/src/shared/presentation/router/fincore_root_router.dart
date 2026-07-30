@@ -86,8 +86,8 @@ class _FincoreRootRouterState extends State<FincoreRootRouter> {
   }
 
   Future<void> _fetchSessionInfo() async {
-    UsuarioEntity? localUser;
-    List<EmpresaEntity> empresas = [];
+    CoreUsuario? localUser;
+    List<CoreEmpresa> empresas = [];
 
     try {
       final session = Supabase.instance.client.auth.currentSession;
