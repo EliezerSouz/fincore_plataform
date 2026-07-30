@@ -33,6 +33,7 @@ database:
   name: postgres
   user: postgres
   requireSsl: true
+  poolSize: 20
 
 # ─── Redis (desabilitado por ora) ───────────────────────────────────
 redis:
