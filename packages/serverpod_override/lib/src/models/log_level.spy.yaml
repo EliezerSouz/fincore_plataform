@@ -1,0 +1,8 @@
+### Represents different log levels.
+enum: LogLevel
+values:
+  - debug
+  - info
+  - warning
+  - error
+  - fatal

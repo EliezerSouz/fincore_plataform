@@ -247,18 +247,23 @@ class DatabaseInitializer {
     if (!isTest) {
       stopwatch.stop();
       final elapsedMs = stopwatch.elapsedMilliseconds;
+      final elapsedStr = elapsedMs < 1000 ? '${elapsedMs}ms' : '${(elapsedMs / 1000).toStringAsFixed(2)}s';
+      final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
+      final supabaseShort = supabaseUrl.isNotEmpty
+          ? supabaseUrl.replaceFirst('https://', '').split('.').first + '.supabase.co'
+          : 'nao configurado';
+
       LogService.instance.info(
         LogModule.startup,
         '''
-══════════════════════════════════════
-FINCORE STARTUP SUCCESS
-Versão: 1.2.0
-Banco SQLite: OK
-Supabase: OK
-Internet: OK
-Bootstrap: Concluído
-Tempo: ${(elapsedMs / 1000).toStringAsFixed(2)}s
-══════════════════════════════════════''',
+╔═══════════════════════════════════════╗
+║  FINCORE  v1.2.0  |  STARTUP OK      ║
+╚═══════════════════════════════════════╝
+  ✔ SQLite local  fincore_v3.db
+  ✔ Supabase      $supabaseShort
+  ✔ Sync Engine   ativo (outbox + push/pull)
+  ✔ Bootstrap     $elapsedStr
+───────────────────────────────────────''',
       );
     }
   }

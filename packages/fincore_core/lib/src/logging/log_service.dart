@@ -80,30 +80,62 @@ class LogService {
         await crashFile.writeAsString(logLine, mode: FileMode.append, flush: true);
       }
       
-      // Print to console using intelligent format
+      // ── Console Output ───────────────────────────────────────────────
       if (!isProduction || level != LogLevel.debug) {
-        final timeStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}.${(now.millisecond).toString().padLeft(3, '0')}';
-        
-        final emoji = {
-          LogLevel.debug: '🔵 DEBUG',
-          LogLevel.info: '🟢 INFO',
-          LogLevel.warning: '🟠 WARNING',
-          LogLevel.error: '🔴 ERROR',
-        }[level];
+        final timeStr =
+            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}'
+            ' ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:'
+            '${now.second.toString().padLeft(2, '0')}.${now.millisecond.toString().padLeft(3, '0')}';
+
+        final badge = switch (level) {
+          LogLevel.debug   => '🔵 DEBUG  ',
+          LogLevel.info    => '🟢 INFO   ',
+          LogLevel.warning => '🟠 WARN   ',
+          LogLevel.error   => '🔴 ERROR  ',
+        };
+
+        final tag = '[${module.name.toUpperCase()}]';
+
+        // ── Contexto inline (usuario@empresa | traceId) ──
+        final inlineParts = <String>[];
+        if (context != null && context.isNotEmpty) {
+          final usuario = context['usuario'];
+          final empresa = context['empresa'];
+          if (usuario != null && empresa != null) {
+            inlineParts.add('$usuario @ $empresa');
+          } else {
+            context.forEach((k, v) => inlineParts.add('$k=$v'));
+          }
+        }
+        if (traceId != null) inlineParts.add(traceId);
+        final inlineCtx = inlineParts.isNotEmpty ? '  |  ${inlineParts.join('  ·  ')}' : '';
+
+        // ── Mensagem: indenta cada linha da mensagem ──
+        final msgLines = message.trim().split('\n');
+        final formattedMsg = msgLines
+            .map((l) {
+              final t = l.trim();
+              return t.isEmpty ? '' : '  $t';
+            })
+            .join('\n');
 
         final buffer = StringBuffer();
-        buffer.writeln('[$timeStr]');
-        buffer.writeln('$emoji [${module.name.toUpperCase()}]');
-        if (traceId != null) {
-          buffer.writeln('Trace ID: $traceId');
+
+        if (level == LogLevel.error) {
+          buffer.writeln('┌─────────────────────────────────────────────────');
         }
-        if (context != null && context.isNotEmpty) {
-          buffer.writeln('Context:');
-          context.forEach((k, v) => buffer.writeln('  $k: $v'));
+
+        buffer.writeln('$badge $tag  [$timeStr]$inlineCtx');
+        buffer.writeln(formattedMsg);
+
+        if (exception != null) {
+          // Mostra só a primeira linha do erro — detalhe completo vai pro arquivo
+          buffer.writeln('  ⚡ ${exception.split('\n').first.trim()}');
         }
-        buffer.writeln(message);
-        if (exception != null) buffer.writeln('Exception: $exception');
-        if (stackTrace != null) buffer.writeln('StackTrace: $stackTrace');
+
+        if (level == LogLevel.error) {
+          buffer.writeln('└─────────────────────────────────────────────────');
+        }
 
         if (level == LogLevel.error) {
           stderr.write(buffer.toString());

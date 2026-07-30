@@ -1,0 +1,3 @@
+dependency_overrides:
+  serverpod:
+    path: ../../../packages/serverpod_override

@@ -103,7 +103,7 @@ class SyncEngine {
       if (entries.isNotEmpty) {
         LogService.instance.info(
           LogModule.sync,
-          'FINCORE PUSH: Encontradas $initialCount transações pendentes no Outbox (Ordenadas topologicamente).',
+          '[Router] 📤 PUSH iniciado — $initialCount registro(s) pendente(s) no Outbox',
           tenantId: context.hasContext ? context.tenantId : null,
           traceId: traceId,
           context: logContext,
@@ -142,13 +142,7 @@ class SyncEngine {
 
           LogService.instance.info(
             LogModule.sync,
-            '''[PUSH]
-${entry.entity}
-Status: ✔ Sincronizado
-Ação: ${entry.action}
-Registro: $shortId...
-Duração: $duration ms
-Versão: ${entry.version}''',
+            '✔ [${entry.entity}] ${entry.action}  id=${shortId}…  (${duration}ms  v${entry.version})',
             tenantId: context.hasContext ? context.tenantId : null,
             traceId: traceId,
             context: logContext,
@@ -201,13 +195,11 @@ Ação: Nova tentativa ($attempts/5).''',
 
     LogService.instance.info(
       LogModule.sync,
-      '''[PUSH] 📤 Ciclo de Envio Concluído
-  Duração: $durationMs ms
-  Pendências no início: $initialCount
-  Enviados com sucesso: $successCount
-  Falhas no envio:      $failureCount
-  Pendências no final:  ${hasPendingAfter ? 'SIM (Ainda restam pendências)' : '0 (Outbox Limpo)'}
-  Status: ${hasPendingAfter ? '⚠️ Modo Degradado Ativado (PULL Suspenso)' : '✔ Outbox Limpo (Pronto para PULL)'}''',
+      '''[PUSH] 📤 Ciclo concluído
+  Duração   : ${durationMs}ms
+  Pendentes : $initialCount → ${hasPendingAfter ? 'ainda há pendentes ⚠️' : '0 (outbox limpo ✔)'}
+  Sucesso   : $successCount   Falhas: $failureCount
+  Status    : ${hasPendingAfter ? 'Modo degradado — PULL suspenso' : 'OK — pronto para PULL'}''',
       tenantId: context.hasContext ? context.tenantId : null,
       traceId: traceId,
       context: logContext,
