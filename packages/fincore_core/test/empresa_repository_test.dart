@@ -5,8 +5,13 @@ import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/repository/empresa_repository.dart';
+import 'package:fincore_core/src/logging/log_service.dart';
 
 void main() {
+  setUpAll(() {
+    LogService.init('.');
+  });
+
   group('EmpresaRepository Unit Tests', () {
     late FincoreDatabase db;
     late TenantContext context;
@@ -35,6 +40,7 @@ void main() {
       country: 'BR',
       createdFrom: 'Web',
       version: 1,
+      tipoPessoa: 'JURIDICA',
       metadata: mockMetadata,
     );
 
@@ -87,6 +93,7 @@ void main() {
         country: 'BR',
         createdFrom: 'Web',
         version: 1,
+        tipoPessoa: 'JURIDICA',
         metadata: mockMetadata,
       );
 

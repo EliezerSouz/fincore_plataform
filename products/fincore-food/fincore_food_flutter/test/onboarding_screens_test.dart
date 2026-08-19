@@ -15,7 +15,7 @@ void main() {
 
   group('Onboarding Screens Structural Tests', () {
     testWidgets('LoginPage structural and validation check', (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.physicalSize = const Size(1600, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
         tester.view.resetPhysicalSize();
@@ -27,14 +27,14 @@ void main() {
       ));
 
       // Verificar campos de texto e botão
-      expect(find.text('Entrar na plataforma'), findsOneWidget);
+      expect(find.text('Bem-vindo de volta'), findsOneWidget);
       expect(find.byType(TextFormField), findsNWidgets(2)); // Email & Senha
       expect(find.text('ENTRAR'), findsOneWidget);
 
       // Clicar em Entrar sem preencher e ver validações
       await tester.tap(find.text('ENTRAR'));
       await tester.pump();
-      expect(find.text('Informe o e-mail'), findsOneWidget);
+      expect(find.text('Informe seu e-mail'), findsOneWidget);
       expect(find.text('Informe a senha'), findsOneWidget);
     });
 
@@ -74,10 +74,10 @@ void main() {
 
       expect(find.text('Etapa 2 de 2: Dados do Estabelecimento'), findsOneWidget);
       expect(find.byType(TextFormField), findsNWidgets(4)); // Razão Social, Nome Fantasia, CNPJ/CPF, Telefone
-      expect(find.text('CADASTRAR E COMEÇAR'), findsOneWidget);
+      expect(find.text('CADASTRAR'), findsOneWidget);
 
       // Clicar em Cadastrar sem preencher dados da empresa
-      await tester.tap(find.text('CADASTRAR E COMEÇAR'));
+      await tester.tap(find.text('CADASTRAR'));
       await tester.pump();
       expect(find.text('Informe a Razão Social'), findsOneWidget);
       expect(find.text('Informe o CNPJ/CPF'), findsOneWidget);
@@ -85,7 +85,7 @@ void main() {
     });
 
     testWidgets('OnboardingWizardPage step progression check', (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.physicalSize = const Size(1600, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
         tester.view.resetPhysicalSize();
@@ -141,9 +141,9 @@ void main() {
         ),
       ));
 
-      expect(find.text('Aprovação em andamento'), findsOneWidget);
-      expect(find.text('VERIFICAR STATUS'), findsOneWidget);
-      expect(find.text('Sair da Conta'), findsOneWidget);
+      expect(find.text('Aguardando Liberação'), findsOneWidget);
+      expect(find.text('Verificar Status'), findsOneWidget);
+      expect(find.text('Sair'), findsOneWidget);
     });
   });
 }

@@ -1,0 +1,44 @@
+class: LancamentoFinanceiro
+table: lancamento_financeiro
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  sessaoCaixaId: UuidValue
+
+  # Pedido que originou a receita (null para sangria, suprimento, despesa)
+  pedidoId: UuidValue?
+
+  # Tipo: 'receita' | 'sangria' | 'suprimento' | 'despesa'
+  tipo: String
+
+  formaPagamentoId: UuidValue?
+  formaPagamentoNome: String?
+
+  # Valor em centavos (sempre positivo)
+  valorCentavos: int
+
+  descricao: String, default=''
+  operadorId: UuidValue?
+  dataHora: DateTime
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  lancamento_sessao_idx:
+    fields: tenantId, sessaoCaixaId
+  lancamento_forma_pgto_idx:
+    fields: tenantId, formaPagamentoId
+  lancamento_data_idx:
+    fields: tenantId, dataHora

@@ -33,6 +33,7 @@ class TabelaPrecificacaoRepository extends SyncableRepository<TabelaPrecificacao
         'tipoPolitica': entity.tipoPolitica.name,
         'prioridade': entity.prioridade,
         'ativo': entity.ativo,
+        'canal': entity.canal, // P1-07
         'syncVersion': entity.metadata.version,
         'createdAt': entity.metadata.createdAt.toIso8601String(),
         'updatedAt': entity.metadata.updatedAt.toIso8601String(),
@@ -71,6 +72,7 @@ class TabelaPrecificacaoRepository extends SyncableRepository<TabelaPrecificacao
             tipoPolitica: tabela.tipoPolitica.name,
             prioridade: tabela.prioridade,
             ativo: tabela.ativo,
+            canal: Value(tabela.canal), // P1-07
             createdAt: tabela.metadata.createdAt,
             updatedAt: DateTime.now().toUtc(),
             createdBy: tabela.metadata.createdBy,
@@ -108,6 +110,7 @@ class TabelaPrecificacaoRepository extends SyncableRepository<TabelaPrecificacao
           orElse: () => PricingPolicyType.unitario),
       prioridade: data.prioridade,
       ativo: data.ativo,
+      canal: data.canal ?? 'todos', // P1-07: fallback retroativo
       metadata: SyncMetadata(
         version: data.syncVersion,
         createdAt: data.createdAt,

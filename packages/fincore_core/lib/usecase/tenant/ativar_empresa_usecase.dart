@@ -33,15 +33,17 @@ class AtivarEmpresaUseCase {
         ),
       );
 
-      // 3. Logar Evento de Ativação
-      await db.into(db.eventosEmpresaTable).insert(
-        EventosEmpresaTableCompanion.insert(
+      // 3. Logar Evento de Ativação via AuditLog
+      await db.into(db.auditLogsTable).insertOnConflictUpdate(
+        AuditLogsTableCompanion.insert(
           id: 'evt-$tenantId-ativacao-${now.millisecondsSinceEpoch}',
           tenantId: tenantId,
-          tipo: 'ATIVADA',
-          payload: Value('{"ativadoPor": "$ativadoPor"}'),
-          geradoPor: ativadoPor,
-          ocorridoEm: now,
+          targetEntity: 'empresa',
+          entityId: tenantId,
+          userId: ativadoPor,
+          action: 'ATIVADA',
+          timestamp: now,
+          diff: Value('{"ativadoPor": "$ativadoPor"}'),
         ),
       );
     });

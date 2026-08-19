@@ -33,9 +33,6 @@ class EmpresaConfiguracaoRepository
   Map<String, dynamic> toOutboxPayload(CoreEmpresaConfiguracao entity) => {
         'id': entity.id,
         'tenantId': entity.tenantId,
-        'timezone': entity.timezone,
-        'locale': entity.locale,
-        'currency': entity.currency,
         'taxaServico': entity.taxaServico,
         'usarWhatsApp': entity.usarWhatsApp,
         'tema': entity.tema,
@@ -66,11 +63,17 @@ class EmpresaConfiguracaoRepository
         'pixFavorecido': entity.pixFavorecido,
         'pixBanco': entity.pixBanco,
         'pixTipo': entity.pixTipo,
-        'pixCidade': entity.pixCidade,
-        'nomeEmpresaCupom': entity.nomeEmpresaCupom,
-        'telefoneEmpresa': entity.telefoneEmpresa,
-        'cnpjEmpresa': entity.cnpjEmpresa,
-        'enderecoEmpresa': entity.enderecoEmpresa,
+        'modoDeliveryAtivo': entity.modoDeliveryAtivo,
+        'modoComandasAtivo': entity.modoComandasAtivo,
+        'clienteObrigatorioVenda': entity.clienteObrigatorioVenda,
+        'atendimentoPadrao': entity.atendimentoPadrao,
+        'mercadoPagoAtivo': entity.mercadoPagoAtivo,
+        'openPixAtivo': entity.openPixAtivo,
+        'asaasAtivo': entity.asaasAtivo,
+        'ifoodAtivo': entity.ifoodAtivo,
+        'margemSegurancaMinutos': entity.margemSegurancaMinutos,
+        'taxaEntregaPorKm': entity.taxaEntregaPorKm,
+        'valorPorKmCentavos': entity.valorPorKmCentavos,
         // Sync metadata
         'syncVersion': entity.metadata.version,
         'createdAt': entity.metadata.createdAt.toIso8601String(),
@@ -85,7 +88,22 @@ class EmpresaConfiguracaoRepository
           ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId)))
         .getSingleOrNull();
     if (row == null) return null;
-    return _mapToEntity(row);
+    final entity = _mapToEntity(row);
+    try {
+      final raw = await db.customSelect(
+        'SELECT modo_delivery_ativo, cliente_obrigatorio_venda, atendimento_padrao FROM empresa_configuracao_table WHERE id = ?',
+        variables: [Variable.withString(id)],
+      ).getSingleOrNull();
+      if (raw != null) {
+        final data = raw.data;
+        return entity.copyWith(
+          modoDeliveryAtivo: data['modo_delivery_ativo'] == 1 || data['modo_delivery_ativo'] == true,
+          clienteObrigatorioVenda: data['cliente_obrigatorio_venda'] == 1 || data['cliente_obrigatorio_venda'] == true,
+          atendimentoPadrao: data['atendimento_padrao'] as String? ?? 'Mesa/Balcão',
+        );
+      }
+    } catch (_) {}
+    return entity;
   }
 
   @override
@@ -93,19 +111,39 @@ class EmpresaConfiguracaoRepository
     final rows = await (db.select(db.empresaConfiguracaoTable)
           ..where((t) => t.tenantId.equals(activeTenantId)))
         .get();
-    return rows.map(_mapToEntity).toList();
+    final list = <CoreEmpresaConfiguracao>[];
+    for (final row in rows) {
+      var entity = _mapToEntity(row);
+      try {
+        final raw = await db.customSelect(
+          'SELECT modo_delivery_ativo, cliente_obrigatorio_venda, atendimento_padrao FROM empresa_configuracao_table WHERE id = ?',
+          variables: [Variable.withString(row.id)],
+        ).getSingleOrNull();
+        if (raw != null) {
+          final data = raw.data;
+          entity = entity.copyWith(
+            modoDeliveryAtivo: data['modo_delivery_ativo'] == 1 || data['modo_delivery_ativo'] == true,
+            clienteObrigatorioVenda: data['cliente_obrigatorio_venda'] == 1 || data['cliente_obrigatorio_venda'] == true,
+            atendimentoPadrao: data['atendimento_padrao'] as String? ?? 'Mesa/Balcão',
+          );
+        }
+      } catch (_) {}
+      list.add(entity);
+    }
+    return list;
   }
 
   @override
   Future<void> saveLocal(CoreEmpresaConfiguracao entity) async {
     final now = DateTime.now().toUtc();
+    try { await db.customStatement('ALTER TABLE empresa_configuracao_table ADD COLUMN modo_delivery_ativo INTEGER DEFAULT 1'); } catch (_) {}
+    try { await db.customStatement('ALTER TABLE empresa_configuracao_table ADD COLUMN cliente_obrigatorio_venda INTEGER DEFAULT 0'); } catch (_) {}
+    try { await db.customStatement('ALTER TABLE empresa_configuracao_table ADD COLUMN atendimento_padrao TEXT DEFAULT "Mesa/Balcão"'); } catch (_) {}
+
     await db.into(db.empresaConfiguracaoTable).insertOnConflictUpdate(
           EmpresaConfiguracaoTableCompanion.insert(
             id: entity.id,
             tenantId: entity.tenantId,
-            timezone: Value(entity.timezone),
-            locale: Value(entity.locale),
-            currency: Value(entity.currency),
             printerConfig: Value(entity.printerConfig),
             pixKey: Value(entity.pixKey),
             taxaServico: Value(entity.taxaServico),
@@ -136,11 +174,13 @@ class EmpresaConfiguracaoRepository
             pixFavorecido: Value(entity.pixFavorecido),
             pixBanco: Value(entity.pixBanco),
             pixTipo: Value(entity.pixTipo),
-            pixCidade: Value(entity.pixCidade),
-            nomeEmpresaCupom: Value(entity.nomeEmpresaCupom),
-            telefoneEmpresa: Value(entity.telefoneEmpresa),
-            cnpjEmpresa: Value(entity.cnpjEmpresa),
-            enderecoEmpresa: Value(entity.enderecoEmpresa),
+            mercadoPagoAtivo: Value(entity.mercadoPagoAtivo),
+            openPixAtivo: Value(entity.openPixAtivo),
+            asaasAtivo: Value(entity.asaasAtivo),
+            ifoodAtivo: Value(entity.ifoodAtivo),
+            margemSegurancaMinutos: Value(entity.margemSegurancaMinutos),
+            taxaEntregaPorKm: Value(entity.taxaEntregaPorKm),
+            valorPorKmCentavos: Value(entity.valorPorKmCentavos),
             // Sync
             syncVersion: Value(entity.metadata.version + 1),
             createdAt: entity.metadata.createdAt,
@@ -151,6 +191,13 @@ class EmpresaConfiguracaoRepository
             lastSyncedAt: Value(entity.metadata.lastSyncedAt),
           ),
         );
+
+    try {
+      await db.customStatement(
+        'UPDATE empresa_configuracao_table SET modo_delivery_ativo = ?, modo_comandas_ativo = ?, cliente_obrigatorio_venda = ?, atendimento_padrao = ? WHERE id = ?',
+        [entity.modoDeliveryAtivo ? 1 : 0, entity.modoComandasAtivo ? 1 : 0, entity.clienteObrigatorioVenda ? 1 : 0, entity.atendimentoPadrao, entity.id],
+      );
+    } catch (_) {}
   }
 
   @override
@@ -164,9 +211,6 @@ class EmpresaConfiguracaoRepository
     return CoreEmpresaConfiguracao(
       id: data.id,
       tenantId: data.tenantId,
-      timezone: data.timezone,
-      locale: data.locale,
-      currency: data.currency,
       taxaServico: data.taxaServico,
       usarWhatsApp: data.usarWhatsApp,
       tema: data.tema,
@@ -197,11 +241,17 @@ class EmpresaConfiguracaoRepository
       pixFavorecido: data.pixFavorecido,
       pixBanco: data.pixBanco,
       pixTipo: data.pixTipo,
-      pixCidade: data.pixCidade,
-      nomeEmpresaCupom: data.nomeEmpresaCupom,
-      telefoneEmpresa: data.telefoneEmpresa,
-      cnpjEmpresa: data.cnpjEmpresa,
-      enderecoEmpresa: data.enderecoEmpresa,
+      modoDeliveryAtivo: data.modoDeliveryAtivo,
+      modoComandasAtivo: data.modoComandasAtivo,
+      clienteObrigatorioVenda: data.clienteObrigatorioVenda,
+      atendimentoPadrao: data.atendimentoPadrao,
+      mercadoPagoAtivo: data.mercadoPagoAtivo,
+      openPixAtivo: data.openPixAtivo,
+      asaasAtivo: data.asaasAtivo,
+      ifoodAtivo: data.ifoodAtivo,
+      margemSegurancaMinutos: data.margemSegurancaMinutos ?? 10,
+      taxaEntregaPorKm: data.taxaEntregaPorKm ?? false,
+      valorPorKmCentavos: data.valorPorKmCentavos ?? 0,
       metadata: SyncMetadata(
         version: data.syncVersion,
         createdAt: data.createdAt,

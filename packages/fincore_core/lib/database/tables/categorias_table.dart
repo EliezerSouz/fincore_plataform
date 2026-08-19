@@ -17,9 +17,14 @@ class CategoriasTable extends Table with IdentityColumns, AuditColumns, SyncColu
   IntColumn get ordemExibicao => integer()();
   BoolColumn get ativo => boolean()();
 
-  // Novos campos de negócio
+  // Campos de negócio
   TextColumn get icone => text().nullable()();
   TextColumn get cor => text().nullable()();
+
+  /// JSON com configurações operacionais herdáveis para produtos:
+  /// preco_base, setor_impressao, tempo_medio, controla_estoque,
+  /// estoque_minimo, estoque_maximo, ncm, cest, canais, estrategia_comercial, etc.
+  TextColumn get metadataPayload => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

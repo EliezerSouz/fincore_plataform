@@ -1,0 +1,6 @@
+class: MapRouteResult
+fields:
+  distanciaMetros: int
+  tempoDeslocamentoSegundos: int
+  status: String
+  mensagem: String?

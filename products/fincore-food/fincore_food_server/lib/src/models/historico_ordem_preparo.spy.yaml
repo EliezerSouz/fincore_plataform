@@ -1,0 +1,29 @@
+﻿class: HistoricoOrdemPreparo
+table: historicos_ordem_preparo
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  ordemPreparoId: String
+  titulo: String
+  descricao: String
+  operadorNome: String
+  criadaEm: DateTime
+  versao: String
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronizacao
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  hist_ordem_preparo_tenant_ordem_idx:
+    fields: tenantId, ordemPreparoId

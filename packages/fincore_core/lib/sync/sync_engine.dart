@@ -46,13 +46,41 @@ class SyncEngine {
 
   bool _isProcessing = false;
   bool get isProcessing => _isProcessing;
+  Timer? _autoSyncTimer;
 
   SyncEngine({
     required this.outboxService,
     required this.context,
     required this.db,
     this.serverPushHandler,
-  });
+    bool autoStart = true,
+    Duration autoSyncInterval = const Duration(seconds: 30),
+  }) {
+    if (autoStart) {
+      startAutoSync(interval: autoSyncInterval);
+    }
+  }
+
+  /// Inicia o timer autônomo de sincronização periódica da fila Outbox.
+  void startAutoSync({Duration interval = const Duration(seconds: 30)}) {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer.periodic(interval, (_) async {
+      if (context.hasContext && !_isProcessing) {
+        try {
+          final hasPending = !(await outboxService.isOutboxEmpty());
+          if (hasPending) {
+            await processPendingQueue();
+          }
+        } catch (_) {}
+      }
+    });
+  }
+
+  /// Para o timer autônomo.
+  void stopAutoSync() {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = null;
+  }
 
   /// Executa o ciclo de sincronização das transações pendentes no Outbox.
   ///
@@ -106,22 +134,38 @@ class SyncEngine {
       if (entries.isNotEmpty) {
         await FincoreLogger.instance.beginCycle(
           LogModule.sync,
-          'CICLO DE ENVIO REMOTO',
+          'CICLO DE ENVIO REMOTO (PUSH)',
           context: logCtxStr,
         );
         LogService.instance.info(
           LogModule.sync,
-          'Fila de envio: $initialCount registro(s) pendente(s) — iniciando sincronização com a nuvem',
+          'Fila de envio: $initialCount registro(s) pendente(s) - iniciando sincronizacao com a nuvem',
           traceId: traceId,
           context: logContext,
         );
       }
 
+      final Set<String> failedEntityKeys = {};
+
       for (final entry in entries) {
         final startTime = DateTime.now();
-        LogService.instance.debug(
+        final shortId = entry.entityId.length > 8 ? '${entry.entityId.substring(0, 8)}...' : entry.entityId;
+
+        // ── VERIFICAÇÃO DE DEPENDÊNCIA DE ENTIDADE FALTANTE ───────
+        if (_isBlockedByDependency(entry, failedEntityKeys)) {
+          LogService.instance.warning(
+            LogModule.sync,
+            '[BLOQUEADO POR DEPENDÊNCIA] Entidade [${entry.entity}] (ID: $shortId) depende de um registro pai com falha. PUSH adiado.',
+            tenantId: context.hasContext ? context.tenantId : null,
+            traceId: traceId,
+            context: logContext,
+          );
+          continue;
+        }
+
+        LogService.instance.info(
           LogModule.sync,
-          'Processando [${entry.action}] da entidade [${entry.entity}] ID [${entry.entityId}]',
+          '[ENVIANDO] Entidade: [${entry.entity}] | Acao: ${entry.action} | ID: ${entry.entityId}',
           tenantId: context.hasContext ? context.tenantId : null,
           traceId: traceId,
           context: logContext,
@@ -135,7 +179,6 @@ class SyncEngine {
           if (serverPushHandler != null) {
             pushSuccess = await serverPushHandler!(entry);
           } else {
-            // Em ambiente sem handler de servidor configurado, considera simulado com sucesso
             pushSuccess = true;
           }
         } catch (e) {
@@ -145,10 +188,9 @@ class SyncEngine {
 
         if (pushSuccess) {
           final duration = DateTime.now().difference(startTime).inMilliseconds;
-          final shortId = entry.entityId.length > 8 ? entry.entityId.substring(0, 8) : entry.entityId;
           LogService.instance.info(
             LogModule.sync,
-            '${entry.entity.padRight(28)} id=${shortId}...  ENVIADO   ${entry.action}  (${duration}ms)',
+            '[CONFIRMADO] Entidade: [${entry.entity}] | Acao: ${entry.action} | ID: $shortId | Status: ENVIADO (${duration}ms)',
             tenantId: context.hasContext ? context.tenantId : null,
             traceId: traceId,
             context: logContext,
@@ -157,32 +199,64 @@ class SyncEngine {
           await _updateSourceTableSyncStatus(entry);
           successCount++;
         } else {
-          final attempts = entry.attemptsCount + 1;
-          final nextStatus = attempts >= 5 ? SyncStatus.failed : SyncStatus.retrying;
-          final shortId = entry.entityId.length > 8 ? entry.entityId.substring(0, 8) : entry.entityId;
-          final parsedReason = _parseSyncError(pushError ?? 'Desconhecido');
-          LogService.instance.warning(
-            LogModule.sync,
-            '${entry.entity.padRight(28)} id=${shortId}...  FALHA     tentativa $attempts/5 — $parsedReason',
-            tenantId: context.hasContext ? context.tenantId : null,
-            traceId: traceId,
-            context: logContext,
-          );
-          if (pushError != null) {
+          final pushErrorStr = pushError ?? 'Falha genérica no envio remoto';
+          final isNetworkOffline = pushErrorStr.contains('OfflineSyncException') ||
+              pushErrorStr.contains('SocketException') ||
+              pushErrorStr.contains('Sem conexão');
+          final isPermanent = _isPermanentError(pushErrorStr);
+
+          if (isNetworkOffline) {
+            await outboxService.updateStatus(
+              entry.id,
+              SyncStatus.retrying,
+              errorMessage: pushErrorStr,
+            );
+            failureCount++;
+            LogService.instance.warning(
+              LogModule.sync,
+              '[OFFLINE] Conexão com o servidor interrompida. Envio da fila pausado temporariamente.',
+              traceId: traceId,
+            );
+            break; // Interrompe o envio sequencial se não há rede
+          } else if (isPermanent) {
+            // Falha de schema/constraint: marca falha permanente imediatamente (sem 5 retries ineficientes)
+            await outboxService.updateStatus(
+              entry.id,
+              SyncStatus.failed,
+              errorMessage: pushErrorStr,
+            );
+            failedEntityKeys.add('${entry.entity}:${entry.entityId}');
+            failureCount++;
+
             LogService.instance.error(
               LogModule.sync,
-              'Detalhe da falha',
+              '[FALHA PERMANENTE] Entidade [${entry.entity}] (ID: $shortId) falhou por divergência de schema. Isolando registro e continuando fila.',
               traceId: traceId,
               context: logContext,
-              exception: pushError,
+              exception: pushErrorStr,
             );
+          } else {
+            final attempts = entry.attemptsCount + 1;
+            final nextStatus = attempts >= 5 ? SyncStatus.failed : SyncStatus.retrying;
+            if (nextStatus == SyncStatus.failed) {
+              failedEntityKeys.add('${entry.entity}:${entry.entityId}');
+            }
+
+            LogService.instance.warning(
+              LogModule.sync,
+              '[FALHA TRANSITÓRIA] Entidade: [${entry.entity}] | ID: $shortId | Tentativa $attempts/5 - ${entry.errorMessage}',
+              tenantId: context.hasContext ? context.tenantId : null,
+              traceId: traceId,
+              context: logContext,
+            );
+
+            await outboxService.updateStatus(
+              entry.id,
+              nextStatus,
+              errorMessage: pushErrorStr,
+            );
+            failureCount++;
           }
-          await outboxService.updateStatus(
-            entry.id,
-            nextStatus,
-            errorMessage: pushError ?? 'Falha no envio remoto (Tentativa $attempts/5)',
-          );
-          failureCount++;
         }
       }
     } finally {
@@ -193,19 +267,18 @@ class SyncEngine {
     final hasPendingAfter = !(await outboxService.isOutboxEmpty());
 
     final statusStr = hasPendingAfter
-        ? 'Ainda há pendências locais — recebimento remoto suspenso'
-        : 'Fila local limpa, pronto para recebimento de atualizações da nuvem';
-
-    LogService.instance.info(
-      LogModule.sync,
-      'Ciclo de envio encerrado: $successCount enviado(s), $failureCount falha(s) em ${durationMs}ms | Status: $statusStr',
-      tenantId: context.hasContext ? context.tenantId : null,
-      traceId: traceId,
-      context: logContext,
-    );
+        ? 'Ainda ha pendencias locais - recebimento remoto suspenso'
+        : 'Fila local limpa, pronto para recebimento de atualizacoes da nuvem';
 
     if (initialCount > 0) {
-      await FincoreLogger.instance.endCycle(LogModule.sync, 'FIM DO CICLO DE ENVIO');
+      LogService.instance.info(
+        LogModule.sync,
+        '[OK] Ciclo de envio concluido: $successCount enviado(s), $failureCount falha(s) em ${durationMs}ms | Status: $statusStr',
+        tenantId: context.hasContext ? context.tenantId : null,
+        traceId: traceId,
+        context: logContext,
+      );
+      await FincoreLogger.instance.endCycle(LogModule.sync, 'FIM DO CICLO DE ENVIO REMOTO (PUSH)');
     }
 
     return SyncResult(
@@ -384,6 +457,46 @@ class SyncEngine {
       default:
         return 50;
     }
+  }
+
+  bool _isPermanentError(String errorMsg) {
+    final lower = errorMsg.toLowerCase();
+    return lower.contains('postgrestexception') ||
+        lower.contains('pgrst') ||
+        lower.contains('column') ||
+        lower.contains('does not exist') ||
+        lower.contains('schema cache') ||
+        lower.contains('violates foreign key constraint') ||
+        lower.contains('code: 23503') ||
+        lower.contains('code: 23505') ||
+        lower.contains('syntax error') ||
+        lower.contains('bad request');
+  }
+
+  bool _isBlockedByDependency(OutboxEntry entry, Set<String> failedEntityKeys) {
+    if (failedEntityKeys.isEmpty) return false;
+
+    final payload = entry.payload;
+
+    if (entry.entity == 'locais_entrega' || entry.entity == 'LocalEntrega') {
+      for (final key in failedEntityKeys) {
+        if (key.startsWith('clientes:') || key.startsWith('Cliente:')) {
+          final parentId = key.split(':').last;
+          if (payload.contains(parentId)) return true;
+        }
+      }
+    }
+
+    if (entry.entity == 'itens_tabela_precificacao' || entry.entity == 'ItemTabelaPrecificacao') {
+      for (final key in failedEntityKeys) {
+        if (key.startsWith('tabelas_precificacao:') || key.startsWith('TabelaPrecificacao:')) {
+          final parentId = key.split(':').last;
+          if (payload.contains(parentId)) return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   String _parseSyncError(String errorMsg) {

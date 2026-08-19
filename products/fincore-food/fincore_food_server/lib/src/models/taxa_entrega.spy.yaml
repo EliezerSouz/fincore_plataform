@@ -10,6 +10,9 @@ fields:
   cepFinal: String?
   valorCentavos: int
   ativo: bool
+  pedidoMinimoCentavos: int, default=0
+  prazoEstimado: String?
+  observacoes: String?
 
   # Auditoria
   createdAt: DateTime

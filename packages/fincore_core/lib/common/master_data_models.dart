@@ -37,6 +37,9 @@ class Categoria {
   final String descricao;
   final int ordemExibicao;
   final bool ativo;
+  final String? icone;
+  final String? cor;
+  final String? metadataPayload;
   final SyncMetadata metadata;
 
   const Categoria({
@@ -47,8 +50,39 @@ class Categoria {
     required this.descricao,
     required this.ordemExibicao,
     required this.ativo,
+    this.icone,
+    this.cor,
+    this.metadataPayload,
     required this.metadata,
   });
+
+  Categoria copyWith({
+    String? id,
+    String? tenantId,
+    String? parentId,
+    String? nome,
+    String? descricao,
+    int? ordemExibicao,
+    bool? ativo,
+    String? icone,
+    String? cor,
+    String? metadataPayload,
+    SyncMetadata? metadata,
+  }) {
+    return Categoria(
+      id: id ?? this.id,
+      tenantId: tenantId ?? this.tenantId,
+      parentId: parentId ?? this.parentId,
+      nome: nome ?? this.nome,
+      descricao: descricao ?? this.descricao,
+      ordemExibicao: ordemExibicao ?? this.ordemExibicao,
+      ativo: ativo ?? this.ativo,
+      icone: icone ?? this.icone,
+      cor: cor ?? this.cor,
+      metadataPayload: metadataPayload ?? this.metadataPayload,
+      metadata: metadata ?? this.metadata,
+    );
+  }
 }
 
 class Produto {
@@ -64,6 +98,11 @@ class Produto {
   final bool controlaEstoque;
   final int ordemProducao;
   final bool ativo;
+  final String? sku;
+  final String? codigoBarras;
+  final String? imagem;
+  final String? corEtiqueta;
+  final String? metadataPayload;
   final SyncMetadata metadata;
 
   const Produto({
@@ -79,8 +118,55 @@ class Produto {
     required this.controlaEstoque,
     required this.ordemProducao,
     required this.ativo,
+    this.sku,
+    this.codigoBarras,
+    this.imagem,
+    this.corEtiqueta,
+    this.metadataPayload,
     required this.metadata,
   });
+
+  Produto copyWith({
+    String? id,
+    String? tenantId,
+    String? codigo,
+    String? nome,
+    String? descricao,
+    String? categoriaId,
+    UnidadeVenda? unidadeVenda,
+    ProductStatus? statusComercial,
+    int? tempoMedioMinutos,
+    bool? controlaEstoque,
+    int? ordemProducao,
+    bool? ativo,
+    String? sku,
+    String? codigoBarras,
+    String? imagem,
+    String? corEtiqueta,
+    String? metadataPayload,
+    SyncMetadata? metadata,
+  }) {
+    return Produto(
+      id: id ?? this.id,
+      tenantId: tenantId ?? this.tenantId,
+      codigo: codigo ?? this.codigo,
+      nome: nome ?? this.nome,
+      descricao: descricao ?? this.descricao,
+      categoriaId: categoriaId ?? this.categoriaId,
+      unidadeVenda: unidadeVenda ?? this.unidadeVenda,
+      statusComercial: statusComercial ?? this.statusComercial,
+      tempoMedioMinutos: tempoMedioMinutos ?? this.tempoMedioMinutos,
+      controlaEstoque: controlaEstoque ?? this.controlaEstoque,
+      ordemProducao: ordemProducao ?? this.ordemProducao,
+      ativo: ativo ?? this.ativo,
+      sku: sku ?? this.sku,
+      codigoBarras: codigoBarras ?? this.codigoBarras,
+      imagem: imagem ?? this.imagem,
+      corEtiqueta: corEtiqueta ?? this.corEtiqueta,
+      metadataPayload: metadataPayload ?? this.metadataPayload,
+      metadata: metadata ?? this.metadata,
+    );
+  }
 }
 
 class Cliente {
@@ -95,6 +181,10 @@ class Cliente {
   final SyncMetadata metadata;
   final bool aceitaWhatsapp;
   final bool aceitaMarketing;
+  final String? apelido;
+  final DateTime? dataNascimento;
+  final String? preferenciaEntrega;
+  final int? limiteCredito;
 
   const Cliente({
     required this.id,
@@ -108,6 +198,10 @@ class Cliente {
     required this.metadata,
     this.aceitaWhatsapp = true,
     this.aceitaMarketing = false,
+    this.apelido,
+    this.dataNascimento,
+    this.preferenciaEntrega,
+    this.limiteCredito,
   });
 
   Cliente copyWith({
@@ -122,6 +216,10 @@ class Cliente {
     SyncMetadata? metadata,
     bool? aceitaWhatsapp,
     bool? aceitaMarketing,
+    String? Function()? apelido,
+    DateTime? Function()? dataNascimento,
+    String? Function()? preferenciaEntrega,
+    int? Function()? limiteCredito,
   }) {
     return Cliente(
       id: id ?? this.id,
@@ -135,6 +233,10 @@ class Cliente {
       metadata: metadata ?? this.metadata,
       aceitaWhatsapp: aceitaWhatsapp ?? this.aceitaWhatsapp,
       aceitaMarketing: aceitaMarketing ?? this.aceitaMarketing,
+      apelido: apelido != null ? apelido() : this.apelido,
+      dataNascimento: dataNascimento != null ? dataNascimento() : this.dataNascimento,
+      preferenciaEntrega: preferenciaEntrega != null ? preferenciaEntrega() : this.preferenciaEntrega,
+      limiteCredito: limiteCredito != null ? limiteCredito() : this.limiteCredito,
     );
   }
 }
@@ -201,6 +303,9 @@ class TaxaEntrega {
   final String? cepFinal;
   final int valorCentavos;
   final bool ativo;
+  final int pedidoMinimoCentavos;
+  final String? prazoEstimado;
+  final String? observacoes;
   final SyncMetadata metadata;
 
   const TaxaEntrega({
@@ -213,6 +318,41 @@ class TaxaEntrega {
     this.cepFinal,
     required this.valorCentavos,
     required this.ativo,
+    this.pedidoMinimoCentavos = 0,
+    this.prazoEstimado,
+    this.observacoes,
     required this.metadata,
   });
+
+  TaxaEntrega copyWith({
+    String? id,
+    String? tenantId,
+    String? nome,
+    TipoRegraTaxaEntrega? tipoRegra,
+    String? bairro,
+    String? cepInicial,
+    String? cepFinal,
+    int? valorCentavos,
+    bool? ativo,
+    int? pedidoMinimoCentavos,
+    String? prazoEstimado,
+    String? observacoes,
+    SyncMetadata? metadata,
+  }) {
+    return TaxaEntrega(
+      id: id ?? this.id,
+      tenantId: tenantId ?? this.tenantId,
+      nome: nome ?? this.nome,
+      tipoRegra: tipoRegra ?? this.tipoRegra,
+      bairro: bairro ?? this.bairro,
+      cepInicial: cepInicial ?? this.cepInicial,
+      cepFinal: cepFinal ?? this.cepFinal,
+      valorCentavos: valorCentavos ?? this.valorCentavos,
+      ativo: ativo ?? this.ativo,
+      pedidoMinimoCentavos: pedidoMinimoCentavos ?? this.pedidoMinimoCentavos,
+      prazoEstimado: prazoEstimado ?? this.prazoEstimado,
+      observacoes: observacoes ?? this.observacoes,
+      metadata: metadata ?? this.metadata,
+    );
+  }
 }

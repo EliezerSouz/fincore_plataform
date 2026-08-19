@@ -103,7 +103,7 @@ class AppWorkspacePage extends StatelessWidget {
           // 4. Barra de Status Inferior
           if (statusBar != null) ...[
             const SizedBox(height: 16),
-            const Divider(color: FincoreColors.border, height: 1),
+            Divider(color: FincoreColors.border, height: 1),
             const SizedBox(height: 12),
             statusBar!,
           ],

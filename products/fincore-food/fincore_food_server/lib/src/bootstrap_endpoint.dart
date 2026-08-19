@@ -1,4 +1,4 @@
-import 'package:serverpod/serverpod.dart';
+﻿import 'package:serverpod/serverpod.dart';
 import 'generated/protocol.dart';
 import 'middleware/auth_middleware.dart';
 
@@ -11,53 +11,101 @@ class BootstrapEndpoint extends Endpoint {
     }
 
     final usuarioId = session.context['usuarioId'] as String;
-    final tenantId = session.context['tenantId'] as String?;
+    final email = session.context['email'] as String?;
+    final userUuid = UuidValue.fromString(usuarioId);
 
-    if (tenantId == null || tenantId.isEmpty) {
-      throw Exception('Usuário não está vinculado a nenhum Tenant');
+    session.log('[BOOTSTRAP] Iniciando bootstrap para usuarioId=$usuarioId, email=$email', level: LogLevel.info);
+
+    // 1. Buscar Usuário do domínio (por UUID, authUserId ou email)
+    var usuario = await Usuario.db.findById(session, userUuid);
+    if (usuario == null && email != null && email.isNotEmpty) {
+      usuario = await Usuario.db.findFirstRow(
+        session,
+        where: (t) => t.email.equals(email) | t.authUserId.equals(usuarioId),
+      );
     }
 
-    // Buscar Usuário
-    final usuario = await Usuario.db.findById(session, UuidValue.fromString(usuarioId));
     if (usuario == null) {
-      throw Exception('Usuário não encontrado');
+      final username = email != null ? email.split('@').first : 'usuario';
+      final nome = username.replaceAll('.', ' ');
+      usuario = Usuario(
+        id: userUuid,
+        tenantId: '00000000-0000-4000-a000-000000000001',
+        authUserId: usuarioId,
+        username: username,
+        email: email,
+        nome: nome,
+        ativo: true,
+        criadoEm: DateTime.now(),
+        atualizadoEm: DateTime.now(),
+      );
+      usuario = await Usuario.db.insertRow(session, usuario);
     }
 
-    // Buscar Empresa
-    final empresa = await Empresa.db.findById(session, UuidValue.fromString(tenantId));
-    if (empresa == null) {
-      throw Exception('Empresa não encontrada');
-    }
-
-    // Buscar Membros da Empresa
-    final membros = await MembroEmpresa.db.find(
+    // 2. Buscar vínculos na tabela MembroEmpresa para o usuário
+    final membrosDoUsuario = await MembroEmpresa.db.find(
       session,
-      where: (t) => t.tenantId.equals(UuidValue.fromString(tenantId)),
+      where: (t) => t.usuarioId.equals(userUuid) | t.usuarioId.equals(usuario!.id),
     );
 
-    // Buscar Configuração da Empresa
+    session.log('[BOOTSTRAP] Membros encontrados para o usuario: ${membrosDoUsuario.length}', level: LogLevel.info);
+
+    Empresa? empresa;
+    UuidValue? tenantUuid;
+
+    // Tentar carregar a empresa de cada membro até achar a empresa cadastrada
+    for (final m in membrosDoUsuario) {
+      final e = await Empresa.db.findById(session, m.tenantId);
+      if (e != null) {
+        empresa = e;
+        tenantUuid = m.tenantId;
+        session.log('[BOOTSTRAP] Empresa encontrada via MembroEmpresa: id=${e.id}, nome=${e.nomeFantasia}', level: LogLevel.info);
+        break;
+      }
+    }
+
+    // Se não encontrou via membro, busca por email da empresa ou criado por este usuário
+    if (empresa == null && email != null && email.isNotEmpty) {
+      empresa = await Empresa.db.findFirstRow(
+        session,
+        where: (e) => e.email.equals(email) | e.createdBy.equals(userUuid) | (usuario != null ? e.createdBy.equals(usuario.id) : Constant.bool(false)),
+      );
+      if (empresa != null) {
+        tenantUuid = empresa.id;
+        session.log('[BOOTSTRAP] Empresa encontrada via Email/CreatedBy: id=${empresa.id}, nome=${empresa.nomeFantasia}', level: LogLevel.info);
+      }
+    }
+
+    if (empresa == null) {
+      throw Exception('Nenhuma empresa cadastrada para o usuário $email. Realize o onboarding para criar sua empresa.');
+    }
+
+    final resolvedTenantId = tenantUuid.toString();
+
+    // 3. Buscar os Membros da empresa real encontrada
+    final membros = await MembroEmpresa.db.find(
+      session,
+      where: (t) => t.tenantId.equals(tenantUuid!),
+    );
+
+    // 4. Buscar a Configuração da empresa real encontrada
     var configuracao = await EmpresaConfiguracao.db.findFirstRow(
       session,
-      where: (t) => t.tenantId.equals(tenantId),
+      where: (t) => t.tenantId.equals(resolvedTenantId),
     );
 
     if (configuracao == null) {
-      // Se a configuração não existir (ex: erro no onboarding), cria uma padrão
       configuracao = EmpresaConfiguracao(
-        tenantId: tenantId,
-        timezone: 'America/Sao_Paulo',
-        locale: 'pt_BR',
-        currency: 'BRL',
+        tenantId: resolvedTenantId,
         taxaServico: 0.10,
         usarWhatsApp: true,
         tema: 'light',
         syncVersion: 1,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
-        createdBy: UuidValue.fromString(usuarioId),
-        updatedBy: UuidValue.fromString(usuarioId),
+        createdBy: userUuid,
+        updatedBy: userUuid,
         
-        // Impressão e Hardware Defaults
         autoPrintCaixa: true,
         autoPrintCozinha: true,
         autoPrintBalcao: false,
@@ -70,16 +118,13 @@ class BootstrapEndpoint extends Endpoint {
         cortarPapel: true,
         abrirGaveta: false,
         
-        // QR Code e Layout Defaults
         imprimirQRCode: true,
         imprimirCopiaCola: true,
         imprimirLogo: false,
         imprimirRodape: true,
         mensagemRodape: 'Obrigado pela preferência!',
         
-        // PIX Defaults
         pixTipo: 'CPF',
-        pixCidade: 'Sorocaba',
       );
       configuracao = await EmpresaConfiguracao.db.insertRow(session, configuracao);
     }

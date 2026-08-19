@@ -19,21 +19,26 @@ import 'categoria.dart' as _i7;
 import 'cliente.dart' as _i8;
 import 'empresa.dart' as _i9;
 import 'empresa_configuracao.dart' as _i10;
-import 'evento_empresa.dart' as _i11;
-import 'forma_pagamento.dart' as _i12;
-import 'item_tabela_precificacao.dart' as _i13;
-import 'local_entrega.dart' as _i14;
-import 'membro_empresa.dart' as _i15;
-import 'onboarding_exception.dart' as _i16;
-import 'produto.dart' as _i17;
-import 'produto_tabela_precificacao.dart' as _i18;
-import 'sync_pull_payload.dart' as _i19;
-import 'sync_push_entry.dart' as _i20;
-import 'tabela_precificacao.dart' as _i21;
-import 'taxa_entrega.dart' as _i22;
-import 'usuario.dart' as _i23;
-import 'workspace_setup_progress_info.dart' as _i24;
-import 'package:fincore_food_server/src/generated/sync_push_entry.dart' as _i25;
+import 'empresa_convite.dart' as _i11;
+import 'evento_empresa.dart' as _i12;
+import 'forma_pagamento.dart' as _i13;
+import 'historico_ordem_preparo.dart' as _i14;
+import 'item_tabela_precificacao.dart' as _i15;
+import 'local_entrega.dart' as _i16;
+import 'lote_insumo.dart' as _i17;
+import 'map_route_result.dart' as _i18;
+import 'membro_empresa.dart' as _i19;
+import 'onboarding_exception.dart' as _i20;
+import 'ordem_preparo.dart' as _i21;
+import 'produto.dart' as _i22;
+import 'produto_tabela_precificacao.dart' as _i23;
+import 'sync_pull_payload.dart' as _i24;
+import 'sync_push_entry.dart' as _i25;
+import 'tabela_precificacao.dart' as _i26;
+import 'taxa_entrega.dart' as _i27;
+import 'usuario.dart' as _i28;
+import 'workspace_setup_progress_info.dart' as _i29;
+import 'package:fincore_food_server/src/generated/sync_push_entry.dart' as _i30;
 export 'greeting.dart';
 export 'audit_log.dart';
 export 'auth_user_info.dart';
@@ -42,12 +47,17 @@ export 'categoria.dart';
 export 'cliente.dart';
 export 'empresa.dart';
 export 'empresa_configuracao.dart';
+export 'empresa_convite.dart';
 export 'evento_empresa.dart';
 export 'forma_pagamento.dart';
+export 'historico_ordem_preparo.dart';
 export 'item_tabela_precificacao.dart';
 export 'local_entrega.dart';
+export 'lote_insumo.dart';
+export 'map_route_result.dart';
 export 'membro_empresa.dart';
 export 'onboarding_exception.dart';
+export 'ordem_preparo.dart';
 export 'produto.dart';
 export 'produto_tabela_precificacao.dart';
 export 'sync_pull_payload.dart';
@@ -663,6 +673,72 @@ class Protocol extends _i1.SerializationManagerServer {
           dartType: 'String?',
         ),
         _i2.ColumnDefinition(
+          name: 'tipoPessoa',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'inscricaoEstadual',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'inscricaoMunicipal',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'regimeTributario',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'cep',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'logradouro',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'numero',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'complemento',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'bairro',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'cidade',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'estado',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
           name: 'createdAt',
           columnType: _i2.ColumnType.timestampWithoutTimeZone,
           isNullable: false,
@@ -782,24 +858,6 @@ class Protocol extends _i1.SerializationManagerServer {
         ),
         _i2.ColumnDefinition(
           name: 'tenantId',
-          columnType: _i2.ColumnType.text,
-          isNullable: false,
-          dartType: 'String',
-        ),
-        _i2.ColumnDefinition(
-          name: 'timezone',
-          columnType: _i2.ColumnType.text,
-          isNullable: false,
-          dartType: 'String',
-        ),
-        _i2.ColumnDefinition(
-          name: 'locale',
-          columnType: _i2.ColumnType.text,
-          isNullable: false,
-          dartType: 'String',
-        ),
-        _i2.ColumnDefinition(
-          name: 'currency',
           columnType: _i2.ColumnType.text,
           isNullable: false,
           dartType: 'String',
@@ -1039,34 +1097,64 @@ class Protocol extends _i1.SerializationManagerServer {
           dartType: 'String',
         ),
         _i2.ColumnDefinition(
-          name: 'pixCidade',
-          columnType: _i2.ColumnType.text,
-          isNullable: false,
-          dartType: 'String',
+          name: 'modoDeliveryAtivo',
+          columnType: _i2.ColumnType.boolean,
+          isNullable: true,
+          dartType: 'bool?',
         ),
         _i2.ColumnDefinition(
-          name: 'nomeEmpresaCupom',
+          name: 'clienteObrigatorioVenda',
+          columnType: _i2.ColumnType.boolean,
+          isNullable: true,
+          dartType: 'bool?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'atendimentoPadrao',
           columnType: _i2.ColumnType.text,
           isNullable: true,
           dartType: 'String?',
         ),
         _i2.ColumnDefinition(
-          name: 'telefoneEmpresa',
-          columnType: _i2.ColumnType.text,
+          name: 'margemSegurancaMinutos',
+          columnType: _i2.ColumnType.bigint,
           isNullable: true,
-          dartType: 'String?',
+          dartType: 'int?',
         ),
         _i2.ColumnDefinition(
-          name: 'cnpjEmpresa',
-          columnType: _i2.ColumnType.text,
+          name: 'taxaEntregaPorKm',
+          columnType: _i2.ColumnType.boolean,
           isNullable: true,
-          dartType: 'String?',
+          dartType: 'bool?',
         ),
         _i2.ColumnDefinition(
-          name: 'enderecoEmpresa',
-          columnType: _i2.ColumnType.text,
+          name: 'valorPorKmCentavos',
+          columnType: _i2.ColumnType.bigint,
           isNullable: true,
-          dartType: 'String?',
+          dartType: 'int?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'mercadoPagoAtivo',
+          columnType: _i2.ColumnType.boolean,
+          isNullable: true,
+          dartType: 'bool?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'openPixAtivo',
+          columnType: _i2.ColumnType.boolean,
+          isNullable: true,
+          dartType: 'bool?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'asaasAtivo',
+          columnType: _i2.ColumnType.boolean,
+          isNullable: true,
+          dartType: 'bool?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'ifoodAtivo',
+          columnType: _i2.ColumnType.boolean,
+          isNullable: true,
+          dartType: 'bool?',
         ),
       ],
       foreignKeys: [],
@@ -1083,7 +1171,166 @@ class Protocol extends _i1.SerializationManagerServer {
           type: 'btree',
           isUnique: true,
           isPrimary: true,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'empresa_config_tenant_unique',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'tenantId',
+            )
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _i2.TableDefinition(
+      name: 'empresa_convite',
+      dartName: 'EmpresaConvite',
+      schema: 'public',
+      module: 'fincore_food',
+      columns: [
+        _i2.ColumnDefinition(
+          name: 'id',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+          columnDefault: 'gen_random_uuid()',
+        ),
+        _i2.ColumnDefinition(
+          name: 'tenantId',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'email',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'role',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'status',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'expiracaoEm',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'syncVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'originDeviceId',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'lastModifiedByDevice',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'entityHash',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+      ],
+      foreignKeys: [
+        _i2.ForeignKeyDefinition(
+          constraintName: 'empresa_convite_fk_0',
+          columns: ['tenantId'],
+          referenceTable: 'empresa',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _i2.ForeignKeyAction.noAction,
+          onDelete: _i2.ForeignKeyAction.restrict,
+          matchType: null,
         )
+      ],
+      indexes: [
+        _i2.IndexDefinition(
+          indexName: 'empresa_convite_pkey',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'id',
+            )
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: true,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'convite_tenant_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'tenantId',
+            )
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
       ],
       managed: true,
     ),
@@ -1293,6 +1540,157 @@ class Protocol extends _i1.SerializationManagerServer {
               type: _i2.IndexElementDefinitionType.column,
               definition: 'tenantId',
             )
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _i2.TableDefinition(
+      name: 'historicos_ordem_preparo',
+      dartName: 'HistoricoOrdemPreparo',
+      schema: 'public',
+      module: 'fincore_food',
+      columns: [
+        _i2.ColumnDefinition(
+          name: 'id',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+          columnDefault: 'gen_random_uuid()',
+        ),
+        _i2.ColumnDefinition(
+          name: 'tenantId',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'ordemPreparoId',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'titulo',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'descricao',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'operadorNome',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'criadaEm',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'versao',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'syncVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'originDeviceId',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'lastModifiedByDevice',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'entityHash',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+      ],
+      foreignKeys: [],
+      indexes: [
+        _i2.IndexDefinition(
+          indexName: 'historicos_ordem_preparo_pkey',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'id',
+            )
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: true,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'hist_ordem_preparo_tenant_ordem_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'tenantId',
+            ),
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'ordemPreparoId',
+            ),
           ],
           type: 'btree',
           isUnique: false,
@@ -1638,6 +2036,175 @@ class Protocol extends _i1.SerializationManagerServer {
       managed: true,
     ),
     _i2.TableDefinition(
+      name: 'lotes_insumo',
+      dartName: 'LoteInsumo',
+      schema: 'public',
+      module: 'fincore_food',
+      columns: [
+        _i2.ColumnDefinition(
+          name: 'id',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+          columnDefault: 'gen_random_uuid()',
+        ),
+        _i2.ColumnDefinition(
+          name: 'tenantId',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'produtoId',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'codigoLote',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'quantidadeInicial',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'quantidadeDisponivel',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'quantidadeReservada',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'unidade',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'dataValidade',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'dataEntrada',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'statusLote',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'syncVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'originDeviceId',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'lastModifiedByDevice',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'entityHash',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+      ],
+      foreignKeys: [],
+      indexes: [
+        _i2.IndexDefinition(
+          indexName: 'lotes_insumo_pkey',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'id',
+            )
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: true,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'lotes_insumo_tenant_produto_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'tenantId',
+            ),
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'produtoId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _i2.TableDefinition(
       name: 'membro_empresa',
       dartName: 'MembroEmpresa',
       schema: 'public',
@@ -1783,6 +2350,204 @@ class Protocol extends _i1.SerializationManagerServer {
           isUnique: true,
           isPrimary: true,
         )
+      ],
+      managed: true,
+    ),
+    _i2.TableDefinition(
+      name: 'ordens_preparo',
+      dartName: 'OrdemPreparo',
+      schema: 'public',
+      module: 'fincore_food',
+      columns: [
+        _i2.ColumnDefinition(
+          name: 'id',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+          columnDefault: 'gen_random_uuid()',
+        ),
+        _i2.ColumnDefinition(
+          name: 'tenantId',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'pedidoId',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'itensJson',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'status',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'prioridade',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'operadorId',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'criadaEm',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'iniciadaEm',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'concluidaEm',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'canceladaEm',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'tempoEstimadoSegundos',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'observacoes',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'updatedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'deletedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'syncVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+        ),
+        _i2.ColumnDefinition(
+          name: 'originDeviceId',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'lastModifiedByDevice',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'entityHash',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+      ],
+      foreignKeys: [],
+      indexes: [
+        _i2.IndexDefinition(
+          indexName: 'ordens_preparo_pkey',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'id',
+            )
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: true,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'ordens_preparo_tenant_status_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'tenantId',
+            ),
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'status',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'ordens_preparo_tenant_pedido_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'tenantId',
+            ),
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'pedidoId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
       ],
       managed: true,
     ),
@@ -2427,6 +3192,25 @@ class Protocol extends _i1.SerializationManagerServer {
           dartType: 'bool',
         ),
         _i2.ColumnDefinition(
+          name: 'pedidoMinimoCentavos',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '0',
+        ),
+        _i2.ColumnDefinition(
+          name: 'prazoEstimado',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'observacoes',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
           name: 'createdAt',
           columnType: _i2.ColumnType.timestampWithoutTimeZone,
           isNullable: false,
@@ -2532,16 +3316,46 @@ class Protocol extends _i1.SerializationManagerServer {
           columnDefault: 'gen_random_uuid()',
         ),
         _i2.ColumnDefinition(
-          name: 'email',
+          name: 'tenantId',
           columnType: _i2.ColumnType.text,
           isNullable: false,
           dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'authUserId',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'username',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'email',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
         ),
         _i2.ColumnDefinition(
           name: 'nome',
           columnType: _i2.ColumnType.text,
           isNullable: false,
           dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'avatarUrl',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'ativo',
+          columnType: _i2.ColumnType.boolean,
+          isNullable: false,
+          dartType: 'bool',
         ),
         _i2.ColumnDefinition(
           name: 'criadoEm',
@@ -2570,7 +3384,24 @@ class Protocol extends _i1.SerializationManagerServer {
           type: 'btree',
           isUnique: true,
           isPrimary: true,
-        )
+        ),
+        _i2.IndexDefinition(
+          indexName: 'usr_tenant_username_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'tenantId',
+            ),
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'username',
+            ),
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: false,
+        ),
       ],
       managed: true,
     ),
@@ -2607,47 +3438,62 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == _i10.EmpresaConfiguracao) {
       return _i10.EmpresaConfiguracao.fromJson(data) as T;
     }
-    if (t == _i11.EventoEmpresa) {
-      return _i11.EventoEmpresa.fromJson(data) as T;
+    if (t == _i11.EmpresaConvite) {
+      return _i11.EmpresaConvite.fromJson(data) as T;
     }
-    if (t == _i12.FormaPagamento) {
-      return _i12.FormaPagamento.fromJson(data) as T;
+    if (t == _i12.EventoEmpresa) {
+      return _i12.EventoEmpresa.fromJson(data) as T;
     }
-    if (t == _i13.ItemTabelaPrecificacao) {
-      return _i13.ItemTabelaPrecificacao.fromJson(data) as T;
+    if (t == _i13.FormaPagamento) {
+      return _i13.FormaPagamento.fromJson(data) as T;
     }
-    if (t == _i14.LocalEntrega) {
-      return _i14.LocalEntrega.fromJson(data) as T;
+    if (t == _i14.HistoricoOrdemPreparo) {
+      return _i14.HistoricoOrdemPreparo.fromJson(data) as T;
     }
-    if (t == _i15.MembroEmpresa) {
-      return _i15.MembroEmpresa.fromJson(data) as T;
+    if (t == _i15.ItemTabelaPrecificacao) {
+      return _i15.ItemTabelaPrecificacao.fromJson(data) as T;
     }
-    if (t == _i16.OnboardingException) {
-      return _i16.OnboardingException.fromJson(data) as T;
+    if (t == _i16.LocalEntrega) {
+      return _i16.LocalEntrega.fromJson(data) as T;
     }
-    if (t == _i17.Produto) {
-      return _i17.Produto.fromJson(data) as T;
+    if (t == _i17.LoteInsumo) {
+      return _i17.LoteInsumo.fromJson(data) as T;
     }
-    if (t == _i18.ProdutoTabelaPrecificacao) {
-      return _i18.ProdutoTabelaPrecificacao.fromJson(data) as T;
+    if (t == _i18.MapRouteResult) {
+      return _i18.MapRouteResult.fromJson(data) as T;
     }
-    if (t == _i19.SyncPullPayload) {
-      return _i19.SyncPullPayload.fromJson(data) as T;
+    if (t == _i19.MembroEmpresa) {
+      return _i19.MembroEmpresa.fromJson(data) as T;
     }
-    if (t == _i20.SyncPushEntry) {
-      return _i20.SyncPushEntry.fromJson(data) as T;
+    if (t == _i20.OnboardingException) {
+      return _i20.OnboardingException.fromJson(data) as T;
     }
-    if (t == _i21.TabelaPrecificacao) {
-      return _i21.TabelaPrecificacao.fromJson(data) as T;
+    if (t == _i21.OrdemPreparo) {
+      return _i21.OrdemPreparo.fromJson(data) as T;
     }
-    if (t == _i22.TaxaEntrega) {
-      return _i22.TaxaEntrega.fromJson(data) as T;
+    if (t == _i22.Produto) {
+      return _i22.Produto.fromJson(data) as T;
     }
-    if (t == _i23.Usuario) {
-      return _i23.Usuario.fromJson(data) as T;
+    if (t == _i23.ProdutoTabelaPrecificacao) {
+      return _i23.ProdutoTabelaPrecificacao.fromJson(data) as T;
     }
-    if (t == _i24.WorkspaceSetupProgressInfo) {
-      return _i24.WorkspaceSetupProgressInfo.fromJson(data) as T;
+    if (t == _i24.SyncPullPayload) {
+      return _i24.SyncPullPayload.fromJson(data) as T;
+    }
+    if (t == _i25.SyncPushEntry) {
+      return _i25.SyncPushEntry.fromJson(data) as T;
+    }
+    if (t == _i26.TabelaPrecificacao) {
+      return _i26.TabelaPrecificacao.fromJson(data) as T;
+    }
+    if (t == _i27.TaxaEntrega) {
+      return _i27.TaxaEntrega.fromJson(data) as T;
+    }
+    if (t == _i28.Usuario) {
+      return _i28.Usuario.fromJson(data) as T;
+    }
+    if (t == _i29.WorkspaceSetupProgressInfo) {
+      return _i29.WorkspaceSetupProgressInfo.fromJson(data) as T;
     }
     if (t == _i1.getType<_i3.Greeting?>()) {
       return (data != null ? _i3.Greeting.fromJson(data) : null) as T;
@@ -2674,62 +3520,78 @@ class Protocol extends _i1.SerializationManagerServer {
       return (data != null ? _i10.EmpresaConfiguracao.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i11.EventoEmpresa?>()) {
-      return (data != null ? _i11.EventoEmpresa.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i11.EmpresaConvite?>()) {
+      return (data != null ? _i11.EmpresaConvite.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i12.FormaPagamento?>()) {
-      return (data != null ? _i12.FormaPagamento.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i12.EventoEmpresa?>()) {
+      return (data != null ? _i12.EventoEmpresa.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i13.ItemTabelaPrecificacao?>()) {
-      return (data != null ? _i13.ItemTabelaPrecificacao.fromJson(data) : null)
+    if (t == _i1.getType<_i13.FormaPagamento?>()) {
+      return (data != null ? _i13.FormaPagamento.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i14.HistoricoOrdemPreparo?>()) {
+      return (data != null ? _i14.HistoricoOrdemPreparo.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i14.LocalEntrega?>()) {
-      return (data != null ? _i14.LocalEntrega.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i15.MembroEmpresa?>()) {
-      return (data != null ? _i15.MembroEmpresa.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i16.OnboardingException?>()) {
-      return (data != null ? _i16.OnboardingException.fromJson(data) : null)
+    if (t == _i1.getType<_i15.ItemTabelaPrecificacao?>()) {
+      return (data != null ? _i15.ItemTabelaPrecificacao.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i17.Produto?>()) {
-      return (data != null ? _i17.Produto.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i16.LocalEntrega?>()) {
+      return (data != null ? _i16.LocalEntrega.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i18.ProdutoTabelaPrecificacao?>()) {
+    if (t == _i1.getType<_i17.LoteInsumo?>()) {
+      return (data != null ? _i17.LoteInsumo.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i18.MapRouteResult?>()) {
+      return (data != null ? _i18.MapRouteResult.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i19.MembroEmpresa?>()) {
+      return (data != null ? _i19.MembroEmpresa.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i20.OnboardingException?>()) {
+      return (data != null ? _i20.OnboardingException.fromJson(data) : null)
+          as T;
+    }
+    if (t == _i1.getType<_i21.OrdemPreparo?>()) {
+      return (data != null ? _i21.OrdemPreparo.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i22.Produto?>()) {
+      return (data != null ? _i22.Produto.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i23.ProdutoTabelaPrecificacao?>()) {
       return (data != null
-          ? _i18.ProdutoTabelaPrecificacao.fromJson(data)
+          ? _i23.ProdutoTabelaPrecificacao.fromJson(data)
           : null) as T;
     }
-    if (t == _i1.getType<_i19.SyncPullPayload?>()) {
-      return (data != null ? _i19.SyncPullPayload.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i24.SyncPullPayload?>()) {
+      return (data != null ? _i24.SyncPullPayload.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i20.SyncPushEntry?>()) {
-      return (data != null ? _i20.SyncPushEntry.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i25.SyncPushEntry?>()) {
+      return (data != null ? _i25.SyncPushEntry.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i21.TabelaPrecificacao?>()) {
-      return (data != null ? _i21.TabelaPrecificacao.fromJson(data) : null)
+    if (t == _i1.getType<_i26.TabelaPrecificacao?>()) {
+      return (data != null ? _i26.TabelaPrecificacao.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i22.TaxaEntrega?>()) {
-      return (data != null ? _i22.TaxaEntrega.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i27.TaxaEntrega?>()) {
+      return (data != null ? _i27.TaxaEntrega.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i23.Usuario?>()) {
-      return (data != null ? _i23.Usuario.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i28.Usuario?>()) {
+      return (data != null ? _i28.Usuario.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i24.WorkspaceSetupProgressInfo?>()) {
+    if (t == _i1.getType<_i29.WorkspaceSetupProgressInfo?>()) {
       return (data != null
-          ? _i24.WorkspaceSetupProgressInfo.fromJson(data)
+          ? _i29.WorkspaceSetupProgressInfo.fromJson(data)
           : null) as T;
     }
-    if (t == List<_i15.MembroEmpresa>) {
+    if (t == List<_i19.MembroEmpresa>) {
       return (data as List)
-          .map((e) => deserialize<_i15.MembroEmpresa>(e))
+          .map((e) => deserialize<_i19.MembroEmpresa>(e))
           .toList() as T;
     }
-    if (t == List<_i17.Produto>) {
-      return (data as List).map((e) => deserialize<_i17.Produto>(e)).toList()
+    if (t == List<_i22.Produto>) {
+      return (data as List).map((e) => deserialize<_i22.Produto>(e)).toList()
           as T;
     }
     if (t == List<_i8.Cliente>) {
@@ -2744,9 +3606,9 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
-    if (t == List<_i25.SyncPushEntry>) {
+    if (t == List<_i30.SyncPushEntry>) {
       return (data as List)
-          .map((e) => deserialize<_i25.SyncPushEntry>(e))
+          .map((e) => deserialize<_i30.SyncPushEntry>(e))
           .toList() as T;
     }
     try {
@@ -2783,46 +3645,61 @@ class Protocol extends _i1.SerializationManagerServer {
     if (data is _i10.EmpresaConfiguracao) {
       return 'EmpresaConfiguracao';
     }
-    if (data is _i11.EventoEmpresa) {
+    if (data is _i11.EmpresaConvite) {
+      return 'EmpresaConvite';
+    }
+    if (data is _i12.EventoEmpresa) {
       return 'EventoEmpresa';
     }
-    if (data is _i12.FormaPagamento) {
+    if (data is _i13.FormaPagamento) {
       return 'FormaPagamento';
     }
-    if (data is _i13.ItemTabelaPrecificacao) {
+    if (data is _i14.HistoricoOrdemPreparo) {
+      return 'HistoricoOrdemPreparo';
+    }
+    if (data is _i15.ItemTabelaPrecificacao) {
       return 'ItemTabelaPrecificacao';
     }
-    if (data is _i14.LocalEntrega) {
+    if (data is _i16.LocalEntrega) {
       return 'LocalEntrega';
     }
-    if (data is _i15.MembroEmpresa) {
+    if (data is _i17.LoteInsumo) {
+      return 'LoteInsumo';
+    }
+    if (data is _i18.MapRouteResult) {
+      return 'MapRouteResult';
+    }
+    if (data is _i19.MembroEmpresa) {
       return 'MembroEmpresa';
     }
-    if (data is _i16.OnboardingException) {
+    if (data is _i20.OnboardingException) {
       return 'OnboardingException';
     }
-    if (data is _i17.Produto) {
+    if (data is _i21.OrdemPreparo) {
+      return 'OrdemPreparo';
+    }
+    if (data is _i22.Produto) {
       return 'Produto';
     }
-    if (data is _i18.ProdutoTabelaPrecificacao) {
+    if (data is _i23.ProdutoTabelaPrecificacao) {
       return 'ProdutoTabelaPrecificacao';
     }
-    if (data is _i19.SyncPullPayload) {
+    if (data is _i24.SyncPullPayload) {
       return 'SyncPullPayload';
     }
-    if (data is _i20.SyncPushEntry) {
+    if (data is _i25.SyncPushEntry) {
       return 'SyncPushEntry';
     }
-    if (data is _i21.TabelaPrecificacao) {
+    if (data is _i26.TabelaPrecificacao) {
       return 'TabelaPrecificacao';
     }
-    if (data is _i22.TaxaEntrega) {
+    if (data is _i27.TaxaEntrega) {
       return 'TaxaEntrega';
     }
-    if (data is _i23.Usuario) {
+    if (data is _i28.Usuario) {
       return 'Usuario';
     }
-    if (data is _i24.WorkspaceSetupProgressInfo) {
+    if (data is _i29.WorkspaceSetupProgressInfo) {
       return 'WorkspaceSetupProgressInfo';
     }
     className = _i2.Protocol().getClassNameForObject(data);
@@ -2862,47 +3739,62 @@ class Protocol extends _i1.SerializationManagerServer {
     if (dataClassName == 'EmpresaConfiguracao') {
       return deserialize<_i10.EmpresaConfiguracao>(data['data']);
     }
+    if (dataClassName == 'EmpresaConvite') {
+      return deserialize<_i11.EmpresaConvite>(data['data']);
+    }
     if (dataClassName == 'EventoEmpresa') {
-      return deserialize<_i11.EventoEmpresa>(data['data']);
+      return deserialize<_i12.EventoEmpresa>(data['data']);
     }
     if (dataClassName == 'FormaPagamento') {
-      return deserialize<_i12.FormaPagamento>(data['data']);
+      return deserialize<_i13.FormaPagamento>(data['data']);
+    }
+    if (dataClassName == 'HistoricoOrdemPreparo') {
+      return deserialize<_i14.HistoricoOrdemPreparo>(data['data']);
     }
     if (dataClassName == 'ItemTabelaPrecificacao') {
-      return deserialize<_i13.ItemTabelaPrecificacao>(data['data']);
+      return deserialize<_i15.ItemTabelaPrecificacao>(data['data']);
     }
     if (dataClassName == 'LocalEntrega') {
-      return deserialize<_i14.LocalEntrega>(data['data']);
+      return deserialize<_i16.LocalEntrega>(data['data']);
+    }
+    if (dataClassName == 'LoteInsumo') {
+      return deserialize<_i17.LoteInsumo>(data['data']);
+    }
+    if (dataClassName == 'MapRouteResult') {
+      return deserialize<_i18.MapRouteResult>(data['data']);
     }
     if (dataClassName == 'MembroEmpresa') {
-      return deserialize<_i15.MembroEmpresa>(data['data']);
+      return deserialize<_i19.MembroEmpresa>(data['data']);
     }
     if (dataClassName == 'OnboardingException') {
-      return deserialize<_i16.OnboardingException>(data['data']);
+      return deserialize<_i20.OnboardingException>(data['data']);
+    }
+    if (dataClassName == 'OrdemPreparo') {
+      return deserialize<_i21.OrdemPreparo>(data['data']);
     }
     if (dataClassName == 'Produto') {
-      return deserialize<_i17.Produto>(data['data']);
+      return deserialize<_i22.Produto>(data['data']);
     }
     if (dataClassName == 'ProdutoTabelaPrecificacao') {
-      return deserialize<_i18.ProdutoTabelaPrecificacao>(data['data']);
+      return deserialize<_i23.ProdutoTabelaPrecificacao>(data['data']);
     }
     if (dataClassName == 'SyncPullPayload') {
-      return deserialize<_i19.SyncPullPayload>(data['data']);
+      return deserialize<_i24.SyncPullPayload>(data['data']);
     }
     if (dataClassName == 'SyncPushEntry') {
-      return deserialize<_i20.SyncPushEntry>(data['data']);
+      return deserialize<_i25.SyncPushEntry>(data['data']);
     }
     if (dataClassName == 'TabelaPrecificacao') {
-      return deserialize<_i21.TabelaPrecificacao>(data['data']);
+      return deserialize<_i26.TabelaPrecificacao>(data['data']);
     }
     if (dataClassName == 'TaxaEntrega') {
-      return deserialize<_i22.TaxaEntrega>(data['data']);
+      return deserialize<_i27.TaxaEntrega>(data['data']);
     }
     if (dataClassName == 'Usuario') {
-      return deserialize<_i23.Usuario>(data['data']);
+      return deserialize<_i28.Usuario>(data['data']);
     }
     if (dataClassName == 'WorkspaceSetupProgressInfo') {
-      return deserialize<_i24.WorkspaceSetupProgressInfo>(data['data']);
+      return deserialize<_i29.WorkspaceSetupProgressInfo>(data['data']);
     }
     if (dataClassName.startsWith('serverpod.')) {
       data['className'] = dataClassName.substring(10);
@@ -2930,26 +3822,34 @@ class Protocol extends _i1.SerializationManagerServer {
         return _i9.Empresa.t;
       case _i10.EmpresaConfiguracao:
         return _i10.EmpresaConfiguracao.t;
-      case _i11.EventoEmpresa:
-        return _i11.EventoEmpresa.t;
-      case _i12.FormaPagamento:
-        return _i12.FormaPagamento.t;
-      case _i13.ItemTabelaPrecificacao:
-        return _i13.ItemTabelaPrecificacao.t;
-      case _i14.LocalEntrega:
-        return _i14.LocalEntrega.t;
-      case _i15.MembroEmpresa:
-        return _i15.MembroEmpresa.t;
-      case _i17.Produto:
-        return _i17.Produto.t;
-      case _i18.ProdutoTabelaPrecificacao:
-        return _i18.ProdutoTabelaPrecificacao.t;
-      case _i21.TabelaPrecificacao:
-        return _i21.TabelaPrecificacao.t;
-      case _i22.TaxaEntrega:
-        return _i22.TaxaEntrega.t;
-      case _i23.Usuario:
-        return _i23.Usuario.t;
+      case _i11.EmpresaConvite:
+        return _i11.EmpresaConvite.t;
+      case _i12.EventoEmpresa:
+        return _i12.EventoEmpresa.t;
+      case _i13.FormaPagamento:
+        return _i13.FormaPagamento.t;
+      case _i14.HistoricoOrdemPreparo:
+        return _i14.HistoricoOrdemPreparo.t;
+      case _i15.ItemTabelaPrecificacao:
+        return _i15.ItemTabelaPrecificacao.t;
+      case _i16.LocalEntrega:
+        return _i16.LocalEntrega.t;
+      case _i17.LoteInsumo:
+        return _i17.LoteInsumo.t;
+      case _i19.MembroEmpresa:
+        return _i19.MembroEmpresa.t;
+      case _i21.OrdemPreparo:
+        return _i21.OrdemPreparo.t;
+      case _i22.Produto:
+        return _i22.Produto.t;
+      case _i23.ProdutoTabelaPrecificacao:
+        return _i23.ProdutoTabelaPrecificacao.t;
+      case _i26.TabelaPrecificacao:
+        return _i26.TabelaPrecificacao.t;
+      case _i27.TaxaEntrega:
+        return _i27.TaxaEntrega.t;
+      case _i28.Usuario:
+        return _i28.Usuario.t;
     }
     return null;
   }

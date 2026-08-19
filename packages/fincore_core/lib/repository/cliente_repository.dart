@@ -36,6 +36,10 @@ class ClienteRepository extends SyncableRepository<Cliente> {
         'ativo': entity.ativo,
         'aceitaWhatsapp': entity.aceitaWhatsapp,
         'aceitaMarketing': entity.aceitaMarketing,
+        'apelido': entity.apelido,
+        'dataNascimento': entity.dataNascimento?.toIso8601String(),
+        'preferenciaEntrega': entity.preferenciaEntrega,
+        'limiteCredito': entity.limiteCredito,
         'syncVersion': entity.metadata.version,
         'createdAt': entity.metadata.createdAt.toIso8601String(),
         'updatedAt': entity.metadata.updatedAt.toIso8601String(),
@@ -67,7 +71,11 @@ class ClienteRepository extends SyncableRepository<Cliente> {
           ..where((t) =>
               t.tenantId.equals(activeTenantId) &
               t.deletedAt.isNull() &
-              (t.nome.lower().like(q) | t.telefone.like(q) | t.documento.like(q))))
+              (t.nome.lower().like(q) |
+               t.apelido.lower().like(q) |
+               t.telefone.like(q) |
+               t.documento.like(q) |
+               t.email.lower().like(q))))
         .get();
     return rows.map(_mapToDomain).toList();
   }
@@ -89,6 +97,10 @@ class ClienteRepository extends SyncableRepository<Cliente> {
             ativo: cliente.ativo,
             aceitaWhatsapp: Value(cliente.aceitaWhatsapp),
             aceitaMarketing: Value(cliente.aceitaMarketing),
+            apelido: Value(cliente.apelido),
+            dataNascimento: Value(cliente.dataNascimento),
+            preferenciaEntrega: Value(cliente.preferenciaEntrega),
+            limiteCredito: Value(cliente.limiteCredito),
             createdAt: cliente.metadata.createdAt,
             updatedAt: DateTime.now().toUtc(),
             createdBy: cliente.metadata.createdBy,
@@ -127,6 +139,10 @@ class ClienteRepository extends SyncableRepository<Cliente> {
       ativo: data.ativo,
       aceitaWhatsapp: data.aceitaWhatsapp,
       aceitaMarketing: data.aceitaMarketing,
+      apelido: data.apelido,
+      dataNascimento: data.dataNascimento,
+      preferenciaEntrega: data.preferenciaEntrega,
+      limiteCredito: data.limiteCredito,
       metadata: SyncMetadata(
         version: data.syncVersion,
         createdAt: data.createdAt,

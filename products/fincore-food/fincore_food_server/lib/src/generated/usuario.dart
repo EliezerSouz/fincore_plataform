@@ -15,16 +15,26 @@ abstract class Usuario
     implements _i1.TableRow<_i1.UuidValue>, _i1.ProtocolSerialization {
   Usuario._({
     _i1.UuidValue? id,
-    required this.email,
+    required this.tenantId,
+    this.authUserId,
+    required this.username,
+    this.email,
     required this.nome,
+    this.avatarUrl,
+    required this.ativo,
     required this.criadoEm,
     required this.atualizadoEm,
   }) : id = id ?? _i1.Uuid().v4obj();
 
   factory Usuario({
     _i1.UuidValue? id,
-    required String email,
+    required String tenantId,
+    String? authUserId,
+    required String username,
+    String? email,
     required String nome,
+    String? avatarUrl,
+    required bool ativo,
     required DateTime criadoEm,
     required DateTime atualizadoEm,
   }) = _UsuarioImpl;
@@ -32,8 +42,13 @@ abstract class Usuario
   factory Usuario.fromJson(Map<String, dynamic> jsonSerialization) {
     return Usuario(
       id: _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
-      email: jsonSerialization['email'] as String,
+      tenantId: jsonSerialization['tenantId'] as String,
+      authUserId: jsonSerialization['authUserId'] as String?,
+      username: jsonSerialization['username'] as String,
+      email: jsonSerialization['email'] as String?,
       nome: jsonSerialization['nome'] as String,
+      avatarUrl: jsonSerialization['avatarUrl'] as String?,
+      ativo: jsonSerialization['ativo'] as bool,
       criadoEm:
           _i1.DateTimeJsonExtension.fromJson(jsonSerialization['criadoEm']),
       atualizadoEm:
@@ -48,9 +63,19 @@ abstract class Usuario
   @override
   _i1.UuidValue id;
 
-  String email;
+  String tenantId;
+
+  String? authUserId;
+
+  String username;
+
+  String? email;
 
   String nome;
+
+  String? avatarUrl;
+
+  bool ativo;
 
   DateTime criadoEm;
 
@@ -64,8 +89,13 @@ abstract class Usuario
   @_i1.useResult
   Usuario copyWith({
     _i1.UuidValue? id,
+    String? tenantId,
+    String? authUserId,
+    String? username,
     String? email,
     String? nome,
+    String? avatarUrl,
+    bool? ativo,
     DateTime? criadoEm,
     DateTime? atualizadoEm,
   });
@@ -73,8 +103,13 @@ abstract class Usuario
   Map<String, dynamic> toJson() {
     return {
       'id': id.toJson(),
-      'email': email,
+      'tenantId': tenantId,
+      if (authUserId != null) 'authUserId': authUserId,
+      'username': username,
+      if (email != null) 'email': email,
       'nome': nome,
+      if (avatarUrl != null) 'avatarUrl': avatarUrl,
+      'ativo': ativo,
       'criadoEm': criadoEm.toJson(),
       'atualizadoEm': atualizadoEm.toJson(),
     };
@@ -84,8 +119,13 @@ abstract class Usuario
   Map<String, dynamic> toJsonForProtocol() {
     return {
       'id': id.toJson(),
-      'email': email,
+      'tenantId': tenantId,
+      if (authUserId != null) 'authUserId': authUserId,
+      'username': username,
+      if (email != null) 'email': email,
       'nome': nome,
+      if (avatarUrl != null) 'avatarUrl': avatarUrl,
+      'ativo': ativo,
       'criadoEm': criadoEm.toJson(),
       'atualizadoEm': atualizadoEm.toJson(),
     };
@@ -121,17 +161,29 @@ abstract class Usuario
   }
 }
 
+class _Undefined {}
+
 class _UsuarioImpl extends Usuario {
   _UsuarioImpl({
     _i1.UuidValue? id,
-    required String email,
+    required String tenantId,
+    String? authUserId,
+    required String username,
+    String? email,
     required String nome,
+    String? avatarUrl,
+    required bool ativo,
     required DateTime criadoEm,
     required DateTime atualizadoEm,
   }) : super._(
           id: id,
+          tenantId: tenantId,
+          authUserId: authUserId,
+          username: username,
           email: email,
           nome: nome,
+          avatarUrl: avatarUrl,
+          ativo: ativo,
           criadoEm: criadoEm,
           atualizadoEm: atualizadoEm,
         );
@@ -142,15 +194,25 @@ class _UsuarioImpl extends Usuario {
   @override
   Usuario copyWith({
     _i1.UuidValue? id,
-    String? email,
+    String? tenantId,
+    Object? authUserId = _Undefined,
+    String? username,
+    Object? email = _Undefined,
     String? nome,
+    Object? avatarUrl = _Undefined,
+    bool? ativo,
     DateTime? criadoEm,
     DateTime? atualizadoEm,
   }) {
     return Usuario(
       id: id ?? this.id,
-      email: email ?? this.email,
+      tenantId: tenantId ?? this.tenantId,
+      authUserId: authUserId is String? ? authUserId : this.authUserId,
+      username: username ?? this.username,
+      email: email is String? ? email : this.email,
       nome: nome ?? this.nome,
+      avatarUrl: avatarUrl is String? ? avatarUrl : this.avatarUrl,
+      ativo: ativo ?? this.ativo,
       criadoEm: criadoEm ?? this.criadoEm,
       atualizadoEm: atualizadoEm ?? this.atualizadoEm,
     );
@@ -159,12 +221,32 @@ class _UsuarioImpl extends Usuario {
 
 class UsuarioTable extends _i1.Table<_i1.UuidValue> {
   UsuarioTable({super.tableRelation}) : super(tableName: 'usuarios') {
+    tenantId = _i1.ColumnString(
+      'tenantId',
+      this,
+    );
+    authUserId = _i1.ColumnString(
+      'authUserId',
+      this,
+    );
+    username = _i1.ColumnString(
+      'username',
+      this,
+    );
     email = _i1.ColumnString(
       'email',
       this,
     );
     nome = _i1.ColumnString(
       'nome',
+      this,
+    );
+    avatarUrl = _i1.ColumnString(
+      'avatarUrl',
+      this,
+    );
+    ativo = _i1.ColumnBool(
+      'ativo',
       this,
     );
     criadoEm = _i1.ColumnDateTime(
@@ -177,9 +259,19 @@ class UsuarioTable extends _i1.Table<_i1.UuidValue> {
     );
   }
 
+  late final _i1.ColumnString tenantId;
+
+  late final _i1.ColumnString authUserId;
+
+  late final _i1.ColumnString username;
+
   late final _i1.ColumnString email;
 
   late final _i1.ColumnString nome;
+
+  late final _i1.ColumnString avatarUrl;
+
+  late final _i1.ColumnBool ativo;
 
   late final _i1.ColumnDateTime criadoEm;
 
@@ -188,8 +280,13 @@ class UsuarioTable extends _i1.Table<_i1.UuidValue> {
   @override
   List<_i1.Column> get columns => [
         id,
+        tenantId,
+        authUserId,
+        username,
         email,
         nome,
+        avatarUrl,
+        ativo,
         criadoEm,
         atualizadoEm,
       ];

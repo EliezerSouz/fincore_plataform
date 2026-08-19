@@ -75,10 +75,10 @@ class _PaymentStepState extends State<PaymentStep> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
                   Icon(Icons.payment_outlined, color: FincoreColors.primary, size: 20),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
                     'PAGAMENTO & OBSERVAÇÕES',
                     style: TextStyle(

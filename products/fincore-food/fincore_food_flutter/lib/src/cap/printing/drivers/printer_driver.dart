@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
-import '../models/print_config.dart';
 
 /// Resultado de uma operação de impressão.
 class PrinterResult {

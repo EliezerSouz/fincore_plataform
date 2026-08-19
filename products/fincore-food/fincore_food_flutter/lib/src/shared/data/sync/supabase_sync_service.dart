@@ -3,15 +3,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:fincore_core/database/fincore_database.dart';
-import 'package:fincore_core/context/tenant_context.dart';
-import 'package:fincore_core/sync/outbox_service.dart';
 import 'package:fincore_core/fincore_core.dart';
 
 /// Estado de conectividade com a nuvem.
 enum CloudConnectivity { online, offline, unknown }
 
 /// Gerencia a sincronização bidirecional entre SQLite local e Supabase.
+///
+/// ## ⚡ CANAL OFICIAL DE SINCRONIZAÇÃO (ARC-001)
+/// Este serviço é o ÚNICO canal de sincronização ativo em produção.
+/// O SyncEndpoint do Serverpod está incompleto e não é usado para sync de dados.
+/// A decisão de usar Supabase SDK direto foi tomada pela equipe por menor latência
+/// e menor complexidade. O isolamento multi-tenant é garantido por RLS no Supabase.
 ///
 /// ## Offline-First por Design
 /// - Push e Pull são tentados SOMENTE se houver conectividade
@@ -45,9 +48,11 @@ class SupabaseSyncService {
   // Callback para notificar a UI sobre mudanças de conectividade
   void Function(CloudConnectivity)? onConnectivityChanged;
 
-  // Mapeamento: entityName do outbox → nome da tabela no Supabase (no singular)
+  // Mapeamento: entityName do outbox → nome da tabela no Supabase
   static const Map<String, String> _entityToTable = {
     'empresa_configuracao': 'empresa_configuracao',
+    'empresas': 'empresa',
+    'empresa': 'empresa',
     'categorias': 'categoria',
     'produtos': 'produto',
     'clientes': 'cliente',
@@ -56,10 +61,37 @@ class SupabaseSyncService {
     'taxas_entrega': 'taxa_entrega',
     'membros_empresa': 'membro_empresa',
     'membro_empresa': 'membro_empresa',
+    'usuarios': 'usuarios',
+    'usuario': 'usuarios',
     'tabelas_precificacao': 'tabela_precificacao',
     'itens_tabela_precificacao': 'item_tabela_precificacao',
     'produtos_tabelas_precificacao': 'produto_tabela_precificacao',
+    'categorias_tabelas_precificacao': 'categoria_tabela_precificacao',
+    // P0-01: Pedidos — canal oficial de vendas
+    'Pedido': 'pedido',
+    'pedidos': 'pedido',
+    'ItensPedido': 'item_pedido',
+    'itens_pedido': 'item_pedido',
+    // Onboarding / IAM
+    'empresa_convite': 'empresa_convite',
+    'empresa_convites': 'empresa_convite',
+    // Auditoria
     'audit_log': 'audit_logs',
+    // KDS Ordens de Preparo
+    'OrdemPreparo': 'ordens_preparo',
+    'ordens_preparo': 'ordens_preparo',
+    'HistoricoOrdemPreparo': 'historicos_ordem_preparo',
+    'historicos_ordem_preparo': 'historicos_ordem_preparo',
+    // ESTOQUE: Controle de produtos acabados
+    'estoque_produto': 'estoque_produto',
+    'EstoqueProduto': 'estoque_produto',
+    'movimentacao_estoque': 'movimentacao_estoque',
+    'MovimentacaoEstoque': 'movimentacao_estoque',
+    // FINANCEIRO: Sessões de caixa e lançamentos
+    'sessao_caixa': 'sessao_caixa',
+    'SessaoCaixa': 'sessao_caixa',
+    'lancamento_financeiro': 'lancamento_financeiro',
+    'LancamentoFinanceiro': 'lancamento_financeiro',
   };
 
   SupabaseSyncService({
@@ -69,6 +101,9 @@ class SupabaseSyncService {
   })  : _supabase = supabase,
         _context = context,
         _outbox = outbox;
+
+  Future<({int pending, int retrying, int failed, int total})> getOutboxStats() => _outbox.getOutboxStats();
+  Future<int> retryFailedEntries() => _outbox.retryFailedEntries();
 
   // ──────────────────────────────────────────────────────────
   // CONECTIVIDADE: verifica acesso antes de qualquer operação
@@ -94,9 +129,9 @@ class SupabaseSyncService {
       _connectivity = status;
       onConnectivityChanged?.call(status);
       if (status == CloudConnectivity.online) {
-        LogService.instance.info(LogModule.sync, '✅ Conectividade restaurada — sync retomado');
+        LogService.instance.info(LogModule.sync, '[OK] Conectividade restaurada - sync retomado');
       } else {
-        LogService.instance.warning(LogModule.sync, '⚠️ Sem conectividade — modo offline. Dados salvos localmente.');
+        LogService.instance.warning(LogModule.sync, '[AVISO] Sem conectividade - modo offline. Dados salvos localmente.');
       }
     }
   }
@@ -109,24 +144,73 @@ class SupabaseSyncService {
   /// Retorna false se offline — o SyncEngine irá fazer retry automaticamente.
   Future<bool> push(OutboxEntry entry) async {
     if (_connectivity == CloudConnectivity.offline) {
-      LogService.instance.debug(LogModule.sync, 'Offline — push de ${entry.entity} adiado');
-      throw OfflineSyncException('Sem conexão com o servidor (Offline)');
+      LogService.instance.debug(LogModule.sync, 'Offline - push de ${entry.entity} adiado');
+      throw OfflineSyncException('Sem conexao com o servidor (Offline)');
     }
 
     final tableName = _entityToTable[entry.entity];
     if (tableName == null) {
-      LogService.instance.warning(LogModule.sync, 'Entidade desconhecida: ${entry.entity} — ignorando push');
+      LogService.instance.warning(LogModule.sync, 'Entidade desconhecida: ${entry.entity} - ignorando push');
       return true;
     }
 
     try {
       final payload = jsonDecode(entry.payload) as Map<String, dynamic>;
 
+      if (tableName == 'audit_logs') {
+        payload.remove('device_info');
+        payload.remove('tenant_id');
+        payload.remove('entity_name');
+        payload.remove('targetEntity');
+        payload.remove('target_entity');
+        payload.remove('entity_id');
+        payload.remove('user_id');
+        payload.remove('sync_version');
+        payload.remove('userName');
+        payload.remove('userRole');
+        payload.remove('machineName');
+        payload.remove('hostName');
+        payload.remove('ipAddress');
+        payload.remove('macAddress');
+        payload.remove('osVersion');
+        payload.remove('appVersion');
+        payload.remove('sessionId');
+        payload.remove('deviceDescription');
+        payload.remove('entityDisplayName');
+        payload.remove('entityModule');
+      }
+
       LogService.instance.debug(
         LogModule.sync,
-        'Supabase PUSH: Tabela: $tableName | Ação: ${entry.action} | ID: ${entry.entityId}',
+        'Supabase PUSH: Tabela: $tableName | Acao: ${entry.action} | ID: ${entry.entityId}',
         tenantId: _context.hasContext ? _context.tenantId : null,
       );
+
+      // Sanitizar createdBy e updatedBy se contiverem strings não-UUID (ex: 'PDV')
+      final tenantUserId = _context.hasContext ? _context.usuario.id : '00000000-0000-0000-0000-000000000000';
+      if (payload.containsKey('createdBy')) {
+        final val = payload['createdBy'] as String? ?? '';
+        if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
+          payload['createdBy'] = tenantUserId;
+        }
+      }
+      if (payload.containsKey('updatedBy')) {
+        final val = payload['updatedBy'] as String? ?? '';
+        if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
+          payload['updatedBy'] = tenantUserId;
+        }
+      }
+
+      // Sanitizar formaPagamentoId se contiver strings não-UUID (evitando erro 22P02 no Postgres)
+      if (payload.containsKey('formaPagamentoId')) {
+        final val = payload['formaPagamentoId'] as String? ?? '';
+        if (val.isNotEmpty) {
+          final isUuid = RegExp(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$').hasMatch(val);
+          if (!isUuid) {
+            payload['formaPagamentoId'] = null;
+          }
+        }
+      }
 
       if (entry.action == 'DELETE') {
         await _supabase
@@ -135,10 +219,32 @@ class SupabaseSyncService {
             .eq('id', entry.entityId)
             .eq('tenantId', _context.tenantId);
       } else {
-        await _supabase.from(tableName).upsert(
-          payload,
-          onConflict: 'id',
-        );
+        final conflictCol = tableName == 'empresa_configuracao' ? 'tenantId' : 'id';
+        int attempts = 0;
+        while (attempts < 5) {
+          try {
+            await _supabase.from(tableName).upsert(
+              payload,
+              onConflict: conflictCol,
+            );
+            break;
+          } on PostgrestException catch (e) {
+            attempts++;
+            if ((e.code == 'PGRST204' || e.message.contains("Could not find the '")) && attempts < 5) {
+              final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(e.message);
+              if (match != null) {
+                final missingCol = match.group(1)!;
+                LogService.instance.warning(
+                  LogModule.sync,
+                  '[SCHEMA FALLBACK] Coluna "$missingCol" ausente na tabela remota "$tableName" do Supabase. Removendo do payload para concluir o envio local.',
+                );
+                payload.remove(missingCol);
+                continue;
+              }
+            }
+            rethrow;
+          }
+        }
       }
 
       _updateConnectivity(CloudConnectivity.online);
@@ -164,66 +270,138 @@ class SupabaseSyncService {
   /// pendências. O router é responsável por garantir isso via [SyncResult.hasPendingAfter].
   /// Mesmo assim, cada linha é protegida individualmente pelo Escudo do Pull.
   ///
+  bool _isPulling = false;
+  bool get isPulling => _isPulling;
+
+  /// Busca todas as tabelas atualizadas desde [lastSyncAt] e aplica localmente.
+  ///
+  /// **IMPORTANTE**: Este método NUNCA deve ser chamado se o Outbox ainda tiver
+  /// pendências. O router é responsável por garantir isso via [SyncResult.hasPendingAfter].
+  /// Mesmo assim, cada linha é protegida individualmente pelo Escudo do Pull.
+  ///
   /// Retorna `true` se a sincronização foi completada com sucesso, ou `false` se offline/erro.
   Future<bool> pullAll(FincoreDatabase db, DateTime lastSyncAt) async {
-    if (!_context.hasContext) return false;
+    if (!_context.hasContext || _isPulling) return false;
+    _isPulling = true;
 
     final online = await isOnline();
     if (!online) {
-      LogService.instance.debug(LogModule.sync, 'Pull cancelado — sem conexão. App rodando 100% offline.');
+      _isPulling = false;
+      LogService.instance.debug(LogModule.sync, 'Pull cancelado - sem conexao. App rodando 100% offline.');
       return false;
     }
 
     final tenantId = _context.tenantId;
+    final startTime = DateTime.now();
+
+    final logCtxStr = _context.hasContext
+        ? '${_context.usuario.nome} @ ${_context.empresa.nomeFantasia}'
+        : null;
 
     try {
-      // Executa as tabelas em ordem topológica (pai antes de filho)
-      // para evitar FK violations no banco local durante o pull.
-      await _pullTable('empresa_configuracao', tenantId, lastSyncAt, db);
-      await _pullTable('categorias', tenantId, lastSyncAt, db);
-      await _pullTable('membros_empresa', tenantId, lastSyncAt, db);
-      await _pullTable('tabelas_precificacao', tenantId, lastSyncAt, db);
-      await _pullTable('taxas_entrega', tenantId, lastSyncAt, db);
-      await _pullTable('formas_pagamento', tenantId, lastSyncAt, db);
-      await _pullTable('clientes', tenantId, lastSyncAt, db);
-      await _pullTable('produtos', tenantId, lastSyncAt, db);
-      await _pullTable('locais_entrega', tenantId, lastSyncAt, db);
-      await _pullTable('itens_tabela_precificacao', tenantId, lastSyncAt, db);
-      await _pullTable('produtos_tabelas_precificacao', tenantId, lastSyncAt, db);
+      await FincoreLogger.instance.beginCycle(
+        LogModule.sync,
+        'CICLO DE RECEBIMENTO REMOTO (PULL)',
+        context: logCtxStr,
+      );
+
+      int totalApplied = 0;
+      int totalProtected = 0;
+
+      final tables = [
+        'empresa_configuracao',
+        'empresas',
+        'categorias',
+        'membros_empresa',
+        'usuarios',
+        'tabelas_precificacao',
+        'taxas_entrega',
+        'formas_pagamento',
+        'clientes',
+        'produtos',
+        'locais_entrega',
+        'itens_tabela_precificacao',
+        'produtos_tabelas_precificacao',
+        'categorias_tabelas_precificacao',
+        // P0-01: Pedidos (Pull para sincronizar entre dispositivos do mesmo tenant)
+        'pedidos',
+        'itens_pedido',
+        // Onboarding / IAM
+        'empresa_convites',
+        // ESTOQUE
+        'estoque_produto',
+        'movimentacao_estoque',
+        // FINANCEIRO
+        'sessao_caixa',
+        'lancamento_financeiro',
+      ];
+
+      for (final table in tables) {
+        final res = await _pullTable(table, tenantId, lastSyncAt, db);
+        totalApplied += res.applied;
+        totalProtected += res.protected;
+      }
+
+      final durationMs = DateTime.now().difference(startTime).inMilliseconds;
+
+      if (totalApplied > 0 || totalProtected > 0) {
+        LogService.instance.info(
+          LogModule.sync,
+          '[OK] Ciclo de recebimento (Pull) concluido com sucesso em ${durationMs}ms | $totalApplied mudanca(s) aplicada(s), $totalProtected protegida(s) | Banco local sincronizado.',
+          tenantId: tenantId,
+        );
+      } else {
+        LogService.instance.info(
+          LogModule.sync,
+          '[OK] Ciclo de recebimento (Pull) concluido em ${durationMs}ms | Sem mudancas na nuvem | Banco local atualizado.',
+          tenantId: tenantId,
+        );
+      }
+
+      await FincoreLogger.instance.endCycle(LogModule.sync, 'FIM DO CICLO DE RECEBIMENTO (PULL)');
 
       // Marca a data/hora exata em UTC do término do PULL bem-sucedido
       _lastPullTimestamp = DateTime.now().toUtc();
       return true;
     } catch (e) {
-      LogService.instance.error(LogModule.sync, '[PULL] Falha crítica durante o pullAll', exception: e.toString());
+      LogService.instance.error(LogModule.sync, '[PULL] Falha critica durante o ciclo de recebimento (Pull)', exception: e.toString());
       return false;
+    } finally {
+      _isPulling = false;
     }
   }
 
   final ConflictResolver _conflictResolver = const ConflictResolver();
 
-  Future<void> _pullTable(
+  Future<({int applied, int protected})> _pullTable(
     String entityName,
     String tenantId,
     DateTime since,
     FincoreDatabase db,
   ) async {
     final tableName = _entityToTable[entityName];
-    if (tableName == null) return;
+    if (tableName == null) return (applied: 0, protected: 0);
 
     final isFullPull = since.isBefore(DateTime.now().subtract(const Duration(days: 6)));
-    final pullType = isFullPull
-        ? 'FULL PULL (Carga Inicial)'
-        : 'INCREMENTAL PULL (Desde ${_formatDateTime(since)})';
+    final pullType = isFullPull ? 'Carga Total' : 'Incremental';
 
     try {
-      final rows = await _supabase
-          .from(tableName)
-          .select()
-          .eq('tenantId', tenantId)
-          .gte('updatedAt', since.toIso8601String());
+      final queryBuilder = _supabase.from(tableName).select();
+      final dateColumn = tableName == 'usuarios' ? 'atualizadoEm' : 'updatedAt';
+      final rows = await (tableName == 'empresa'
+              ? queryBuilder.eq('id', tenantId)
+              : queryBuilder.eq('tenantId', tenantId))
+          .gte(dateColumn, since.toIso8601String());
 
-      if (rows.isEmpty) return;
+      if (rows.isEmpty) {
+        return (applied: 0, protected: 0);
+      }
+
+      LogService.instance.info(
+        LogModule.sync,
+        '  Encontrada(s) ${rows.length} mudanca(s) na nuvem para [$entityName]. Processando...',
+        tenantId: tenantId,
+      );
 
       // ── ESCUDO DO PULL (OUTBOX) ─────────────────────────────
       final lockedIds = await _outbox.getPendingEntityIds(entityName);
@@ -233,7 +411,6 @@ class SupabaseSyncService {
       int protectedCount = 0;
       int stalledCount = 0;
       final List<String> protectedDetails = [];
-      final List<String> stalledDetails = [];
 
       await db.transaction(() async {
         for (final row in rows) {
@@ -258,10 +435,9 @@ class SupabaseSyncService {
           if (!decision.allowOverwrite) {
             if (hasPending) {
               protectedCount++;
-              protectedDetails.add('• $entityName [$shortId] "$desc" — Outbox pendente');
+              protectedDetails.add('* $entityName [$shortId] "$desc" - Outbox pendente');
             } else {
               stalledCount++;
-              stalledDetails.add('• $entityName [$shortId] "$desc" — Servidor v$serverVersion < Local v$localVersion');
             }
             continue;
           }
@@ -272,26 +448,28 @@ class SupabaseSyncService {
         }
       });
 
-      if (rows.isNotEmpty) {
+      LogService.instance.info(
+        LogModule.sync,
+        '  Resultado [$entityName]: $appliedCount aplicado(s) no banco local, $protectedCount protegido(s), $stalledCount mantido(s)',
+        tenantId: tenantId,
+      );
+
+      for (final d in protectedDetails) {
         LogService.instance.info(
           LogModule.sync,
-          'Atualização remota [$entityName]: $appliedCount aplicado(s) no banco local, $protectedCount protegido(s) por edições locais, $stalledCount mantidos ($pullType)',
+          '    Registro protegido contra sobrescrita: $d',
           tenantId: tenantId,
         );
-
-        for (final d in protectedDetails) {
-          LogService.instance.info(
-            LogModule.sync,
-            '  🛡️ Registro protegido contra sobrescrita: $d',
-            tenantId: tenantId,
-          );
-        }
       }
+
+      return (applied: appliedCount, protected: protectedCount);
     } on SocketException {
       _updateConnectivity(CloudConnectivity.offline);
-      LogService.instance.debug(LogModule.sync, 'Sem conexão durante atualização de $entityName — mantendo dados locais.');
+      LogService.instance.debug(LogModule.sync, 'Sem conexao durante atualizacao de $entityName - mantendo dados locais.');
+      return (applied: 0, protected: 0);
     } catch (e) {
-      LogService.instance.error(LogModule.sync, 'Falha ao processar atualização remota de $entityName', exception: e.toString());
+      LogService.instance.error(LogModule.sync, 'Falha ao processar atualizacao remota de $entityName', exception: e.toString());
+      return (applied: 0, protected: 0);
     }
   }
 
@@ -334,6 +512,12 @@ class SupabaseSyncService {
                 ..where((t) => t.id.equals(entityId)))
               .getSingleOrNull();
           return row?.syncVersion;
+        case 'empresas':
+        case 'empresa':
+          final row = await (db.select(db.empresasTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
         case 'formas_pagamento':
           final row = await (db.select(db.formasPagamentoTable)
                 ..where((t) => t.id.equals(entityId)))
@@ -364,6 +548,18 @@ class SupabaseSyncService {
                 ..where((t) => t.id.equals(entityId)))
               .getSingleOrNull();
           return row?.syncVersion;
+        case 'empresa_convite':
+        case 'empresa_convites':
+          final row = await (db.select(db.empresaConvitesTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
+        case 'usuarios':
+        case 'usuario':
+          final row = await (db.select(db.usuariosTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.atualizadoEm.millisecondsSinceEpoch ?? 1;
         default:
           return null;
       }
@@ -383,9 +579,6 @@ class SupabaseSyncService {
               EmpresaConfiguracaoTableCompanion.insert(
                 id: row['id'] as String,
                 tenantId: row['tenantId'] as String,
-                timezone: Value(row['timezone'] as String? ?? 'America/Sao_Paulo'),
-                locale: Value(row['locale'] as String? ?? 'pt_BR'),
-                currency: Value(row['currency'] as String? ?? 'BRL'),
                 taxaServico: Value((row['taxaServico'] as num?)?.toDouble() ?? 0.10),
                 usarWhatsApp: Value(row['usarWhatsApp'] as bool? ?? false),
                 tema: Value(row['tema'] as String? ?? 'dark'),
@@ -415,9 +608,78 @@ class SupabaseSyncService {
                 pixFavorecido: Value(row['pixFavorecido'] as String?),
                 pixBanco: Value(row['pixBanco'] as String?),
                 pixTipo: Value(row['pixTipo'] as String? ?? 'CPF'),
-                pixCidade: Value(row['pixCidade'] as String? ?? 'Sorocaba'),
-                nomeEmpresaCupom: Value(row['nomeEmpresaCupom'] as String?),
-                telefoneEmpresa: Value(row['telefoneEmpresa'] as String?),
+                mercadoPagoAtivo: Value(row['mercadoPagoAtivo'] as bool? ?? false),
+                openPixAtivo: Value(row['openPixAtivo'] as bool? ?? false),
+                asaasAtivo: Value(row['asaasAtivo'] as bool? ?? false),
+                ifoodAtivo: Value(row['ifoodAtivo'] as bool? ?? false),
+                margemSegurancaMinutos: Value(row['margemSegurancaMinutos'] as int? ?? 10),
+                taxaEntregaPorKm: Value(row['taxaEntregaPorKm'] as bool? ?? false),
+                valorPorKmCentavos: Value(row['valorPorKmCentavos'] as int? ?? 0),
+                syncVersion: Value(row['syncVersion'] as int? ?? 1),
+                syncStatus: SyncStatus.synced,
+                lastSyncedAt: Value(DateTime.now().toUtc()),
+                createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+                updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+                createdBy: row['createdBy'] as String? ?? '',
+                updatedBy: row['updatedBy'] as String? ?? '',
+                deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+                deletedBy: const Value(null),
+              ),
+            );
+
+        if (row.containsKey('modoDeliveryAtivo') ||
+            row.containsKey('clienteObrigatorioVenda') ||
+            row.containsKey('atendimentoPadrao') ||
+            row.containsKey('margemSegurancaMinutos') ||
+            row.containsKey('taxaEntregaPorKm') ||
+            row.containsKey('valorPorKmCentavos')) {
+          try {
+            await db.customStatement(
+              'UPDATE empresa_configuracao_table SET modo_delivery_ativo = ?, cliente_obrigatorio_venda = ?, atendimento_padrao = ?, margem_seguranca_minutos = ?, taxa_entrega_por_km = ?, valor_por_km_centavos = ? WHERE id = ?',
+              [
+                row['modoDeliveryAtivo'] == true || row['modoDeliveryAtivo'] == 1 ? 1 : 0,
+                row['clienteObrigatorioVenda'] == true || row['clienteObrigatorioVenda'] == 1 ? 1 : 0,
+                row['atendimentoPadrao'] as String? ?? 'Mesa/Balcão',
+                row['margemSegurancaMinutos'] as int? ?? 10,
+                row['taxaEntregaPorKm'] == true || row['taxaEntregaPorKm'] == 1 ? 1 : 0,
+                row['valorPorKmCentavos'] as int? ?? 0,
+                row['id'],
+              ],
+            );
+          } catch (_) {}
+        }
+        break;
+
+      case 'empresas':
+      case 'empresa':
+        await db.into(db.empresasTable).insertOnConflictUpdate(
+              EmpresasTableCompanion.insert(
+                id: row['id'] as String,
+                razaoSocial: row['razaoSocial'] as String? ?? '',
+                nomeFantasia: row['nomeFantasia'] as String? ?? '',
+                documentoFiscal: row['documentoFiscal'] as String? ?? '',
+                email: row['email'] as String? ?? '',
+                telefone: row['telefone'] as String? ?? '',
+                status: row['status'] as String? ?? 'ativo',
+                plano: row['plano'] as String? ?? 'bronze',
+                timezone: row['timezone'] as String? ?? 'America/Sao_Paulo',
+                locale: row['locale'] as String? ?? 'pt_BR',
+                currency: row['currency'] as String? ?? 'BRL',
+                country: row['country'] as String? ?? 'BR',
+                createdFrom: row['createdFrom'] as String? ?? 'PDV',
+                vencimento: row['vencimento'] != null ? Value(_parseDate(row['vencimento'] as String?)) : const Value.absent(),
+                segmento: Value(row['segmento'] as String?),
+                tipoPessoa: Value(row['tipoPessoa'] as String? ?? 'JURIDICA'),
+                inscricaoEstadual: Value(row['inscricaoEstadual'] as String?),
+                inscricaoMunicipal: Value(row['inscricaoMunicipal'] as String?),
+                regimeTributario: Value(row['regimeTributario'] as String?),
+                cep: Value(row['cep'] as String?),
+                logradouro: Value(row['logradouro'] as String?),
+                numero: Value(row['numero'] as String?),
+                complemento: Value(row['complemento'] as String?),
+                bairro: Value(row['bairro'] as String?),
+                cidade: Value(row['cidade'] as String?),
+                estado: Value(row['estado'] as String?),
                 syncVersion: Value(row['syncVersion'] as int? ?? 1),
                 syncStatus: SyncStatus.synced,
                 lastSyncedAt: Value(DateTime.now().toUtc()),
@@ -440,6 +702,9 @@ class SupabaseSyncService {
                 descricao: row['descricao'] as String? ?? '',
                 ordemExibicao: row['ordemExibicao'] as int? ?? 0,
                 ativo: row['ativo'] as bool? ?? true,
+                icone: Value(row['icone'] as String?),
+                cor: Value(row['cor'] as String?),
+                metadataPayload: Value(row['metadataPayload'] as String?),
                 syncVersion: Value(row['syncVersion'] as int? ?? 1),
                 syncStatus: SyncStatus.synced,
                 lastSyncedAt: Value(DateTime.now().toUtc()),
@@ -472,6 +737,7 @@ class SupabaseSyncService {
                 codigoBarras: Value(row['codigoBarras'] as String?),
                 imagem: Value(row['imagem'] as String?),
                 corEtiqueta: Value(row['corEtiqueta'] as String?),
+                metadata: Value(row['metadata'] as String?),
                 syncVersion: Value(row['syncVersion'] as int? ?? 1),
                 syncStatus: SyncStatus.synced,
                 lastSyncedAt: Value(DateTime.now().toUtc()),
@@ -681,9 +947,286 @@ class SupabaseSyncService {
             );
         break;
 
+      case 'usuarios':
+      case 'usuario':
+        await db.into(db.usuariosTable).insertOnConflictUpdate(
+              UsuariosTableCompanion.insert(
+                id: row['id'] as String,
+                tenantId: Value(row['tenantId'] as String?),
+                authUserId: Value(row['authUserId'] as String?),
+                username: row['username'] as String? ?? '',
+                email: Value(row['email'] as String?),
+                nome: row['nome'] as String? ?? '',
+                avatarUrl: Value(row['avatarUrl'] as String?),
+                ativo: Value(row['ativo'] as bool? ?? true),
+                criadoEm: _parseDate(row['criadoEm'] as String?) ?? DateTime.now(),
+                atualizadoEm: _parseDate(row['atualizadoEm'] as String?) ?? DateTime.now(),
+              ),
+            );
+        break;
+
+      // P0-01: Pedidos — sincronização bidirecional entre dispositivos do mesmo tenant
+      case 'pedidos':
+      case 'Pedido':
+        await _applyPedidoLocally(row, db);
+        break;
+
+      case 'itens_pedido':
+      case 'ItensPedido':
+        await _applyItemPedidoLocally(row, db);
+        break;
+
+      case 'empresa_convite':
+      case 'empresa_convites':
+        await db.into(db.empresaConvitesTable).insertOnConflictUpdate(
+              EmpresaConvitesTableCompanion.insert(
+                id: row['id'] as String,
+                tenantId: row['tenantId'] as String,
+                email: row['email'] as String? ?? '',
+                role: Value(row['role'] as String? ?? 'OPERADOR'),
+                status: Value(row['status'] as String? ?? 'PENDENTE'),
+                expiracaoEm: _parseDate(row['expiracaoEm'] as String?) ?? DateTime.now().add(const Duration(days: 7)),
+                syncVersion: Value(row['syncVersion'] as int? ?? 1),
+                syncStatus: SyncStatus.synced,
+                lastSyncedAt: Value(DateTime.now().toUtc()),
+                createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+                updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+                createdBy: row['createdBy'] as String? ?? '',
+                updatedBy: row['updatedBy'] as String? ?? '',
+                deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+              ),
+            );
+      case 'OrdemPreparo':
+      case 'ordens_preparo':
+        final listItensRaw = row['itensJson'] as String? ?? '[]';
+        await db.into(db.ordensPreparoTable).insertOnConflictUpdate(
+              OrdensPreparoTableCompanion.insert(
+                id: row['id'] as String,
+                tenantId: row['tenantId'] as String,
+                pedidoId: row['pedidoId'] as String? ?? '',
+                itensJson: listItensRaw,
+                status: row['status'] as String? ?? 'pendente',
+                prioridade: row['prioridade'] as String? ?? 'normal',
+                operadorId: Value(row['operadorId'] as String?),
+                criadaEm: _parseDate(row['criadaEm'] as String?) ?? DateTime.now(),
+                iniciadaEm: Value(_parseDate(row['iniciadaEm'] as String?)),
+                concluidaEm: Value(_parseDate(row['concluidaEm'] as String?)),
+                canceladaEm: Value(_parseDate(row['canceladaEm'] as String?)),
+                tempoEstimadoSegundos: Value(row['tempoEstimadoSegundos'] as int? ?? 0),
+                observacoes: Value(row['observacoes'] as String?),
+                syncVersion: Value(row['syncVersion'] as int? ?? 1),
+                syncStatus: SyncStatus.synced,
+                lastSyncedAt: Value(DateTime.now().toUtc()),
+                createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+                updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+                createdBy: row['createdBy'] as String? ?? '',
+                updatedBy: row['updatedBy'] as String? ?? '',
+                deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+              ),
+            );
+      case 'HistoricoOrdemPreparo':
+      case 'historicos_ordem_preparo':
+        await db.into(db.historicosOrdemPreparoTable).insertOnConflictUpdate(
+              HistoricosOrdemPreparoTableCompanion.insert(
+                id: row['id'] as String,
+                tenantId: row['tenantId'] as String,
+                ordemPreparoId: row['ordemPreparoId'] as String,
+                titulo: row['titulo'] as String? ?? 'Status alterado',
+                descricao: row['descricao'] as String? ?? '',
+                operadorNome: Value(row['operadorNome'] as String? ?? 'Operador'),
+                criadaEm: _parseDate(row['criadaEm'] as String?) ?? DateTime.now(),
+                syncVersion: Value(row['syncVersion'] as int? ?? 1),
+                syncStatus: SyncStatus.synced,
+                lastSyncedAt: Value(DateTime.now().toUtc()),
+                createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+                updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+                createdBy: row['createdBy'] as String? ?? '',
+                updatedBy: row['updatedBy'] as String? ?? '',
+                deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+              ),
+            );
+        break;
+
+      // ESTOQUE: Produtos Acabados
+      case 'estoque_produto':
+      case 'EstoqueProduto':
+        await db.into(db.estoqueProdutosTable).insertOnConflictUpdate(
+          EstoqueProdutosTableCompanion.insert(
+            id: row['id'] as String,
+            tenantId: row['tenantId'] as String,
+            produtoId: row['produtoId'] as String,
+            quantidadeAtual: Value(row['quantidadeAtual'] as int? ?? 0),
+            quantidadeMinima: Value(row['quantidadeMinima'] as int? ?? 0),
+            quantidadeMaxima: Value(row['quantidadeMaxima'] as int? ?? 9999),
+            unidade: Value(row['unidade'] as String? ?? 'un'),
+            syncVersion: Value(row['syncVersion'] as int? ?? 1),
+            syncStatus: SyncStatus.synced,
+            lastSyncedAt: Value(DateTime.now().toUtc()),
+            createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+            updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+            createdBy: row['createdBy'] as String? ?? '',
+            updatedBy: row['updatedBy'] as String? ?? '',
+            deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+            deletedBy: const Value(null),
+          ),
+        );
+        break;
+
+      case 'movimentacao_estoque':
+      case 'MovimentacaoEstoque':
+        await db.into(db.movimentacoesEstoqueTable).insertOnConflictUpdate(
+          MovimentacoesEstoqueTableCompanion.insert(
+            id: row['id'] as String,
+            tenantId: row['tenantId'] as String,
+            produtoId: row['produtoId'] as String,
+            pedidoId: Value(row['pedidoId'] as String?),
+            tipo: row['tipo'] as String? ?? 'saida',
+            quantidade: row['quantidade'] as int? ?? 0,
+            quantidadeAntes: row['quantidadeAntes'] as int? ?? 0,
+            quantidadeDepois: row['quantidadeDepois'] as int? ?? 0,
+            motivo: Value(row['motivo'] as String? ?? ''),
+            operadorId: Value(row['operadorId'] as String?),
+            dataHora: _parseDate(row['dataHora'] as String?) ?? DateTime.now(),
+            syncVersion: Value(row['syncVersion'] as int? ?? 1),
+            syncStatus: SyncStatus.synced,
+            lastSyncedAt: Value(DateTime.now().toUtc()),
+            createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+            updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+            createdBy: row['createdBy'] as String? ?? '',
+            updatedBy: row['updatedBy'] as String? ?? '',
+            deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+            deletedBy: const Value(null),
+          ),
+        );
+        break;
+
+      // FINANCEIRO: Sessões de Caixa e Lançamentos
+      case 'sessao_caixa':
+      case 'SessaoCaixa':
+        await db.into(db.sessoesCaixaTable).insertOnConflictUpdate(
+          SessoesCaixaTableCompanion.insert(
+            id: row['id'] as String,
+            tenantId: row['tenantId'] as String,
+            operadorId: row['operadorId'] as String? ?? '',
+            operadorNome: Value(row['operadorNome'] as String? ?? 'Operador'),
+            status: Value(row['status'] as String? ?? 'aberta'),
+            dataAbertura: _parseDate(row['dataAbertura'] as String?) ?? DateTime.now(),
+            dataFechamento: Value(_parseDate(row['dataFechamento'] as String?)),
+            valorAberturaCentavos: Value(row['valorAberturaCentavos'] as int? ?? 0),
+            valorFechamentoCentavos: Value(row['valorFechamentoCentavos'] as int?),
+            totalVendasCentavos: Value(row['totalVendasCentavos'] as int? ?? 0),
+            totalDespesasCentavos: Value(row['totalDespesasCentavos'] as int? ?? 0),
+            diferencaCentavos: Value(row['diferencaCentavos'] as int?),
+            observacoes: Value(row['observacoes'] as String?),
+            syncVersion: Value(row['syncVersion'] as int? ?? 1),
+            syncStatus: SyncStatus.synced,
+            lastSyncedAt: Value(DateTime.now().toUtc()),
+            createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+            updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+            createdBy: row['createdBy'] as String? ?? '',
+            updatedBy: row['updatedBy'] as String? ?? '',
+            deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+            deletedBy: const Value(null),
+          ),
+        );
+        break;
+
+      case 'lancamento_financeiro':
+      case 'LancamentoFinanceiro':
+        await db.into(db.lancamentosFinanceirosTable).insertOnConflictUpdate(
+          LancamentosFinanceirosTableCompanion.insert(
+            id: row['id'] as String,
+            tenantId: row['tenantId'] as String,
+            sessaoCaixaId: row['sessaoCaixaId'] as String,
+            pedidoId: Value(row['pedidoId'] as String?),
+            tipo: row['tipo'] as String? ?? 'receita',
+            formaPagamentoId: Value(row['formaPagamentoId'] as String?),
+            formaPagamentoNome: Value(row['formaPagamentoNome'] as String?),
+            valorCentavos: row['valorCentavos'] as int? ?? 0,
+            descricao: Value(row['descricao'] as String? ?? ''),
+            operadorId: Value(row['operadorId'] as String?),
+            dataHora: _parseDate(row['dataHora'] as String?) ?? DateTime.now(),
+            syncVersion: Value(row['syncVersion'] as int? ?? 1),
+            syncStatus: SyncStatus.synced,
+            lastSyncedAt: Value(DateTime.now().toUtc()),
+            createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+            updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+            createdBy: row['createdBy'] as String? ?? '',
+            updatedBy: row['updatedBy'] as String? ?? '',
+            deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+            deletedBy: const Value(null),
+          ),
+        );
+        break;
+
       default:
         break;
     }
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // _applyRowLocally: PEDIDOS e ITENS DO PEDIDO
+  // Chamado durante o PULL para sincronizar pedidos de outros
+  // dispositivos do mesmo tenant (multi-caixa, multi-operador).
+  // ──────────────────────────────────────────────────────────────
+  Future<void> _applyPedidoLocally(Map<String, dynamic> row, FincoreDatabase db) async {
+    await db.into(db.pedidosTable).insertOnConflictUpdate(
+      PedidosTableCompanion.insert(
+        id: row['id'] as String,
+        tenantId: row['tenantId'] as String,
+        status: Value(row['status'] as String? ?? 'confirmado'),
+        tipoLogistica: row['tipoLogistica'] as String? ?? 'Retirada',
+        clienteId: Value(row['clienteId'] as String?),
+        clienteNomeAvulso: Value(row['clienteNomeAvulso'] as String?),
+        clienteTelefoneAvulso: Value(row['clienteTelefoneAvulso'] as String?),
+        valorSubtotalCentavos: row['valorSubtotalCentavos'] as int? ?? 0,
+        valorTaxaEntregaCentavos: Value(row['valorTaxaEntregaCentavos'] as int? ?? 0),
+        valorTotalCentavos: row['valorTotalCentavos'] as int? ?? 0,
+        trocoParaCentavos: Value(row['trocoParaCentavos'] as int?),
+        formaPagamentoId: Value(row['formaPagamentoId'] as String?),
+        formaPagamentoNome: Value(row['formaPagamentoNome'] as String?),
+        enderecoJson: Value(row['enderecoJson'] as String?),
+        operadorId: Value(row['operadorId'] as String?),
+        dataHoraCriacao: _parseDate(row['dataHoraCriacao'] as String?) ?? DateTime.now(),
+        numeroPedido: Value(row['numeroPedido'] as int?),
+        observacoes: Value(row['observacoes'] as String?),
+        canalOrigem: Value(row['canalOrigem'] as String? ?? 'pdv_express'),
+        syncVersion: Value(row['syncVersion'] as int? ?? 1),
+        syncStatus: SyncStatus.synced,
+        lastSyncedAt: Value(DateTime.now().toUtc()),
+        createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+        updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+        createdBy: row['createdBy'] as String? ?? '',
+        updatedBy: row['updatedBy'] as String? ?? '',
+        deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+        deletedBy: const Value(null),
+      ),
+    );
+  }
+
+  Future<void> _applyItemPedidoLocally(Map<String, dynamic> row, FincoreDatabase db) async {
+    await db.into(db.itensPedidoTable).insertOnConflictUpdate(
+      ItensPedidoTableCompanion.insert(
+        id: row['id'] as String,
+        tenantId: row['tenantId'] as String,
+        pedidoId: row['pedidoId'] as String,
+        produtoId: row['produtoId'] as String,
+        nomeProduto: row['nomeProduto'] as String? ?? '',
+        quantidade: (row['quantidade'] as num?)?.toDouble() ?? 1.0,
+        valorUnitarioCentavos: row['valorUnitarioCentavos'] as int? ?? 0,
+        valorTotalCentavos: row['valorTotalCentavos'] as int? ?? 0,
+        observacoes: Value(row['observacoes'] as String?),
+        syncVersion: Value(row['syncVersion'] as int? ?? 1),
+        syncStatus: SyncStatus.synced,
+        lastSyncedAt: Value(DateTime.now().toUtc()),
+        createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+        updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+        createdBy: row['createdBy'] as String? ?? '',
+        updatedBy: row['updatedBy'] as String? ?? '',
+        deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+        deletedBy: const Value(null),
+      ),
+    );
   }
 
   // ──────────────────────────────────────────────────────────
@@ -783,7 +1326,7 @@ class SupabaseSyncService {
           )
           .subscribe((status, [error]) {
             if (status == RealtimeSubscribeStatus.subscribed) {
-              LogService.instance.info(LogModule.sync, 'Canal de tempo real ativado com sucesso: $tableName');
+              LogService.instance.debug(LogModule.sync, 'Canal de tempo real ativado com sucesso: $tableName');
             } else if (status == RealtimeSubscribeStatus.channelError) {
               LogService.instance.debug(
                 LogModule.sync,

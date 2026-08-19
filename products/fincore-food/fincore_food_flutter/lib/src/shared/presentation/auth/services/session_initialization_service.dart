@@ -1,8 +1,7 @@
 import 'package:fincore_core/fincore_core.dart';
 import 'package:fincore_food_client/fincore_food_client.dart';
-import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_food_flutter/src/shared/data/mappers/bootstrap_mapper.dart';
-import 'package:fincore_core/repository/empresa_configuracao_repository.dart';
+
 class SessionInitializationService {
   final Client _serverpodClient;
   
@@ -17,13 +16,40 @@ class SessionInitializationService {
     final usuarioRepo = DependencyInjection().get<UsuarioRepository>();
     final empresaRepo = DependencyInjection().get<EmpresaRepository>();
     final tenantContext = DependencyInjection().get<TenantContext>();
+    final membroRepo = DependencyInjection().get<MembroEmpresaRepository>();
 
     // 1. Tentar carregar do banco local SQLite
-    CoreUsuario? localUser = await usuarioRepo.findById(userInfo.usuarioId);
-    CoreEmpresa? localEmpresa = await empresaRepo.findById(tenantId);
+    final empresas = await empresaRepo.findAll();
 
-    // 2. Se não existir no banco local (primeiro acesso no dispositivo com este usuário)
-    if (localUser == null || localEmpresa == null) {
+    // P2-03/AUTH-001: Busca empresa pelo tenantId real do usuário autenticado.
+    // NÃO usa firstOrNull cego — garante que o usuário pertence à empresa.
+    CoreEmpresa? localEmpresa = empresas.where((e) => e.id == tenantId).firstOrNull;
+
+    // Fallback: empresa não-demo cujo ID coincide com membro do usuário
+    if (localEmpresa == null) {
+      final membros = await membroRepo.findAll();
+      final tenantIds = membros.map((m) => m.tenantId).toSet();
+      localEmpresa = empresas
+          .where((e) => tenantIds.contains(e.id) && e.nomeFantasia != 'FINCORE Food Demo')
+          .firstOrNull;
+    }
+
+    // Se ainda null, não existe empresa válida no banco — precisa de bootstrap
+    CoreUsuario? localUser = await usuarioRepo.findById(userInfo.usuarioId);
+    localUser ??= (await usuarioRepo.findAll())
+        .where((u) => u.tenantId == tenantId)
+        .firstOrNull;
+
+    final bool hasRealCompany = localEmpresa != null && localEmpresa.nomeFantasia != 'FINCORE Food Demo';
+    final bool hasUser = localUser != null;
+
+    // 2. Se já existir empresa real no banco local, configura o contexto e retorna
+    if (hasUser && hasRealCompany) {
+      tenantContext.setContext(empresa: localEmpresa, usuario: localUser);
+      return true;
+    }
+
+    if (!hasUser || !hasRealCompany) {
       final db = DependencyInjection().get<FincoreDatabase>();
       
       try {
@@ -40,11 +66,11 @@ class SessionInitializationService {
           // 3. Preenche temporariamente o contexto na memória para que os Repositórios permitam o Save (segurança do Tenancy)
           tenantContext.setContext(empresa: localEmpresa!, usuario: localUser!);
 
-          // Salva Usuário
-          await usuarioRepo.save(localUser!);
-          
           // Salva Empresa
           await empresaRepo.save(localEmpresa!);
+
+          // Salva Usuário
+          await usuarioRepo.save(localUser!);
           
           // Salva Configuração
           final configRepo = DependencyInjection().get<EmpresaConfiguracaoRepository>();
@@ -57,9 +83,13 @@ class SessionInitializationService {
             await membroRepo.save(localMembro);
           }
         });
-      } catch (e) {
-        // Se falhar o bootstrap (sem internet ou erro), retornamos false
-        print('Erro no bootstrap: $e');
+      } catch (e, st) {
+        LogService.instance.error(
+          LogModule.startup,
+          'Falha na inicialização do bootstrap de sessão',
+          exception: e.toString(),
+          stackTrace: st.toString(),
+        );
         return false;
       }
     }

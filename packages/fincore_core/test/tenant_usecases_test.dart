@@ -4,6 +4,10 @@ import 'package:test/test.dart';
 import 'package:fincore_core/fincore_core.dart';
 
 void main() {
+  setUpAll(() {
+    LogService.init('.');
+  });
+
   group('Tenant UseCases Unit Tests', () {
     late FincoreDatabase db;
     late CriarEmpresaUseCase criarUseCase;

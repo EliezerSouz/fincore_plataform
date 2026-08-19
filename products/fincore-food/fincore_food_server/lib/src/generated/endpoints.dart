@@ -14,9 +14,10 @@ import '../admin_endpoint.dart' as _i2;
 import '../auth_endpoint.dart' as _i3;
 import '../bootstrap_endpoint.dart' as _i4;
 import '../greeting_endpoint.dart' as _i5;
-import '../onboarding_endpoint.dart' as _i6;
-import '../sync_endpoint.dart' as _i7;
-import 'package:fincore_food_server/src/generated/sync_push_entry.dart' as _i8;
+import '../map_route_endpoint.dart' as _i6;
+import '../onboarding_endpoint.dart' as _i7;
+import '../sync_endpoint.dart' as _i8;
+import 'package:fincore_food_server/src/generated/sync_push_entry.dart' as _i9;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -46,13 +47,19 @@ class Endpoints extends _i1.EndpointDispatch {
           'greeting',
           null,
         ),
-      'onboarding': _i6.OnboardingEndpoint()
+      'mapRoute': _i6.MapRouteEndpoint()
+        ..initialize(
+          server,
+          'mapRoute',
+          null,
+        ),
+      'onboarding': _i7.OnboardingEndpoint()
         ..initialize(
           server,
           'onboarding',
           null,
         ),
-      'sync': _i7.SyncEndpoint()
+      'sync': _i8.SyncEndpoint()
         ..initialize(
           server,
           'sync',
@@ -157,6 +164,36 @@ class Endpoints extends _i1.EndpointDispatch {
         )
       },
     );
+    connectors['mapRoute'] = _i1.EndpointConnector(
+      name: 'mapRoute',
+      endpoint: endpoints['mapRoute']!,
+      methodConnectors: {
+        'calculateRoute': _i1.MethodConnector(
+          name: 'calculateRoute',
+          params: {
+            'origin': _i1.ParameterDescription(
+              name: 'origin',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'destination': _i1.ParameterDescription(
+              name: 'destination',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call: (
+            _i1.Session session,
+            Map<String, dynamic> params,
+          ) async =>
+              (endpoints['mapRoute'] as _i6.MapRouteEndpoint).calculateRoute(
+            session,
+            params['origin'],
+            params['destination'],
+          ),
+        )
+      },
+    );
     connectors['onboarding'] = _i1.EndpointConnector(
       name: 'onboarding',
       endpoint: endpoints['onboarding']!,
@@ -204,12 +241,17 @@ class Endpoints extends _i1.EndpointDispatch {
               type: _i1.getType<String>(),
               nullable: false,
             ),
+            'plano': _i1.ParameterDescription(
+              name: 'plano',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
           },
           call: (
             _i1.Session session,
             Map<String, dynamic> params,
           ) async =>
-              (endpoints['onboarding'] as _i6.OnboardingEndpoint).criarEmpresa(
+              (endpoints['onboarding'] as _i7.OnboardingEndpoint).criarEmpresa(
             session,
             tenantId: params['tenantId'],
             razaoSocial: params['razaoSocial'],
@@ -219,7 +261,18 @@ class Endpoints extends _i1.EndpointDispatch {
             telefoneEmpresa: params['telefoneEmpresa'],
             usuarioNome: params['usuarioNome'],
             segmento: params['segmento'],
+            plano: params['plano'],
           ),
+        ),
+        'minhaEmpresa': _i1.MethodConnector(
+          name: 'minhaEmpresa',
+          params: {},
+          call: (
+            _i1.Session session,
+            Map<String, dynamic> params,
+          ) async =>
+              (endpoints['onboarding'] as _i7.OnboardingEndpoint)
+                  .minhaEmpresa(session),
         ),
         'status': _i1.MethodConnector(
           name: 'status',
@@ -228,7 +281,7 @@ class Endpoints extends _i1.EndpointDispatch {
             _i1.Session session,
             Map<String, dynamic> params,
           ) async =>
-              (endpoints['onboarding'] as _i6.OnboardingEndpoint)
+              (endpoints['onboarding'] as _i7.OnboardingEndpoint)
                   .status(session),
         ),
         'progressoSetup': _i1.MethodConnector(
@@ -244,7 +297,7 @@ class Endpoints extends _i1.EndpointDispatch {
             _i1.Session session,
             Map<String, dynamic> params,
           ) async =>
-              (endpoints['onboarding'] as _i6.OnboardingEndpoint)
+              (endpoints['onboarding'] as _i7.OnboardingEndpoint)
                   .progressoSetup(
             session,
             params['tenantId'],
@@ -261,7 +314,7 @@ class Endpoints extends _i1.EndpointDispatch {
           params: {
             'changes': _i1.ParameterDescription(
               name: 'changes',
-              type: _i1.getType<List<_i8.SyncPushEntry>>(),
+              type: _i1.getType<List<_i9.SyncPushEntry>>(),
               nullable: false,
             )
           },
@@ -269,7 +322,7 @@ class Endpoints extends _i1.EndpointDispatch {
             _i1.Session session,
             Map<String, dynamic> params,
           ) async =>
-              (endpoints['sync'] as _i7.SyncEndpoint).push(
+              (endpoints['sync'] as _i8.SyncEndpoint).push(
             session,
             params['changes'],
           ),
@@ -287,7 +340,7 @@ class Endpoints extends _i1.EndpointDispatch {
             _i1.Session session,
             Map<String, dynamic> params,
           ) async =>
-              (endpoints['sync'] as _i7.SyncEndpoint).pull(
+              (endpoints['sync'] as _i8.SyncEndpoint).pull(
             session,
             params['lastSyncAt'],
           ),

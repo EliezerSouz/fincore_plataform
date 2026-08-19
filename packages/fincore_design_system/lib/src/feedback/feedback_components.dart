@@ -54,7 +54,7 @@ class AppEmptyState extends StatelessWidget {
             const SizedBox(height: 20),
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textSecondary,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -65,7 +65,7 @@ class AppEmptyState extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 subtitle!,
-                style: const TextStyle(
+                style: TextStyle(
                   color: FincoreColors.textMuted,
                   fontSize: 13,
                 ),
@@ -107,7 +107,7 @@ class AppLoading extends StatelessWidget {
           SizedBox(
             width: size,
             height: size,
-            child: const CircularProgressIndicator(
+            child: CircularProgressIndicator(
               strokeWidth: 3,
               color: FincoreColors.primary,
             ),
@@ -116,7 +116,7 @@ class AppLoading extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               message!,
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textMuted,
                 fontSize: 13,
               ),
@@ -161,7 +161,7 @@ class AppErrorState extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               message,
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textSecondary,
                 fontSize: 14,
               ),
@@ -175,7 +175,7 @@ class AppErrorState extends StatelessWidget {
                 label: const Text('Tentar novamente'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: FincoreColors.primary,
-                  side: const BorderSide(color: FincoreColors.primary),
+                  side: BorderSide(color: FincoreColors.primary),
                 ),
               ),
             ],
@@ -217,7 +217,7 @@ class AppStatusBadge extends StatelessWidget {
   const AppStatusBadge.warning({super.key, required this.label, this.icon})
       : color = FincoreColors.warning;
 
-  const AppStatusBadge.muted({super.key, required this.label, this.icon})
+  AppStatusBadge.muted({super.key, required this.label, this.icon})
       : color = FincoreColors.textMuted;
 
   @override
@@ -281,7 +281,7 @@ class AppInfoTile extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
-              style: const TextStyle(
+              style: TextStyle(
                   color: FincoreColors.textMuted, fontSize: 12)),
           Text(value,
               style: TextStyle(
@@ -301,7 +301,7 @@ class AppInfoTile extends StatelessWidget {
             width: 120,
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textMuted,
                 fontSize: 13,
               ),

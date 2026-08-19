@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:flutter/services.dart';
+import 'package:fincore_core/common/kds_models.dart';
 import '../controllers/pdv_express_controller.dart';
 import 'widgets/pix_payment_modal.dart';
 import 'widgets/stepper_header.dart';
@@ -12,7 +13,14 @@ import 'comprovante_pedido_page.dart';
 
 class PdvExpressScreen extends StatefulWidget {
   final bool isEmbedded;
-  const PdvExpressScreen({super.key, this.isEmbedded = false});
+  final OrdemPreparo? ordemParaEditar;
+  final String? repetirPedidoId;
+  const PdvExpressScreen({
+    super.key,
+    this.isEmbedded = false,
+    this.ordemParaEditar,
+    this.repetirPedidoId,
+  });
 
   @override
   State<PdvExpressScreen> createState() => _PdvExpressScreenState();
@@ -36,7 +44,10 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
   @override
   void initState() {
     super.initState();
-    _controller = PdvExpressController();
+    _controller = PdvExpressController(
+      ordemParaEditar: widget.ordemParaEditar,
+      repetirPedidoId: widget.repetirPedidoId,
+    );
     _controller.addListener(_onControllerChanged);
 
     // Shake: 200ms horizontal (conforme Motion Guidelines PRD-006)
@@ -93,37 +104,103 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     _shakeController.forward(from: 0.0);
   }
 
+  void _showShortcutHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final shortcuts = [
+          const _ShortcutEntry(key: 'F1', label: 'Selecionar Cliente & Entrega'),
+          const _ShortcutEntry(key: 'F2', label: 'Catálogo de Produtos'),
+          const _ShortcutEntry(key: 'F3', label: 'Forma de Pagamento'),
+          const _ShortcutEntry(key: 'F12', label: 'Finalizar / Processar Venda'),
+          const _ShortcutEntry(key: 'ESC', label: 'Limpar Venda / Cancelar'),
+        ];
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2E),
+          title: Row(
+            children: [
+              Icon(Icons.keyboard, color: FincoreColors.primary),
+              const SizedBox(width: 10),
+              const Text(
+                'Atalhos de Teclado',
+                style: TextStyle(color: FincoreColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: shortcuts.map((s) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: FincoreColors.surfaceElevated,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: FincoreColors.border),
+                      ),
+                      child: Text(
+                        s.key,
+                        style: TextStyle(
+                          color: FincoreColors.primary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        s.label,
+                        style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('FECHAR', style: TextStyle(color: FincoreColors.primary)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // ── Handler Central de Atalhos de Teclado ────────────────────────
-  // Mapa de atalhos conforme Épico I — Task 1.2 (PRD-008) e PRD-006
   void _handleKeyEvent(KeyEvent event) async {
     if (event is! KeyDownEvent) return;
 
     final key = event.logicalKey;
 
-    // F1 — Ir para Catálogo de Produtos e focar busca
+    // F1 — Ir para Identificação do Cliente
     if (key == LogicalKeyboardKey.f1) {
       _flashKeyLabel('F1');
+      _controller.setPassoAtual(0);
+    }
+    // F2 — Ir para Catálogo de Produtos e focar busca
+    else if (key == LogicalKeyboardKey.f2) {
+      _flashKeyLabel('F2');
       _controller.setPassoAtual(1);
       _searchFocusNode.requestFocus();
     }
-    // F2 — Ir para Identificação do Cliente
-    else if (key == LogicalKeyboardKey.f2) {
-      _flashKeyLabel('F2');
-      _controller.setPassoAtual(0);
-      _keyboardFocusNode.requestFocus();
-    }
-    // F3 — Ir direto para Pagamento
+    // F3 — Ir para Pagamento
     else if (key == LogicalKeyboardKey.f3) {
       _flashKeyLabel('F3');
       _controller.setPassoAtual(2);
-      _keyboardFocusNode.requestFocus();
     }
-    // F4 — Avançar para próxima etapa (sequencial)
+    // F4 — Avançar Etapa
     else if (key == LogicalKeyboardKey.f4) {
       _flashKeyLabel('F4');
       _avancarPasso();
     }
-    // F5 — Voltar para etapa anterior
+    // F5 — Voltar Etapa
     else if (key == LogicalKeyboardKey.f5) {
       _flashKeyLabel('F5');
       _voltarPasso();
@@ -133,7 +210,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       _flashKeyLabel('F9');
       _showReimprimirToast();
     }
-    // F12 — Confirmar Venda / Finalizar pagamento (PRD-006: F12 dispara AguardandoPIX)
+    // F12 — Confirmar Venda / Finalizar
     else if (key == LogicalKeyboardKey.f12) {
       _flashKeyLabel('F12');
       if (_controller.passoAtual == 2 || _controller.state == PdvState.selectingPayment) {
@@ -143,7 +220,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: FincoreColors.danger,
-            content: Text('F12: Preencha a etapa atual antes de confirmar.'),
+            content: Text('Por favor, preencha as informações obrigatórias da etapa atual.'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -211,8 +288,34 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
   }
 
   void _showSuccessNotification() {
-    // Abre a tela de comprovante/impressão
     final lastVenda = _controller.lastVenda;
+    final isEdit = widget.ordemParaEditar != null;
+
+    if (isEdit) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: FincoreColors.success,
+          content: Row(
+            children: const [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Alterações salvas com sucesso!',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      if (context.mounted) {
+        Navigator.of(context).pop(true);
+      }
+      return;
+    }
+
     if (lastVenda != null && context.mounted) {
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -289,7 +392,6 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     return KeyboardListener(
       focusNode: _keyboardFocusNode,
       onKeyEvent: _handleKeyEvent,
-      // Shake aplica-se ao corpo principal (AnimatedBuilder, PRD-006 Motion)
       child: AnimatedBuilder(
         animation: _shakeAnimation,
         builder: (context, child) => Transform.translate(
@@ -298,44 +400,83 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
         ),
         child: Scaffold(
           backgroundColor: widget.isEmbedded ? Colors.transparent : FincoreColors.background,
-          appBar: widget.isEmbedded ? null : _buildAppBar(),
           body: Stack(
             children: [
-              Row(
+              Column(
                 children: [
-                  // ── Coluna Esquerda: Wizard de Etapas ──────────────
-                  Expanded(
-                    flex: 3,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // StepperHeader com borda de foco Laranja Forno (PRD-006)
-                          _FocusedBorderWrapper(
+                  // ── Top Row: Back button, Title, StepperHeader, and Keyboard Help Button ──
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.arrow_back, color: FincoreColors.textPrimary),
+                          onPressed: () => Navigator.of(context).pop(false),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.ordemParaEditar != null ? 'Editar Pedido' : 'Novo Pedido',
+                              style: const TextStyle(
+                                color: FincoreColors.textPrimary,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const Text(
+                              'Central de vendas',
+                              style: TextStyle(
+                                color: FincoreColors.textMuted,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 24),
+                        Expanded(
+                          child: _FocusedBorderWrapper(
                             isActive: _keyboardFocusNode.hasFocus,
                             child: StepperHeader(controller: _controller),
                           ),
-                          const SizedBox(height: 20),
-                          Expanded(
-                            child: _buildStepView(),
-                          ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 16),
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_outlined, color: FincoreColors.textSecondary),
+                          tooltip: 'Atalhos de Teclado',
+                          onPressed: _showShortcutHelpDialog,
+                        ),
+                      ],
                     ),
                   ),
 
-                  // ── Divisor Vertical ──────────────────────────────
-                  Container(
-                    width: 1.5,
-                    color: FincoreColors.border,
-                  ),
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // ── Coluna Esquerda: Conteúdo das Etapas ──
+                        Expanded(
+                          flex: 3,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: _buildStepView(),
+                          ),
+                        ),
 
-                  // ── Coluna Direita: Painel Operacional Persistente ─
-                  OrderSummaryPanel(
-                    controller: _controller,
-                    onBack: _voltarPasso,
-                    onNext: _avancarPasso,
+                        // ── Coluna Direita: Painel Operacional Persistente ──
+                        Padding(
+                          padding: const EdgeInsets.only(right: 20, bottom: 16),
+                          child: OrderSummaryPanel(
+                            controller: _controller,
+                            onBack: _voltarPasso,
+                            onNext: _avancarPasso,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -345,141 +486,91 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                 PixPaymentModal(controller: _controller),
             ],
           ),
-          bottomNavigationBar: _buildShortcutFooter(),
+          bottomNavigationBar: null,
         ),
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
-      backgroundColor: FincoreColors.surface,
-      elevation: 0,
-      title: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: FincoreColors.primary,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: const Text(
-              'FINCORE',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: Colors.white),
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Text(
-            'Food service PDV Express',
-            style: TextStyle(fontSize: 16, color: FincoreColors.textPrimary, fontWeight: FontWeight.w300),
-          ),
-        ],
-      ),
-      actions: [
-        // Badge de Conectividade Offline-First (PRD-006)
-        Container(
-          margin: const EdgeInsets.only(right: 16),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: FincoreColors.background,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: FincoreColors.success),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.wifi, color: FincoreColors.success, size: 16),
-              SizedBox(width: 6),
-              Text(
-                'LOCAL - SYNC OK',
-                style: TextStyle(color: FincoreColors.success, fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Footer de Atalhos (PRD-006 — Navegação por Teclado) ──────────
+  // ── Footer Flutuante de Atalhos em Pílula (Mockup Original) ───────
   Widget _buildShortcutFooter() {
     final shortcuts = [
-      _ShortcutEntry(key: 'F1', label: 'Catálogo / Buscar'),
-      _ShortcutEntry(key: 'F2', label: 'Dados Cliente'),
-      _ShortcutEntry(key: 'F3', label: 'Ir p/ Pagamento'),
-      _ShortcutEntry(key: 'F4', label: 'Avançar Etapa'),
-      _ShortcutEntry(key: 'F5', label: 'Voltar Etapa'),
-      _ShortcutEntry(key: 'F9', label: 'Reimprimir'),
-      _ShortcutEntry(key: 'F12', label: 'Confirmar Venda'),
-      _ShortcutEntry(key: 'ESC', label: 'Limpar/Sair'),
+      const _ShortcutEntry(key: 'F1', label: 'Cliente'),
+      const _ShortcutEntry(key: 'F2', label: 'Produtos'),
+      const _ShortcutEntry(key: 'F3', label: 'Pagamento'),
+      const _ShortcutEntry(key: 'F12', label: 'Finalizar'),
+      const _ShortcutEntry(key: 'ESC', label: 'Limpar'),
     ];
 
     return Container(
-      color: FincoreColors.surface,
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-      child: Row(
-        children: shortcuts.map((s) {
-          final isActive = _activaKeyLabel == s.key;
-          return Expanded(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
+      color: Colors.transparent,
+      padding: const EdgeInsets.only(bottom: 16, top: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
               decoration: BoxDecoration(
-                // Borda Laranja Forno 2px no atalho ativo (PRD-006)
-                border: Border.all(
-                  color: isActive ? FincoreColors.primary : Colors.transparent,
-                  width: 2,
-                ),
-                borderRadius: BorderRadius.circular(6),
-                color: isActive
-                    ? FincoreColors.primary.withValues(alpha: 0.15)
-                    : Colors.transparent,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: isActive ? FincoreColors.primary : FincoreColors.border,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      s.key,
-                      style: TextStyle(
-                        color: isActive ? Colors.white : FincoreColors.textSecondary,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    s.label,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isActive ? FincoreColors.primary : FincoreColors.textMuted,
-                      fontSize: 9,
-                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                    ),
+                color: FincoreColors.surface,
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: FincoreColors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: shortcuts.map((s) {
+                  final isActive = _activaKeyLabel == s.key;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${s.key}: ',
+                          style: TextStyle(
+                            color: isActive
+                                ? FincoreColors.primary
+                                : FincoreColors.textPrimary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        Text(
+                          s.label,
+                          style: TextStyle(
+                            color: isActive
+                                ? FincoreColors.primary
+                                : FincoreColors.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
             ),
-          );
-        }).toList(),
+          ],
+        ),
       ),
     );
   }
 }
 
-// ── Wrapper de Borda de Foco Laranja Forno 2px (PRD-006) ───────────
-// Exibe a borda laranja ao redor do elemento quando o teclado está ativo,
-// sinalizando ao operador que os atalhos estão prontos para uso.
+class _ShortcutEntry {
+  final String key;
+  final String label;
+  const _ShortcutEntry({required this.key, required this.label});
+}
+
 class _FocusedBorderWrapper extends StatelessWidget {
   final bool isActive;
   final Widget child;
@@ -496,7 +587,6 @@ class _FocusedBorderWrapper extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          // Borda Laranja Forno 2px no modo de teclado ativo (PRD-006)
           color: isActive ? FincoreColors.primary : Colors.transparent,
           width: 2,
         ),
@@ -504,11 +594,4 @@ class _FocusedBorderWrapper extends StatelessWidget {
       child: child,
     );
   }
-}
-
-// ── Model de dados do footer de atalhos ──────────────────────────────
-class _ShortcutEntry {
-  final String key;
-  final String label;
-  const _ShortcutEntry({required this.key, required this.label});
 }

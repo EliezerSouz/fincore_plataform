@@ -38,6 +38,11 @@ class ProdutoRepository extends SyncableRepository<Produto> {
         'controlaEstoque': entity.controlaEstoque,
         'ordemProducao': entity.ordemProducao,
         'ativo': entity.ativo,
+        'sku': entity.sku,
+        'codigoBarras': entity.codigoBarras,
+        'imagem': entity.imagem,
+        'corEtiqueta': entity.corEtiqueta,
+        'metadata': entity.metadataPayload,
         'syncVersion': entity.metadata.version,
         'createdAt': entity.metadata.createdAt.toIso8601String(),
         'updatedAt': entity.metadata.updatedAt.toIso8601String(),
@@ -48,7 +53,7 @@ class ProdutoRepository extends SyncableRepository<Produto> {
   @override
   Future<Produto?> findById(String id) async {
     final row = await (db.select(db.produtosTable)
-          ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId)))
+          ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId) & t.deletedAt.isNull()))
         .getSingleOrNull();
     if (row == null) return null;
     return _mapToDomain(row);
@@ -99,6 +104,11 @@ class ProdutoRepository extends SyncableRepository<Produto> {
             controlaEstoque: produto.controlaEstoque,
             ordemProducao: produto.ordemProducao,
             ativo: produto.ativo,
+            sku: Value(produto.sku),
+            codigoBarras: Value(produto.codigoBarras),
+            imagem: Value(produto.imagem),
+            corEtiqueta: Value(produto.corEtiqueta),
+            metadata: Value(produto.metadataPayload),
             createdAt: produto.metadata.createdAt,
             updatedAt: DateTime.now().toUtc(),
             createdBy: produto.metadata.createdBy,
@@ -143,6 +153,11 @@ class ProdutoRepository extends SyncableRepository<Produto> {
       controlaEstoque: data.controlaEstoque,
       ordemProducao: data.ordemProducao,
       ativo: data.ativo,
+      sku: data.sku,
+      codigoBarras: data.codigoBarras,
+      imagem: data.imagem,
+      corEtiqueta: data.corEtiqueta,
+      metadataPayload: data.metadata,
       metadata: SyncMetadata(
         version: data.syncVersion,
         createdAt: data.createdAt,

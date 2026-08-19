@@ -1,40 +1,24 @@
 import 'dart:io';
-import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
+import 'package:drift/drift.dart';
+import 'database_connection.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_food_client/fincore_food_client.dart';
-import 'package:fincore_core/database/fincore_database.dart';
+// fincore_core barrel — cobre todos os repositórios, serviços e modelos do core
 import 'package:fincore_core/fincore_core.dart';
-import 'package:fincore_core/database/fincore_seeds.dart';
-import 'package:fincore_core/di/dependency_injection.dart';
-import 'package:fincore_core/context/tenant_context.dart';
-import 'package:fincore_core/common/core_models.dart';
-import 'package:fincore_core/common/domain_primitives.dart';
-import 'package:fincore_core/repository/categoria_repository.dart';
-import 'package:fincore_core/repository/produto_repository.dart';
-import 'package:fincore_core/repository/cliente_repository.dart';
-import 'package:fincore_core/repository/local_entrega_repository.dart';
-import 'package:fincore_core/repository/forma_pagamento_repository.dart';
-import 'package:fincore_core/repository/taxa_entrega_repository.dart';
-import 'package:fincore_core/sync/outbox_service.dart';
-import 'package:fincore_core/sync/sync_engine.dart';
 import 'package:fincore_food_flutter/src/shared/data/sync/supabase_sync_service.dart';
 import 'package:fincore_pricing/repository/tabela_precificacao_repository.dart';
 import 'package:fincore_pricing/repository/item_tabela_precificacao_repository.dart';
 import 'package:fincore_pricing/repository/produto_tabela_precificacao_repository.dart';
+import 'package:fincore_pricing/repository/categoria_tabela_precificacao_repository.dart';
 import 'package:fincore_pricing/pricing_engine.dart';
-import 'package:fincore_core/repository/ordem_preparo_repository.dart';
-import 'package:fincore_core/repository/audit_log_repository.dart';
-import 'package:fincore_core/repository/lote_insumo_repository.dart';
-import 'package:fincore_core/usecase/estornar_lote_estoque_usecase.dart';
 import 'package:fincore_food_flutter/src/dashboard/data/dashboard_repository.dart';
 import 'package:fincore_food_flutter/src/dashboard/domain/dashboard_service.dart';
-import 'package:fincore_core/repository/empresa_configuracao_repository.dart';
-import 'package:fincore_core/repository/usuario_repository.dart';
-import 'package:fincore_core/repository/empresa_repository.dart';
-import 'package:fincore_core/repository/membro_empresa_repository.dart';
+import 'package:fincore_food_flutter/src/dashboard/controllers/dashboard_controller.dart';
+import 'package:fincore_food_flutter/src/clientes/controllers/clientes_controller.dart';
 import 'package:fincore_core/repository/print_job_repository.dart';
 import 'package:fincore_food_flutter/src/cap/printing/usecases/print_use_case.dart';
 
@@ -57,15 +41,22 @@ import 'package:fincore_food_flutter/src/cap/printing/usecases/print_use_case.da
 class DatabaseInitializer {
   static Future<void> init(Client client) async {
     final stopwatch = Stopwatch()..start();
-    final bool isTest = Platform.environment.containsKey('FLUTTER_TEST');
+    final bool isTest = !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
 
     // ──────────────────────────────────────────────────────────────
     // 0. Inicializar Serviço de Logs unificado
     // ──────────────────────────────────────────────────────────────
-    if (!isTest) {
+    if (kIsWeb) {
+      LogService.init('');
+      await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso (Web).');
+    } else if (!isTest) {
       final docDir = await getApplicationDocumentsDirectory();
       LogService.init(docDir.path);
       await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso.');
+    } else {
+      try {
+        LogService.init(Directory.systemTemp.path);
+      } catch (_) {}
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -81,12 +72,44 @@ class DatabaseInitializer {
     // 2. Abrir banco de dados Drift SQLite (offline-first local)
     // ──────────────────────────────────────────────────────────────
     final FincoreDatabase db;
-    if (isTest) {
-      db = FincoreDatabase(NativeDatabase.memory());
+    if (kIsWeb) {
+      db = FincoreDatabase(createDatabaseConnection('fincore_v3'));
+    } else if (isTest) {
+      db = FincoreDatabase(createDatabaseConnection('fincore_v3', inMemory: true));
     } else {
       final dbFolder = await getApplicationDocumentsDirectory();
-      final file = File(p.join(dbFolder.path, 'fincore_v3.db'));
-      db = FincoreDatabase(NativeDatabase(file));
+      final dbPath = p.join(dbFolder.path, 'fincore_v3.db');
+
+      // Auto-healer: Se o banco existe, verifica se há dados corrompidos (usuários com tenantId nulo)
+      // e deleta o arquivo para forçar um reset limpo (zero-state).
+      if (checkDatabaseExists(dbPath)) {
+        try {
+          final tempDb = FincoreDatabase(createDatabaseConnection(dbPath));
+          final corruptedUsers = await tempDb.select(tempDb.usuariosTable).get();
+          bool needReset = false;
+          for (final u in corruptedUsers) {
+            print('DEBUG USER: id=${u.id}, email=${u.email}, tenantId=${u.tenantId}');
+            // Se o usuário real (que tem email cadastrado) está com tenantId nulo, vazio ou associado à empresa de demonstração, precisamos resetar
+            if (u.email != null) {
+              if (u.tenantId == null || 
+                  u.tenantId!.isEmpty || 
+                  u.tenantId == '00000000-0000-4000-a000-000000000001') {
+                needReset = true;
+                break;
+              }
+            }
+          }
+          await tempDb.close();
+          if (needReset) {
+            deleteDatabaseFile(dbPath);
+            // Também garante que vamos limpar o token/sessão local cache para autenticar do zero
+            await Supabase.instance.client.auth.signOut();
+            LogService.instance.warning(LogModule.startup, 'Auto-healer: Banco de dados com dados corrompidos resetado com sucesso.');
+          }
+        } catch (_) {}
+      }
+
+      db = FincoreDatabase(createDatabaseConnection(dbPath));
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -94,23 +117,31 @@ class DatabaseInitializer {
     // ──────────────────────────────────────────────────────────────
     final context = TenantContext();
 
+    // Limpeza proativa de registros legados do SQLite local com tenant-demo-001 (formato não-UUID)
+    try {
+      await (db.delete(db.outboxSync)..where((t) => t.tenantId.equals('tenant-demo-001'))).go();
+      await (db.delete(db.empresasTable)..where((t) => t.id.equals('tenant-demo-001'))).go();
+      // Remove registros de auditoria com IDs legados não-UUID ("AUD-XXX") que quebram o Supabase
+      await (db.delete(db.outboxSync)
+            ..where((t) => t.entity.equals('audit_log') & t.entityId.like('AUD-%')))
+          .go();
+      // Limpa do outbox a tabela local categorias_tabelas_precificacao que não existe no Supabase
+      await (db.delete(db.outboxSync)
+            ..where((t) => t.entity.equals('categorias_tabelas_precificacao')))
+          .go();
+    } catch (_) {}
+
     // ──────────────────────────────────────────────────────────────
-    // 4. Seeds de dados iniciais
+    // 4. Seeds de dados iniciais (com UUID válido)
     // ──────────────────────────────────────────────────────────────
     final empresas = await db.select(db.empresasTable).get();
     if (empresas.isEmpty) {
       await FincoreSeeds.populate(db);
     }
-
     // ──────────────────────────────────────────────────────────────
     // 5. Infraestrutura de Sync
-    // O OutboxService e SyncEngine são criados ANTES dos repositórios
-    // para que possam ser injetados como dependência obrigatória
     // ──────────────────────────────────────────────────────────────
     final outboxService = OutboxService(db: db, context: context);
-
-    // SupabaseSyncService será configurado após a inicialização do Supabase
-    // O SyncEngine recebe o handler de push via construtor
     late final SupabaseSyncService supabaseSyncService;
 
     final syncEngine = SyncEngine(
@@ -155,8 +186,37 @@ class DatabaseInitializer {
 
     // Repositórios sem sync bidirecional por enquanto (somente leitura remota)
     final usuarioRepo = UsuarioRepository(db: db, context: context);
-    final empresaRepo = EmpresaRepository(db: db, context: context);
+    final empresaRepo = EmpresaRepository(
+      db: db,
+      context: context,
+      outbox: outboxService,
+      syncEngine: syncEngine,
+    );
+
+    // Ativar o contexto do Tenant com os dados do banco local
+    final coreEmpresas = await empresaRepo.findAll();
+    if (coreEmpresas.isNotEmpty) {
+      final emp = coreEmpresas.first;
+      final coreUsuarios = await usuarioRepo.findAll();
+      // ⚠️  SEGURANÇA (P0-03): Este usuário placeholder é criado APENAS como contexto
+      // mínimo para que o banco inicialize antes da autenticação real via Supabase.
+      // role: null impede que qualquer módulo administrativo seja acessado sem login.
+      // O FincoreRootRouter substituirá este contexto pelo usuário real após o login.
+      final usr = coreUsuarios.isNotEmpty
+          ? coreUsuarios.first
+          : CoreUsuario(
+              id: '00000000-0000-0000-0000-000000000001',
+              tenantId: emp.id,
+              nome: 'Sistema',
+              email: null,
+              role: null, // Sem role — exige autenticação antes de conceder acesso
+              criadoEm: DateTime.now(),
+              atualizadoEm: DateTime.now(),
+            );
+      context.setContext(empresa: emp, usuario: usr);
+    }
     final membroRepo = MembroEmpresaRepository(db: db, context: context);
+    final empresaConviteRepo = EmpresaConviteRepository(db: db, context: context);
     final ordemPreparoRepo = OrdemPreparoRepository(db: db, context: context);
     final loteInsumoRepo = LoteInsumoRepository(db: db, context: context);
     final estornarLoteEstoqueUseCase = EstornarLoteEstoqueUseCase(loteRepository: loteInsumoRepo);
@@ -178,11 +238,15 @@ class DatabaseInitializer {
     final assocRepo = ProdutoTabelaPrecificacaoRepository(
       db: db, context: context, outbox: outboxService, syncEngine: syncEngine,
     );
+    final catAssocRepo = CategoriaTabelaPrecificacaoRepository(
+      db: db, context: context, outbox: outboxService, syncEngine: syncEngine,
+    );
 
     final pricingEngine = PricingEngine(
       tabelaRepo: tabelaRepo,
       itemRepo: itemRepo,
       assocRepo: assocRepo,
+      catAssocRepo: catAssocRepo,
     );
 
     // ──────────────────────────────────────────────────────────────
@@ -202,11 +266,13 @@ class DatabaseInitializer {
     di.register<TaxaEntregaRepository>(taxaRepo);
     di.register<EmpresaConfiguracaoRepository>(configRepo);
     di.register<MembroEmpresaRepository>(membroRepo);
+    di.register<EmpresaConviteRepository>(empresaConviteRepo);
     di.register<UsuarioRepository>(usuarioRepo);
     di.register<EmpresaRepository>(empresaRepo);
     di.register<TabelaPrecificacaoRepository>(tabelaRepo);
     di.register<ItemTabelaPrecificacaoRepository>(itemRepo);
     di.register<ProdutoTabelaPrecificacaoRepository>(assocRepo);
+    di.register<CategoriaTabelaPrecificacaoRepository>(catAssocRepo);
     di.register<PricingEngine>(pricingEngine);
     di.register<OrdemPreparoRepository>(ordemPreparoRepo);
     di.register<LoteInsumoRepository>(loteInsumoRepo);
@@ -214,12 +280,33 @@ class DatabaseInitializer {
     // CAP.PRINTING
     di.register<PrintJobRepository>(printJobRepo);
     di.register<PrintUseCase>(printUseCase);
+    di.register<Client>(client);
+
+    // CAP.CLIENTES — Controller registrado após os repositórios dos quais depende
+    try {
+      final oldController = di.get<ClientesController>();
+      oldController.dispose();
+    } catch (_) {}
+
+    final clientesController = ClientesController(
+      clienteRepo: clienteRepo,
+      localRepo: localRepo,
+      taxaRepo: taxaRepo,
+    );
+    di.register<ClientesController>(clientesController);
 
     // CAP.DASHBOARD
-    final dashboardRepo = DashboardRepository(db: db, tenantContext: context, KdsRepo: ordemPreparoRepo);
+    try {
+      final oldDashboardController = di.get<DashboardController>();
+      oldDashboardController.dispose();
+    } catch (_) {}
+
+    final dashboardRepo = DashboardRepository(db: db, tenantContext: context, kdsRepo: ordemPreparoRepo);
     final dashboardService = DashboardService(repository: dashboardRepo);
+    final dashboardController = DashboardController(service: dashboardService);
     di.register<DashboardRepository>(dashboardRepo);
     di.register<DashboardService>(dashboardService);
+    di.register<DashboardController>(dashboardController);
 
     // ──────────────────────────────────────────────────────────────
     // 8. Inicializar Supabase SDK + SupabaseSyncService
@@ -231,7 +318,7 @@ class DatabaseInitializer {
       if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty) {
         await Supabase.initialize(
           url: supabaseUrl,
-          anonKey: supabaseKey,
+          publishableKey: supabaseKey,
           debug: false,
         );
 
@@ -250,7 +337,7 @@ class DatabaseInitializer {
       final elapsedStr = elapsedMs < 1000 ? '${elapsedMs}ms' : '${(elapsedMs / 1000).toStringAsFixed(2)}s';
       final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
       final supabaseShort = supabaseUrl.isNotEmpty
-          ? supabaseUrl.replaceFirst('https://', '').split('.').first + '.supabase.co'
+          ? '${supabaseUrl.replaceFirst('https://', '').split('.').first}.supabase.co'
           : 'nao configurado';
 
       await FincoreLogger.instance.beginCycle(
@@ -258,9 +345,9 @@ class DatabaseInitializer {
         'INICIALIZACAO DO SISTEMA FINCORE v1.2.0',
       );
       await LogService.instance.info(LogModule.startup, 'Banco SQLite local inicializado com sucesso (fincore_v3.db)');
-      await LogService.instance.info(LogModule.startup, 'Conexão Supabase configurada ($supabaseShort)');
-      await LogService.instance.info(LogModule.startup, 'Mecanismo de sincronização ativo (Fila de Envio + Tempo Real)');
-      await LogService.instance.info(LogModule.startup, 'Inicialização do sistema concluída com sucesso em $elapsedStr');
+      await LogService.instance.info(LogModule.startup, 'Conexao Supabase configurada ($supabaseShort)');
+      await LogService.instance.info(LogModule.startup, 'Mecanismo de sincronizacao ativo (Fila de Envio + Tempo Real)');
+      await LogService.instance.info(LogModule.startup, 'Inicializacao do sistema concluida com sucesso em $elapsedStr');
       await FincoreLogger.instance.endCycle(LogModule.startup, 'SISTEMA PRONTO PARA USO');
     }
   }

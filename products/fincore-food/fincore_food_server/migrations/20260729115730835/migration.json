@@ -1,0 +1,54 @@
+{
+  "actions": [
+    {
+      "type": "alterTable",
+      "alterTable": {
+        "name": "empresa_configuracao",
+        "schema": "public",
+        "addColumns": [],
+        "deleteColumns": [],
+        "modifyColumns": [],
+        "addIndexes": [
+          {
+            "indexName": "empresa_config_tenant_unique",
+            "elements": [
+              {
+                "type": 0,
+                "definition": "tenantId"
+              }
+            ],
+            "type": "btree",
+            "isUnique": true,
+            "isPrimary": false
+          }
+        ],
+        "deleteIndexes": [],
+        "addForeignKeys": [],
+        "deleteForeignKeys": [],
+        "warnings": [
+          {
+            "type": "uniqueIndexCreated",
+            "message": "Unique index \"empresa_config_tenant_unique\" is added to table \"empresa_configuracao\". If there are existing rows with duplicate values, this migration will fail.",
+            "table": "empresa_configuracao",
+            "columns": [
+              "tenantId"
+            ],
+            "destrucive": false
+          }
+        ]
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "type": "uniqueIndexCreated",
+      "message": "Unique index \"empresa_config_tenant_unique\" is added to table \"empresa_configuracao\". If there are existing rows with duplicate values, this migration will fail.",
+      "table": "empresa_configuracao",
+      "columns": [
+        "tenantId"
+      ],
+      "destrucive": false
+    }
+  ],
+  "migrationApiVersion": 1
+}

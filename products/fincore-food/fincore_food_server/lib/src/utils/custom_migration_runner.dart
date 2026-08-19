@@ -56,6 +56,10 @@ class CustomMigrationRunner {
           "appliedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
       ''');
+
+      // Limpeza auto-regenerativa: remove o registro das migrações de estoque que falharam no meio
+      await conn.execute("DELETE FROM public._custom_applied_migrations WHERE name = '20260816_estoque_financeiro.sql';");
+      await conn.execute("DELETE FROM public._custom_applied_migrations WHERE name = '20260816_fix_estoque_rls.sql';");
       
       // Procurar arquivos .sql na pasta migrations
       final migrationDir = Directory('migrations');
@@ -80,17 +84,24 @@ class CustomMigrationRunner {
           
           if (result.isEmpty) {
             print('🚀 [CustomMigrationRunner] Aplicando migração: $fileName...');
-            final sqlContent = await file.readAsString();
-            
-            // Dividir os comandos por ponto e vírgula
-            final statements = sqlContent
-                .split(';')
-                .map((s) => s.trim())
-                .where((s) => s.isNotEmpty);
-            
-            for (final statement in statements) {
-              await conn.execute(statement);
-            }
+             final sqlContent = await file.readAsString();
+             final trimmedUpper = sqlContent.trim().toUpperCase();
+             
+             if (trimmedUpper.startsWith('DO \$\$') || trimmedUpper.startsWith('DO\$\$')) {
+               await conn.execute(sqlContent);
+             } else {
+               final statements = sqlContent.split(';');
+               for (var stmt in statements) {
+                 final clean = stmt
+                     .split('\n')
+                     .where((l) => !l.trim().startsWith('--'))
+                     .join('\n')
+                     .trim();
+                 if (clean.isNotEmpty) {
+                   await conn.execute(clean);
+                 }
+               }
+             }
             
             // Registrar como aplicada
             await conn.execute(

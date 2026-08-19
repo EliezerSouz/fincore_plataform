@@ -84,7 +84,7 @@ class AppMetricCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 title.toUpperCase(),
-                style: const TextStyle(
+                style: TextStyle(
                   color: FincoreColors.textMuted,
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
@@ -95,7 +95,7 @@ class AppMetricCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   subtitle!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: FincoreColors.textSecondary,
                     fontSize: 11,
                   ),
@@ -188,7 +188,7 @@ class AppDashboardCard extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: FincoreColors.textPrimary,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -197,7 +197,7 @@ class AppDashboardCard extends StatelessWidget {
                       if (subtitle != null)
                         Text(
                           subtitle!,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: FincoreColors.textMuted,
                             fontSize: 11,
                           ),
@@ -216,7 +216,7 @@ class AppDashboardCard extends StatelessWidget {
           ),
           // Footer
           if (footer != null) ...[
-            const Divider(color: FincoreColors.border, height: 1),
+            Divider(color: FincoreColors.border, height: 1),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: footer!,

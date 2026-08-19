@@ -6,8 +6,15 @@ import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/repository/cliente_repository.dart';
 import 'package:fincore_core/usecase/cliente_usecases.dart';
+import 'package:fincore_core/sync/outbox_service.dart';
+import 'package:fincore_core/src/logging/log_service.dart';
+import 'package:fincore_core/common/master_data_models.dart';
 
 void main() {
+  setUpAll(() {
+    LogService.init('.');
+  });
+
   group('Cliente UseCases Unit Tests', () {
     late FincoreDatabase db;
     late TenantContext context;
@@ -40,6 +47,7 @@ void main() {
       country: 'BR',
       createdFrom: 'Test',
       version: 1,
+      tipoPessoa: 'JURIDICA',
       metadata: mockMetadata,
     );
 
@@ -57,7 +65,8 @@ void main() {
       context.clear();
       context.setContext(empresa: mockEmpresa, usuario: mockUsuario);
 
-      repository = ClienteRepository(db: db, context: context);
+      final outboxService = OutboxService(db: db, context: context);
+      repository = ClienteRepository(db: db, context: context, outbox: outboxService);
       criarUseCase = CriarClienteUseCase(repository: repository);
       editarUseCase = EditarClienteUseCase(repository: repository);
       excluirUseCase = ExcluirClienteUseCase(repository: repository);
@@ -179,6 +188,50 @@ void main() {
       final porDoc = await buscarUseCase.execute(query: '111222');
       expect(porDoc.length, equals(1));
       expect(porDoc.first.nome, equals('Ana Paula'));
+    });
+
+    test('Salvar e buscar novos campos em Cliente e busca por apelido e e-mail', () async {
+      final now = DateTime.now();
+      final cliente = Cliente(
+        id: 'client-new-001',
+        tenantId: 'tenant-001',
+        nome: 'Julio Cesar',
+        telefone: '11955554444',
+        email: 'julio@imperio.com',
+        documento: '222.333.444-55',
+        observacoes: 'Observacao',
+        ativo: true,
+        apelido: 'Imperador',
+        dataNascimento: now,
+        preferenciaEntrega: 'Motoboy',
+        limiteCredito: 50000,
+        metadata: SyncMetadata(
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+          createdBy: 'user-001',
+          updatedBy: 'user-001',
+        ),
+      );
+
+      await repository.save(cliente);
+
+      final doBanco = await repository.findById('client-new-001');
+      expect(doBanco, isNotNull);
+      expect(doBanco!.apelido, equals('Imperador'));
+      expect(doBanco.preferenciaEntrega, equals('Motoboy'));
+      expect(doBanco.limiteCredito, equals(50000));
+      expect(doBanco.dataNascimento?.day, equals(now.day));
+
+      // Busca por apelido
+      final porApelido = await buscarUseCase.execute(query: 'Imperador');
+      expect(porApelido.length, equals(1));
+      expect(porApelido.first.nome, equals('Julio Cesar'));
+
+      // Busca por e-mail
+      final porEmail = await buscarUseCase.execute(query: 'julio@imperio.com');
+      expect(porEmail.length, equals(1));
+      expect(porEmail.first.nome, equals('Julio Cesar'));
     });
   });
 }

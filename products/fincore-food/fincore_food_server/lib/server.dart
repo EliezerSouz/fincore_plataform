@@ -13,9 +13,6 @@ import 'src/utils/custom_migration_runner.dart';
 // configuring Relic (Serverpod's web-server), or need custom setup work.
 
 void run(List<String> args) async {
-  // Executar migrações SQL customizadas antes da inicialização do Serverpod
-  await CustomMigrationRunner.run();
-
   // Initialize Serverpod and connect it with your generated code.
   final pod = Serverpod(
     args,
@@ -35,6 +32,9 @@ void run(List<String> args) async {
 
   // Start the server.
   await pod.start();
+
+  // Executar migrações SQL customizadas após a inicialização e criação de tabelas pelo Serverpod
+  await CustomMigrationRunner.run();
 
   // After starting the server, you can register future calls. Future calls are
   // tasks that need to happen in the future, or independently of the request/

@@ -15,6 +15,8 @@ dependencies:
   brasil_fields: ^1.15.0
   fincore_shared:
     path: ../fincore_shared
+  shared_preferences: ^2.2.0
+  uuid: ^4.3.3
 
 dev_dependencies:
   flutter_test:

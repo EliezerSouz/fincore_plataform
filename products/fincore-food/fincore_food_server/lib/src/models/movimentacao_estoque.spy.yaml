@@ -1,0 +1,45 @@
+class: MovimentacaoEstoque
+table: movimentacao_estoque
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  produtoId: UuidValue
+
+  # Pedido que gerou a movimentação (nullable para entradas/ajustes manuais)
+  pedidoId: UuidValue?
+
+  # Tipo: 'entrada' | 'saida' | 'ajuste_positivo' | 'ajuste_negativo' | 'inventario' | 'cancelamento'
+  tipo: String
+
+  # Quantidade movimentada (sempre positivo — tipo define a direção)
+  quantidade: int
+
+  # Snapshots para auditoria
+  quantidadeAntes: int
+  quantidadeDepois: int
+
+  # Motivo legível: "Venda PDV #0042", "Ajuste de Inventário"
+  motivo: String, default=''
+
+  operadorId: UuidValue?
+  dataHora: DateTime
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  mov_estoque_produto_idx:
+    fields: tenantId, produtoId
+  mov_estoque_pedido_idx:
+    fields: tenantId, pedidoId

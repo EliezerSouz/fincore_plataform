@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import '../../database/fincore_database.dart';
 import '../../common/domain_primitives.dart';
+import '../../src/logging/log_service.dart';
 
 class CriarEmpresaUseCase {
   final FincoreDatabase db;
@@ -21,6 +22,13 @@ class CriarEmpresaUseCase {
     required String usuarioEmail,
   }) async {
     final now = DateTime.now();
+
+    LogService.instance.info(
+      LogModule.startup,
+      'Criando nova empresa [$nomeFantasia] id=$tenantId no banco local...',
+      tenantId: tenantId,
+      userId: usuarioId,
+    );
 
     await db.transaction(() async {
       // 1. Criar Empresa
@@ -45,21 +53,42 @@ class CriarEmpresaUseCase {
           createdBy: usuarioId,
           updatedBy: usuarioId,
           syncStatus: SyncStatus.pending,
+          tipoPessoa: const Value('JURIDICA'),
         ),
       );
 
-      // 2. Garantir que Usuário existe globalmente
+      // 2. Inicializar Configuração Padrão da Empresa (Atômica)
+      await db.into(db.empresaConfiguracaoTable).insertOnConflictUpdate(
+        EmpresaConfiguracaoTableCompanion.insert(
+          id: 'conf-$tenantId',
+          tenantId: tenantId,
+          taxaServico: const Value(0.10),
+          usarWhatsApp: const Value(true),
+          tema: const Value('escuro'),
+          syncVersion: const Value(1),
+          createdAt: now,
+          updatedAt: now,
+          createdBy: usuarioId,
+          updatedBy: usuarioId,
+          syncStatus: SyncStatus.pending,
+        ),
+      );
+
+      // 3. Garantir que Usuário existe no tenant
       await db.into(db.usuariosTable).insertOnConflictUpdate(
         UsuariosTableCompanion.insert(
           id: usuarioId,
+          tenantId: Value(tenantId),
+          username: usuarioEmail.contains('@') ? usuarioEmail.split('@').first : usuarioEmail,
           nome: usuarioNome,
-          email: usuarioEmail,
+          email: Value(usuarioEmail),
+          ativo: const Value(true),
           criadoEm: now,
           atualizadoEm: now,
         ),
       );
 
-      // 3. Associar Usuário como Membro ADMIN
+      // 4. Associar Usuário como Membro ADMIN
       await db.into(db.membrosEmpresaTable).insertOnConflictUpdate(
         MembrosEmpresaTableCompanion.insert(
           id: 'membro-$tenantId-$usuarioId',
@@ -77,15 +106,17 @@ class CriarEmpresaUseCase {
         ),
       );
 
-      // 4. Logar Evento de Criação
-      await db.into(db.eventosEmpresaTable).insert(
-        EventosEmpresaTableCompanion.insert(
+      // 5. Logar Evento de Criação via AuditLog
+      await db.into(db.auditLogsTable).insertOnConflictUpdate(
+        AuditLogsTableCompanion.insert(
           id: 'evt-$tenantId-criacao-${now.millisecondsSinceEpoch}',
           tenantId: tenantId,
-          tipo: 'CRIADA',
-          payload: Value('{"razaoSocial": "$razaoSocial", "criadoPor": "$usuarioId"}'),
-          geradoPor: usuarioId,
-          ocorridoEm: now,
+          targetEntity: 'empresa',
+          entityId: tenantId,
+          userId: usuarioId,
+          action: 'CRIADA',
+          timestamp: now,
+          diff: Value('{"razaoSocial": "$razaoSocial", "criadoPor": "$usuarioId"}'),
         ),
       );
     });

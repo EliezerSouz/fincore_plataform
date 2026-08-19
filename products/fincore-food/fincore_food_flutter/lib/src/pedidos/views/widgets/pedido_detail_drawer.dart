@@ -1,0 +1,1208 @@
+import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' hide Column;
+import 'package:fincore_design_system/fincore_design_system.dart';
+import 'package:fincore_core/common/kds_models.dart';
+import 'package:intl/intl.dart';
+import 'package:fincore_core/di/dependency_injection.dart';
+import 'package:fincore_core/database/fincore_database.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/widgets/entity_detail_drawer.dart';
+import 'package:fincore_food_flutter/src/shared/services/dados_ordem_parser.dart';
+import 'package:fincore_food_flutter/src/pedidos/controllers/central_pedidos_controller.dart';
+import 'package:fincore_food_flutter/src/shared/services/permissao_service.dart';
+
+/// Drawer de detalhes de um pedido — especialização de [EntityDetailDrawer].
+///
+/// Exibe: lifecycle do pedido, dados do cliente, lista de itens, resumo
+/// financeiro (se role permitir), linha do tempo operacional e ações
+/// contextuais filtradas por role.
+class PedidoDetailDrawer extends StatefulWidget {
+  final OrdemPreparo ordem;
+  final DadosOrdemKanban parsed;
+  final String? userRole;
+  final CentralPedidosController controller;
+
+  /// Callback após avançar/reverter status
+  final VoidCallback? onStatusChanged;
+
+  /// Callback para ação de impressão
+  final VoidCallback? onImprimir;
+
+  /// Callback para ação de editar
+  final VoidCallback? onEditar;
+
+  /// Callback para ação de cancelar
+  final VoidCallback? onCancelar;
+
+  /// Callback para solicitar motivo de reversão
+  final Future<String?> Function(String deStatus, String paraStatus)?
+      onSolicitarMotivoReversao;
+
+  const PedidoDetailDrawer({
+    super.key,
+    required this.ordem,
+    required this.parsed,
+    required this.controller,
+    this.userRole,
+    this.onStatusChanged,
+    this.onImprimir,
+    this.onEditar,
+    this.onCancelar,
+    this.onSolicitarMotivoReversao,
+  });
+
+  @override
+  State<PedidoDetailDrawer> createState() => _PedidoDetailDrawerState();
+}
+
+class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
+  bool _loadingAction = false;
+  late List<HistoricoOrdemPreparo> _historico;
+  bool _loadingHistorico = true;
+  Map<String, int> _itemPrecosEfetivos = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _historico = [];
+    _carregarPrecosEfetivos();
+    if (PermissaoService.podeVerTimeline(widget.userRole)) {
+      _carregarHistorico();
+    } else {
+      _loadingHistorico = false;
+    }
+  }
+
+  Future<void> _carregarPrecosEfetivos() async {
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final itemRows = await (db.select(db.itensPedidoTable)
+            ..where((t) => t.pedidoId.equals(widget.ordem.pedidoId) & t.deletedAt.isNull()))
+          .get();
+      if (mounted) {
+        setState(() {
+          _itemPrecosEfetivos = {
+            for (final row in itemRows) row.produtoId: row.valorUnitarioCentavos
+          };
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _carregarHistorico() async {
+    try {
+      final h = await widget.controller.carregarHistorico(widget.ordem.id);
+      if (mounted) {
+        setState(() {
+          _historico = h;
+          _loadingHistorico = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingHistorico = false);
+    }
+  }
+
+  // ── Status e labels ──────────────────────────────────────────────────
+
+  static const _statusLabels = {
+    StatusOrdemPreparo.pendente: 'Pendente',
+    StatusOrdemPreparo.emPreparo: 'Em Preparo',
+    StatusOrdemPreparo.pronto: 'Pronto',
+    StatusOrdemPreparo.entregue: 'Entregue',
+    StatusOrdemPreparo.cancelado: 'Cancelado',
+  };
+
+  static const _statusColors = {
+    StatusOrdemPreparo.pendente: Color(0xFFF97316),
+    StatusOrdemPreparo.emPreparo: Color(0xFFF59E0B),
+    StatusOrdemPreparo.pronto: Color(0xFF06B6D4),
+    StatusOrdemPreparo.entregue: Color(0xFF10B981),
+    StatusOrdemPreparo.cancelado: Color(0xFFEF4444),
+  };
+
+  Color get _statusColor =>
+      _statusColors[widget.ordem.status] ?? FincoreColors.primary;
+
+  String get _statusLabel =>
+      _statusLabels[widget.ordem.status] ?? widget.ordem.status.name;
+
+  // ── Próxima ação pelo role ────────────────────────────────────────────
+
+  StatusOrdemPreparo? get _proximoStatus {
+    switch (widget.ordem.status) {
+      case StatusOrdemPreparo.pendente:
+        return PermissaoService.podeIniciarPreparo(widget.userRole)
+            ? StatusOrdemPreparo.emPreparo
+            : null;
+      case StatusOrdemPreparo.emPreparo:
+        return PermissaoService.podeConcluirPreparo(widget.userRole)
+            ? StatusOrdemPreparo.pronto
+            : null;
+      case StatusOrdemPreparo.pronto:
+        return PermissaoService.podeEntregar(widget.userRole)
+            ? StatusOrdemPreparo.entregue
+            : null;
+      default:
+        return null;
+    }
+  }
+
+  String get _proximoLabel {
+    switch (widget.ordem.status) {
+      case StatusOrdemPreparo.pendente:
+        return 'Iniciar Preparo';
+      case StatusOrdemPreparo.emPreparo:
+        return 'Marcar como Pronto';
+      case StatusOrdemPreparo.pronto:
+        return 'Confirmar Entrega';
+      default:
+        return '';
+    }
+  }
+
+  // ── Ação de avançar status ────────────────────────────────────────────
+
+  Future<void> _avancarStatus() async {
+    final next = _proximoStatus;
+    if (next == null) return;
+
+    setState(() => _loadingAction = true);
+    try {
+      await widget.controller.moverStatus(widget.ordem, next);
+      widget.onStatusChanged?.call();
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _loadingAction = false);
+    }
+  }
+
+  // ── Ação de reverter status ───────────────────────────────────────────
+
+  StatusOrdemPreparo? get _statusAnterior {
+    switch (widget.ordem.status) {
+      case StatusOrdemPreparo.emPreparo:
+        return StatusOrdemPreparo.pendente;
+      case StatusOrdemPreparo.pronto:
+        return StatusOrdemPreparo.emPreparo;
+      case StatusOrdemPreparo.entregue:
+        return StatusOrdemPreparo.pronto;
+      case StatusOrdemPreparo.cancelado:
+        return StatusOrdemPreparo.pendente;
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _reverterStatus() async {
+    final anterior = _statusAnterior;
+    if (anterior == null) return;
+
+    final deLabel = _statusLabel;
+    final paraLabel = _statusLabels[anterior] ?? anterior.name;
+    final motivo = await widget.onSolicitarMotivoReversao?.call(deLabel, paraLabel);
+    if (motivo == null) return;
+
+    setState(() => _loadingAction = true);
+    try {
+      await widget.controller.moverStatus(
+        widget.ordem,
+        anterior,
+        motivo: motivo,
+      );
+      widget.onStatusChanged?.call();
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _loadingAction = false);
+    }
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
+    final friendlyId = pedido != null && pedido.numeroPedido != null
+        ? '#${pedido.numeroPedido.toString().padLeft(6, '0')}'
+        : (widget.ordem.pedidoId.length > 8
+            ? '#${widget.ordem.pedidoId.substring(0, 8).toUpperCase()}'
+            : '#${widget.ordem.pedidoId.toUpperCase()}');
+
+    final minutosAtras =
+        DateTime.now().difference(widget.ordem.criadaEm).inMinutes;
+    final subtitle = minutosAtras < 60
+        ? 'há $minutosAtras min'
+        : 'há ${(minutosAtras / 60).floor()}h ${minutosAtras % 60}min';
+
+    final isCozinha = widget.userRole?.toUpperCase() == 'COZINHA';
+    return EntityDetailDrawer(
+      title: 'Pedido $friendlyId',
+      subtitle: subtitle,
+      badges: _buildBadges(),
+      lifecycle: isCozinha ? null : _buildLifecycle(),
+      body: _buildBody(),
+      timeline: PermissaoService.podeVerTimeline(widget.userRole) ? _buildTimeline() : null,
+      actions: _buildActions(),
+    );
+  }
+
+  // ── Badges de status e prioridade ────────────────────────────────────
+
+  Widget _buildBadges() {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: [
+        _StatusBadge(label: _statusLabel, color: _statusColor),
+        if (widget.ordem.prioridade == PrioridadeOrdem.urgente)
+          _StatusBadge(label: '⚡ URGENTE', color: const Color(0xFFEF4444)),
+        if (widget.ordem.prioridade == PrioridadeOrdem.vip)
+          _StatusBadge(label: '★ VIP', color: const Color(0xFFF59E0B)),
+        if (widget.ordem.prioridade == PrioridadeOrdem.programado)
+          _StatusBadge(label: '📅 Programado', color: const Color(0xFF8B5CF6)),
+      ],
+    );
+  }
+
+  // ── Lifecycle horizontal ───────────────────────────────────────────────
+
+  Widget _buildLifecycle() {
+    final steps = [
+      _LifecycleStep(
+        label: 'Criado',
+        completed: true,
+        isCurrent: widget.ordem.status == StatusOrdemPreparo.pendente,
+      ),
+      _LifecycleStep(
+        label: 'Em Preparo',
+        completed: widget.ordem.status != StatusOrdemPreparo.pendente &&
+            widget.ordem.status != StatusOrdemPreparo.cancelado,
+        isCurrent: widget.ordem.status == StatusOrdemPreparo.emPreparo,
+      ),
+      _LifecycleStep(
+        label: 'Pronto',
+        completed: widget.ordem.status == StatusOrdemPreparo.pronto ||
+            widget.ordem.status == StatusOrdemPreparo.entregue,
+        isCurrent: widget.ordem.status == StatusOrdemPreparo.pronto,
+      ),
+      _LifecycleStep(
+        label: 'Entregue',
+        completed: widget.ordem.status == StatusOrdemPreparo.entregue,
+        isCurrent: widget.ordem.status == StatusOrdemPreparo.entregue,
+      ),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+      child: Row(
+        children: [
+          for (int i = 0; i < steps.length; i++) ...[
+            _StepNode(step: steps[i]),
+            if (i < steps.length - 1)
+              Expanded(
+                child: Container(
+                  height: 2,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  color: steps[i + 1].completed
+                      ? const Color(0xFF10B981)
+                      : FincoreColors.border,
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Corpo do drawer ──────────────────────────────────────────────────
+
+  Widget _buildBody() {
+    final totalCentavos = widget.controller.totalOrdemCentavos(widget.ordem);
+    final mostraFinanceiro =
+        PermissaoService.podeVerFinanceiro(widget.userRole);
+    final isCozinha = widget.userRole?.toUpperCase() == 'COZINHA';
+
+    final agendada = widget.parsed.dataAgendada;
+    final String dataStr;
+    final String horaStr;
+    if (agendada != null) {
+      final local = agendada.toLocal();
+      dataStr = DateFormat('dd/MM/yyyy').format(local);
+      horaStr = DateFormat('HH:mm').format(local);
+    } else {
+      dataStr = 'Imediato';
+      horaStr = DateFormat('HH:mm').format(widget.ordem.criadaEm.toLocal());
+    }
+    final isDelivery = widget.parsed.tipoLogistica.toLowerCase().contains('entrega') ||
+                       widget.parsed.tipoLogistica.toLowerCase().contains('delivery');
+    final deadline = widget.controller.calculateDeadline(widget.ordem);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // --- Cliente Card ---
+        const DrawerSectionLabel(label: 'Cliente'),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: FincoreColors.border, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: FincoreColors.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.person, color: FincoreColors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.parsed.cliente.isEmpty ? 'Consumidor Final' : widget.parsed.cliente,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: FincoreColors.textPrimary,
+                      ),
+                    ),
+                    if (widget.parsed.telefone.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.phone_outlined, size: 12, color: FincoreColors.textMuted),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.parsed.telefone,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: FincoreColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // --- Entrega Card ---
+        const DrawerSectionLabel(label: 'Logística de Atendimento'),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: FincoreColors.border, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(_logisticaIcon(widget.parsed.tipoLogistica), color: const Color(0xFF06B6D4), size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.parsed.tipoLogistica.toUpperCase(),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                      color: Color(0xFF06B6D4),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 16, color: FincoreColors.border),
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today_outlined, size: 14, color: FincoreColors.textMuted),
+                        const SizedBox(width: 6),
+                        Text(
+                          dataStr,
+                          style: const TextStyle(fontSize: 13, color: FincoreColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.access_time_rounded, size: 14, color: FincoreColors.textMuted),
+                        const SizedBox(width: 6),
+                        Text(
+                          horaStr,
+                          style: const TextStyle(fontSize: 13, color: FincoreColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (mostraFinanceiro && widget.parsed.pagamento.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.payment_outlined, size: 14, color: FincoreColors.textMuted),
+                    const SizedBox(width: 6),
+                    Text(
+                      widget.parsed.pagamento,
+                      style: const TextStyle(fontSize: 13, color: FincoreColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        if (widget.parsed.observacoesLimpa.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          const DrawerSectionLabel(label: 'Observações'),
+          Container(
+            padding: const EdgeInsets.all(12),
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: FincoreColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: FincoreColors.border),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.notes_outlined, size: 14, color: FincoreColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.parsed.observacoesLimpa,
+                    style: const TextStyle(fontSize: 13, color: FincoreColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 16),
+
+        // --- Itens ---
+        const DrawerSectionLabel(label: 'Itens do Pedido'),
+        Column(
+          children: [
+            for (final item in widget.ordem.itens)
+              _LargeItemCard(
+                item: item,
+                precoUnitarioCentavos: _itemPrecosEfetivos[item.produtoId] ?? widget.controller
+                    .precoUnitarioCentavos(item.produtoId),
+                mostraPreco: mostraFinanceiro,
+              ),
+          ],
+        ),
+
+        const SizedBox(height: 12),
+        
+        // Resumo de volumes e financeiro
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                FincoreColors.primary.withValues(alpha: 0.12),
+                FincoreColors.primary.withValues(alpha: 0.04),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.25)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'TOTAL DE ITENS',
+                    style: TextStyle(
+                      color: FincoreColors.textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${widget.ordem.itens.length} item(ns) / ${widget.parsed.totalUnidades.toInt()} un.',
+                    style: const TextStyle(
+                      color: FincoreColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              if (mostraFinanceiro && totalCentavos > 0)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      'VALOR TOTAL',
+                      style: TextStyle(
+                        color: FincoreColors.primary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'R\$ ${(totalCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+                      style: TextStyle(
+                        color: FincoreColors.primary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // --- Prazo Operacional ---
+        const DrawerSectionLabel(label: 'Prazo Operacional'),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: FincoreColors.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _PrazoRow(
+                label: 'Preparação',
+                value: '${deadline.tempoPreparacaoMinutos} min',
+              ),
+              if (isDelivery) ...[
+                const SizedBox(height: 8),
+                _PrazoRow(
+                  label: 'Deslocamento',
+                  value: '${deadline.tempoDeslocamentoMinutos} min',
+                ),
+              ],
+              const SizedBox(height: 8),
+              _PrazoRow(
+                label: 'Margem de Segurança',
+                value: '${deadline.margemSegurancaMinutos} min',
+              ),
+              const Divider(color: FincoreColors.border, height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Iniciar produção até',
+                    style: TextStyle(
+                      color: FincoreColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (deadline.isImmediate || deadline.statusLabel.contains('atrasada'))
+                          ? const Color(0xFFEF4444).withValues(alpha: 0.1)
+                          : FincoreColors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: (deadline.isImmediate || deadline.statusLabel.contains('atrasada'))
+                            ? const Color(0xFFEF4444).withValues(alpha: 0.3)
+                            : FincoreColors.primary.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Text(
+                      deadline.isImmediate 
+                          ? 'AGORA' 
+                          : DateFormat('HH:mm').format(deadline.horarioInicioRecomendado),
+                      style: TextStyle(
+                        color: (deadline.isImmediate || deadline.statusLabel.contains('atrasada'))
+                            ? const Color(0xFFEF4444)
+                            : FincoreColors.primary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  IconData _logisticaIcon(String tipo) {
+    final t = tipo.toLowerCase();
+    if (t.contains('entrega') || t.contains('delivery')) {
+      return Icons.delivery_dining_outlined;
+    }
+    if (t.contains('mesa')) return Icons.table_restaurant_outlined;
+    return Icons.storefront_outlined;
+  }
+
+  // ── Linha do tempo ────────────────────────────────────────────────
+
+  Widget _buildTimeline() {
+    if (_loadingHistorico) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: FincoreColors.primary,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_historico.isEmpty) {
+      return const Text(
+        'Nenhum evento registrado.',
+        style: TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+      );
+    }
+
+    return Column(
+      children: [
+        for (int i = 0; i < _historico.length; i++)
+          _TimelineEntry(
+            log: _historico[i],
+            isLast: i == _historico.length - 1,
+          ),
+      ],
+    );
+  }
+
+  // ── Ações contextuais ─────────────────────────────────────────────
+
+  Widget _buildActions() {
+    final isCozinha = widget.userRole == 'COZINHA';
+    final proxStatus = _proximoStatus;
+    final podeReverter = !isCozinha && PermissaoService.podeRevertarStatus(widget.userRole) &&
+        _statusAnterior != null;
+    final podeEditar = !isCozinha && PermissaoService.podeEditarPedido(widget.userRole) &&
+        widget.ordem.status == StatusOrdemPreparo.pendente;
+    final podeCancelar = !isCozinha && PermissaoService.podeCancelarPedido(widget.userRole) &&
+        widget.ordem.status == StatusOrdemPreparo.pendente;
+    final podeImprimir = !isCozinha && PermissaoService.podeImprimir(widget.userRole);
+
+    final hasSecondaryActions = podeEditar || podeCancelar || podeReverter || podeImprimir;
+
+    if (proxStatus == null && !hasSecondaryActions) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Ação principal: próximo status
+        if (proxStatus != null)
+          ElevatedButton(
+            onPressed: _loadingAction ? null : _avancarStatus,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FincoreColors.primary,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(vertical: isCozinha ? 18 : 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: _loadingAction
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Text(
+                    _proximoLabel.toUpperCase(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: isCozinha ? 15 : 13,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+          ),
+
+        // Ações secundárias
+        if (hasSecondaryActions) ...[
+          if (proxStatus != null) const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (podeReverter)
+                _SecondaryButton(
+                  icon: Icons.undo_rounded,
+                  label: 'Reverter',
+                  onTap: _loadingAction ? null : _reverterStatus,
+                  color: const Color(0xFFF59E0B),
+                ),
+              if (podeEditar && widget.onEditar != null)
+                _SecondaryButton(
+                  icon: Icons.edit_outlined,
+                  label: 'Editar',
+                  onTap: widget.onEditar,
+                ),
+              if (podeImprimir && widget.onImprimir != null)
+                _SecondaryButton(
+                  icon: Icons.print_outlined,
+                  label: 'Imprimir',
+                  onTap: widget.onImprimir,
+                ),
+              if (podeCancelar && widget.onCancelar != null)
+                _SecondaryButton(
+                  icon: Icons.cancel_outlined,
+                  label: 'Cancelar',
+                  onTap: widget.onCancelar,
+                  color: FincoreColors.danger,
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ── Sub-widgets ────────────────────────────────────────────────────────────
+
+class _StatusBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _StatusBadge({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class _LifecycleStep {
+  final String label;
+  final bool completed;
+  final bool isCurrent;
+  const _LifecycleStep({
+    required this.label,
+    required this.completed,
+    this.isCurrent = false,
+  });
+}
+
+class _StepNode extends StatelessWidget {
+  final _LifecycleStep step;
+  const _StepNode({required this.step});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = step.completed
+        ? (step.isCurrent ? FincoreColors.primary : const Color(0xFF10B981))
+        : FincoreColors.border;
+
+    return Column(
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: step.completed
+                ? color
+                : FincoreColors.background,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: color,
+              width: step.isCurrent ? 2.5 : 1.5,
+            ),
+          ),
+          child: Icon(
+            step.completed ? Icons.check_rounded : Icons.circle_outlined,
+            size: 12,
+            color: step.completed ? Colors.white : FincoreColors.border,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          step.label,
+          style: TextStyle(
+            color: step.completed
+                ? (step.isCurrent
+                    ? FincoreColors.textPrimary
+                    : FincoreColors.textSecondary)
+                : FincoreColors.textMuted,
+            fontSize: 9,
+            fontWeight:
+                step.isCurrent ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LargeItemCard extends StatelessWidget {
+  final ItemOrdemPreparo item;
+  final int precoUnitarioCentavos;
+  final bool mostraPreco;
+
+  const _LargeItemCard({
+    required this.item,
+    required this.precoUnitarioCentavos,
+    required this.mostraPreco,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final total = (item.quantidade * precoUnitarioCentavos).round();
+    final totalStr =
+        'R\$ ${(total / 100).toStringAsFixed(2).replaceAll('.', ',')}';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: FincoreColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: FincoreColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 4,
+              color: FincoreColors.primary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  children: [
+                    Text(
+                      '${item.quantidade.toInt()} un.',
+                      style: TextStyle(
+                        color: FincoreColors.primary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Text(
+                      '  —  ',
+                      style: TextStyle(
+                        color: FincoreColors.textMuted,
+                        fontSize: 14,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        item.nomeProduto,
+                        style: const TextStyle(
+                          color: FincoreColors.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (mostraPreco && total > 0) ...[
+                      const SizedBox(width: 12),
+                      Text(
+                        totalStr,
+                        style: const TextStyle(
+                          color: FincoreColors.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 12),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrazoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _PrazoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: FincoreColors.textSecondary,
+            fontSize: 12,
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: FincoreColors.textPrimary,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ResumoFinanceiro extends StatelessWidget {
+  final int totalCentavos;
+  const _ResumoFinanceiro({required this.totalCentavos});
+
+  @override
+  Widget build(BuildContext context) {
+    final totalStr =
+        'R\$ ${(totalCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: FincoreColors.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: FincoreColors.border),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'TOTAL',
+            style: TextStyle(
+              color: FincoreColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.8,
+            ),
+          ),
+          Text(
+            totalStr,
+            style: const TextStyle(
+              color: FincoreColors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineEntry extends StatelessWidget {
+  final HistoricoOrdemPreparo log;
+  final bool isLast;
+  const _TimelineEntry({required this.log, required this.isLast});
+
+  Color _bulletColor() {
+    final t = log.titulo.toLowerCase();
+    if (t.contains('criado')) return const Color(0xFF3B82F6);
+    if (t.contains('pix') || t.contains('pagamento')) return const Color(0xFF10B981);
+    if (t.contains('revertido')) return const Color(0xFFF59E0B);
+    if (t.contains('cancelado')) return FincoreColors.danger;
+    if (t.contains('status')) return const Color(0xFF8B5CF6);
+    return FincoreColors.primary;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              margin: const EdgeInsets.only(top: 3),
+              decoration: BoxDecoration(
+                color: _bulletColor(),
+                shape: BoxShape.circle,
+              ),
+            ),
+            if (!isLast)
+              Container(
+                width: 1.5,
+                height: 44,
+                color: FincoreColors.border,
+              ),
+          ],
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      log.titulo,
+                      style: const TextStyle(
+                        color: FincoreColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      DateFormat('dd/MM HH:mm').format(log.criadaEm.toLocal()),
+                      style: const TextStyle(
+                        color: FincoreColors.textMuted,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  log.descricao,
+                  style: const TextStyle(
+                    color: FincoreColors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Por ${log.operadorNome}',
+                  style: const TextStyle(
+                    color: FincoreColors.textMuted,
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SecondaryButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final Color? color;
+
+  const _SecondaryButton({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? FincoreColors.textSecondary;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: c.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: c),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: c,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

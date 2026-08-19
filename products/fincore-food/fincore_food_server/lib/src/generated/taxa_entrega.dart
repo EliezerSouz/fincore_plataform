@@ -23,6 +23,9 @@ abstract class TaxaEntrega
     this.cepFinal,
     required this.valorCentavos,
     required this.ativo,
+    int? pedidoMinimoCentavos,
+    this.prazoEstimado,
+    this.observacoes,
     required this.createdAt,
     required this.updatedAt,
     required this.createdBy,
@@ -33,7 +36,8 @@ abstract class TaxaEntrega
     this.originDeviceId,
     this.lastModifiedByDevice,
     this.entityHash,
-  }) : id = id ?? _i1.Uuid().v4obj();
+  })  : id = id ?? _i1.Uuid().v4obj(),
+        pedidoMinimoCentavos = pedidoMinimoCentavos ?? 0;
 
   factory TaxaEntrega({
     _i1.UuidValue? id,
@@ -45,6 +49,9 @@ abstract class TaxaEntrega
     String? cepFinal,
     required int valorCentavos,
     required bool ativo,
+    int? pedidoMinimoCentavos,
+    String? prazoEstimado,
+    String? observacoes,
     required DateTime createdAt,
     required DateTime updatedAt,
     required _i1.UuidValue createdBy,
@@ -68,6 +75,9 @@ abstract class TaxaEntrega
       cepFinal: jsonSerialization['cepFinal'] as String?,
       valorCentavos: jsonSerialization['valorCentavos'] as int,
       ativo: jsonSerialization['ativo'] as bool,
+      pedidoMinimoCentavos: jsonSerialization['pedidoMinimoCentavos'] as int,
+      prazoEstimado: jsonSerialization['prazoEstimado'] as String?,
+      observacoes: jsonSerialization['observacoes'] as String?,
       createdAt:
           _i1.DateTimeJsonExtension.fromJson(jsonSerialization['createdAt']),
       updatedAt:
@@ -113,6 +123,12 @@ abstract class TaxaEntrega
 
   bool ativo;
 
+  int pedidoMinimoCentavos;
+
+  String? prazoEstimado;
+
+  String? observacoes;
+
   DateTime createdAt;
 
   DateTime updatedAt;
@@ -149,6 +165,9 @@ abstract class TaxaEntrega
     String? cepFinal,
     int? valorCentavos,
     bool? ativo,
+    int? pedidoMinimoCentavos,
+    String? prazoEstimado,
+    String? observacoes,
     DateTime? createdAt,
     DateTime? updatedAt,
     _i1.UuidValue? createdBy,
@@ -172,6 +191,9 @@ abstract class TaxaEntrega
       if (cepFinal != null) 'cepFinal': cepFinal,
       'valorCentavos': valorCentavos,
       'ativo': ativo,
+      'pedidoMinimoCentavos': pedidoMinimoCentavos,
+      if (prazoEstimado != null) 'prazoEstimado': prazoEstimado,
+      if (observacoes != null) 'observacoes': observacoes,
       'createdAt': createdAt.toJson(),
       'updatedAt': updatedAt.toJson(),
       'createdBy': createdBy.toJson(),
@@ -198,6 +220,9 @@ abstract class TaxaEntrega
       if (cepFinal != null) 'cepFinal': cepFinal,
       'valorCentavos': valorCentavos,
       'ativo': ativo,
+      'pedidoMinimoCentavos': pedidoMinimoCentavos,
+      if (prazoEstimado != null) 'prazoEstimado': prazoEstimado,
+      if (observacoes != null) 'observacoes': observacoes,
       'createdAt': createdAt.toJson(),
       'updatedAt': updatedAt.toJson(),
       'createdBy': createdBy.toJson(),
@@ -255,6 +280,9 @@ class _TaxaEntregaImpl extends TaxaEntrega {
     String? cepFinal,
     required int valorCentavos,
     required bool ativo,
+    int? pedidoMinimoCentavos,
+    String? prazoEstimado,
+    String? observacoes,
     required DateTime createdAt,
     required DateTime updatedAt,
     required _i1.UuidValue createdBy,
@@ -275,6 +303,9 @@ class _TaxaEntregaImpl extends TaxaEntrega {
           cepFinal: cepFinal,
           valorCentavos: valorCentavos,
           ativo: ativo,
+          pedidoMinimoCentavos: pedidoMinimoCentavos,
+          prazoEstimado: prazoEstimado,
+          observacoes: observacoes,
           createdAt: createdAt,
           updatedAt: updatedAt,
           createdBy: createdBy,
@@ -301,6 +332,9 @@ class _TaxaEntregaImpl extends TaxaEntrega {
     Object? cepFinal = _Undefined,
     int? valorCentavos,
     bool? ativo,
+    int? pedidoMinimoCentavos,
+    Object? prazoEstimado = _Undefined,
+    Object? observacoes = _Undefined,
     DateTime? createdAt,
     DateTime? updatedAt,
     _i1.UuidValue? createdBy,
@@ -322,6 +356,10 @@ class _TaxaEntregaImpl extends TaxaEntrega {
       cepFinal: cepFinal is String? ? cepFinal : this.cepFinal,
       valorCentavos: valorCentavos ?? this.valorCentavos,
       ativo: ativo ?? this.ativo,
+      pedidoMinimoCentavos: pedidoMinimoCentavos ?? this.pedidoMinimoCentavos,
+      prazoEstimado:
+          prazoEstimado is String? ? prazoEstimado : this.prazoEstimado,
+      observacoes: observacoes is String? ? observacoes : this.observacoes,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,
@@ -371,6 +409,19 @@ class TaxaEntregaTable extends _i1.Table<_i1.UuidValue> {
     );
     ativo = _i1.ColumnBool(
       'ativo',
+      this,
+    );
+    pedidoMinimoCentavos = _i1.ColumnInt(
+      'pedidoMinimoCentavos',
+      this,
+      hasDefault: true,
+    );
+    prazoEstimado = _i1.ColumnString(
+      'prazoEstimado',
+      this,
+    );
+    observacoes = _i1.ColumnString(
+      'observacoes',
       this,
     );
     createdAt = _i1.ColumnDateTime(
@@ -431,6 +482,12 @@ class TaxaEntregaTable extends _i1.Table<_i1.UuidValue> {
 
   late final _i1.ColumnBool ativo;
 
+  late final _i1.ColumnInt pedidoMinimoCentavos;
+
+  late final _i1.ColumnString prazoEstimado;
+
+  late final _i1.ColumnString observacoes;
+
   late final _i1.ColumnDateTime createdAt;
 
   late final _i1.ColumnDateTime updatedAt;
@@ -462,6 +519,9 @@ class TaxaEntregaTable extends _i1.Table<_i1.UuidValue> {
         cepFinal,
         valorCentavos,
         ativo,
+        pedidoMinimoCentavos,
+        prazoEstimado,
+        observacoes,
         createdAt,
         updatedAt,
         createdBy,

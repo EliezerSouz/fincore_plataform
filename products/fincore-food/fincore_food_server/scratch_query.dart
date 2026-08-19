@@ -13,20 +13,22 @@ void main() async {
     settings: const ConnectionSettings(sslMode: SslMode.require),
   );
 
-  print('Buscando logs de erro do Serverpod...');
-  final logRows = await connection.execute('SELECT "time", "message", "error", "stackTrace" FROM serverpod_log ORDER BY id DESC LIMIT 5');
-  for (final row in logRows) {
-    print('-----------------------------------------');
-    print('Hora: ${row[0]}');
-    print('Mensagem: ${row[1]}');
-    print('Erro: ${row[2]}');
-    print('Stack: ${row[3]}');
+  print('\n=== ROUTE CACHE ===');
+  final cacheRows = await connection.execute('SELECT origin, destination, distance_meters, duration_seconds FROM route_cache');
+  for (final row in cacheRows) {
+    print('  Origem: ${row[0]} | Destino: ${row[1]} | Distância: ${row[2]}m | Duração: ${row[3]}s');
   }
 
-  print('\nBuscando membros...');
-  final membroRows = await connection.execute('SELECT "tenantId", "usuarioId", ativo FROM membro_empresa');
+  print('\n=== USUÁRIOS ===');
+  final userRows = await connection.execute('SELECT id, email, nome FROM usuarios');
+  for (final row in userRows) {
+    print('  ID: ${row[0]} | Email: ${row[1]} | Nome: ${row[2]}');
+  }
+
+  print('\n=== MEMBROS DE EMPRESA ===');
+  final membroRows = await connection.execute('SELECT id, "tenantId", "usuarioId", role, ativo FROM membro_empresa');
   for (final row in membroRows) {
-    print('Membro Tenant: ${row[0]}, Usuario: ${row[1]}, Ativo: ${row[2]}');
+    print('  ID: ${row[0]} | Tenant: ${row[1]} | Usuario: ${row[2]} | Role: ${row[3]} | Ativo: ${row[4]}');
   }
 
   await connection.close();

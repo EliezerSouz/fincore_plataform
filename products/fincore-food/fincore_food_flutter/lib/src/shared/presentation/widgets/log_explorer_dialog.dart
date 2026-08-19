@@ -134,7 +134,7 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
             // Utilizando Row para alinhar
             child: Row(
               children: [
-                const Icon(Icons.analytics_outlined, color: FincoreColors.primary, size: 28),
+                Icon(Icons.analytics_outlined, color: FincoreColors.primary, size: 28),
                 const SizedBox(width: 12),
                 const Text(
                   'CENTRAL DE DIAGNÓSTICO',
@@ -275,7 +275,7 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
                       builder: (ctx, child) {
                         return Theme(
                           data: Theme.of(ctx).copyWith(
-                            colorScheme: const ColorScheme.dark(
+                            colorScheme: ColorScheme.dark(
                               primary: FincoreColors.primary,
                               surface: FincoreColors.surface,
                               onSurface: FincoreColors.textPrimary,
@@ -324,7 +324,7 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
           // Área Principal Split View
           Expanded(
             child: _isLoading
-                ? const Center(
+                ? Center(
                     child: CircularProgressIndicator(color: FincoreColors.primary),
                   )
                 : _logs.isEmpty
@@ -448,7 +448,7 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
                                           const SizedBox(height: 4),
                                           SelectableText(
                                             'Trace ID: ${_selectedLog!['traceId']}',
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: FincoreColors.primary,
                                               fontWeight: FontWeight.bold,
                                               fontSize: 13,

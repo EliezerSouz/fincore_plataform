@@ -28,6 +28,17 @@ abstract class Empresa implements _i1.SerializableModel {
     required this.createdFrom,
     this.vencimento,
     this.segmento,
+    required this.tipoPessoa,
+    this.inscricaoEstadual,
+    this.inscricaoMunicipal,
+    this.regimeTributario,
+    this.cep,
+    this.logradouro,
+    this.numero,
+    this.complemento,
+    this.bairro,
+    this.cidade,
+    this.estado,
     required this.createdAt,
     required this.updatedAt,
     required this.createdBy,
@@ -56,6 +67,17 @@ abstract class Empresa implements _i1.SerializableModel {
     required String createdFrom,
     DateTime? vencimento,
     String? segmento,
+    required String tipoPessoa,
+    String? inscricaoEstadual,
+    String? inscricaoMunicipal,
+    String? regimeTributario,
+    String? cep,
+    String? logradouro,
+    String? numero,
+    String? complemento,
+    String? bairro,
+    String? cidade,
+    String? estado,
     required DateTime createdAt,
     required DateTime updatedAt,
     required _i1.UuidValue createdBy,
@@ -87,6 +109,17 @@ abstract class Empresa implements _i1.SerializableModel {
           ? null
           : _i1.DateTimeJsonExtension.fromJson(jsonSerialization['vencimento']),
       segmento: jsonSerialization['segmento'] as String?,
+      tipoPessoa: jsonSerialization['tipoPessoa'] as String,
+      inscricaoEstadual: jsonSerialization['inscricaoEstadual'] as String?,
+      inscricaoMunicipal: jsonSerialization['inscricaoMunicipal'] as String?,
+      regimeTributario: jsonSerialization['regimeTributario'] as String?,
+      cep: jsonSerialization['cep'] as String?,
+      logradouro: jsonSerialization['logradouro'] as String?,
+      numero: jsonSerialization['numero'] as String?,
+      complemento: jsonSerialization['complemento'] as String?,
+      bairro: jsonSerialization['bairro'] as String?,
+      cidade: jsonSerialization['cidade'] as String?,
+      estado: jsonSerialization['estado'] as String?,
       createdAt:
           _i1.DateTimeJsonExtension.fromJson(jsonSerialization['createdAt']),
       updatedAt:
@@ -142,6 +175,28 @@ abstract class Empresa implements _i1.SerializableModel {
 
   String? segmento;
 
+  String tipoPessoa;
+
+  String? inscricaoEstadual;
+
+  String? inscricaoMunicipal;
+
+  String? regimeTributario;
+
+  String? cep;
+
+  String? logradouro;
+
+  String? numero;
+
+  String? complemento;
+
+  String? bairro;
+
+  String? cidade;
+
+  String? estado;
+
   DateTime createdAt;
 
   DateTime updatedAt;
@@ -181,6 +236,17 @@ abstract class Empresa implements _i1.SerializableModel {
     String? createdFrom,
     DateTime? vencimento,
     String? segmento,
+    String? tipoPessoa,
+    String? inscricaoEstadual,
+    String? inscricaoMunicipal,
+    String? regimeTributario,
+    String? cep,
+    String? logradouro,
+    String? numero,
+    String? complemento,
+    String? bairro,
+    String? cidade,
+    String? estado,
     DateTime? createdAt,
     DateTime? updatedAt,
     _i1.UuidValue? createdBy,
@@ -210,6 +276,17 @@ abstract class Empresa implements _i1.SerializableModel {
       'createdFrom': createdFrom,
       if (vencimento != null) 'vencimento': vencimento?.toJson(),
       if (segmento != null) 'segmento': segmento,
+      'tipoPessoa': tipoPessoa,
+      if (inscricaoEstadual != null) 'inscricaoEstadual': inscricaoEstadual,
+      if (inscricaoMunicipal != null) 'inscricaoMunicipal': inscricaoMunicipal,
+      if (regimeTributario != null) 'regimeTributario': regimeTributario,
+      if (cep != null) 'cep': cep,
+      if (logradouro != null) 'logradouro': logradouro,
+      if (numero != null) 'numero': numero,
+      if (complemento != null) 'complemento': complemento,
+      if (bairro != null) 'bairro': bairro,
+      if (cidade != null) 'cidade': cidade,
+      if (estado != null) 'estado': estado,
       'createdAt': createdAt.toJson(),
       'updatedAt': updatedAt.toJson(),
       'createdBy': createdBy.toJson(),
@@ -249,6 +326,17 @@ class _EmpresaImpl extends Empresa {
     required String createdFrom,
     DateTime? vencimento,
     String? segmento,
+    required String tipoPessoa,
+    String? inscricaoEstadual,
+    String? inscricaoMunicipal,
+    String? regimeTributario,
+    String? cep,
+    String? logradouro,
+    String? numero,
+    String? complemento,
+    String? bairro,
+    String? cidade,
+    String? estado,
     required DateTime createdAt,
     required DateTime updatedAt,
     required _i1.UuidValue createdBy,
@@ -275,6 +363,17 @@ class _EmpresaImpl extends Empresa {
           createdFrom: createdFrom,
           vencimento: vencimento,
           segmento: segmento,
+          tipoPessoa: tipoPessoa,
+          inscricaoEstadual: inscricaoEstadual,
+          inscricaoMunicipal: inscricaoMunicipal,
+          regimeTributario: regimeTributario,
+          cep: cep,
+          logradouro: logradouro,
+          numero: numero,
+          complemento: complemento,
+          bairro: bairro,
+          cidade: cidade,
+          estado: estado,
           createdAt: createdAt,
           updatedAt: updatedAt,
           createdBy: createdBy,
@@ -307,6 +406,17 @@ class _EmpresaImpl extends Empresa {
     String? createdFrom,
     Object? vencimento = _Undefined,
     Object? segmento = _Undefined,
+    String? tipoPessoa,
+    Object? inscricaoEstadual = _Undefined,
+    Object? inscricaoMunicipal = _Undefined,
+    Object? regimeTributario = _Undefined,
+    Object? cep = _Undefined,
+    Object? logradouro = _Undefined,
+    Object? numero = _Undefined,
+    Object? complemento = _Undefined,
+    Object? bairro = _Undefined,
+    Object? cidade = _Undefined,
+    Object? estado = _Undefined,
     DateTime? createdAt,
     DateTime? updatedAt,
     _i1.UuidValue? createdBy,
@@ -334,6 +444,23 @@ class _EmpresaImpl extends Empresa {
       createdFrom: createdFrom ?? this.createdFrom,
       vencimento: vencimento is DateTime? ? vencimento : this.vencimento,
       segmento: segmento is String? ? segmento : this.segmento,
+      tipoPessoa: tipoPessoa ?? this.tipoPessoa,
+      inscricaoEstadual: inscricaoEstadual is String?
+          ? inscricaoEstadual
+          : this.inscricaoEstadual,
+      inscricaoMunicipal: inscricaoMunicipal is String?
+          ? inscricaoMunicipal
+          : this.inscricaoMunicipal,
+      regimeTributario: regimeTributario is String?
+          ? regimeTributario
+          : this.regimeTributario,
+      cep: cep is String? ? cep : this.cep,
+      logradouro: logradouro is String? ? logradouro : this.logradouro,
+      numero: numero is String? ? numero : this.numero,
+      complemento: complemento is String? ? complemento : this.complemento,
+      bairro: bairro is String? ? bairro : this.bairro,
+      cidade: cidade is String? ? cidade : this.cidade,
+      estado: estado is String? ? estado : this.estado,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,

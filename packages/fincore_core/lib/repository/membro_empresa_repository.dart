@@ -41,6 +41,13 @@ class MembroEmpresaRepository extends BaseRepository<CoreMembroEmpresa, String> 
     return results.map(_mapToCore).toList();
   }
 
+  Future<List<CoreMembroEmpresa>> findByUsuarioGlobal(String usuarioId) async {
+    final results = await (db.select(db.membrosEmpresaTable)
+          ..where((t) => t.usuarioId.equals(usuarioId)))
+        .get();
+    return results.map(_mapToCore).toList();
+  }
+
   @override
   Future<void> save(CoreMembroEmpresa entity) async {
     if (entity.tenantId != activeTenantId) {

@@ -56,6 +56,7 @@ void main() {
       country: 'BR',
       createdFrom: 'Web',
       version: 1,
+      tipoPessoa: 'JURIDICA',
       metadata: mockMetadata,
     );
 
@@ -118,7 +119,7 @@ void main() {
       );
 
       final processed = await syncEngine.processPendingQueue();
-      expect(processed, equals(1));
+      expect(processed.successCount, equals(1));
 
       final pendingAfter = await outboxService.getPendingEntries();
       expect(pendingAfter.isEmpty, isTrue);

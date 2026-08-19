@@ -35,6 +35,9 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
         'cepFinal': entity.cepFinal,
         'valorCentavos': entity.valorCentavos,
         'ativo': entity.ativo,
+        'pedidoMinimoCentavos': entity.pedidoMinimoCentavos,
+        'prazoEstimado': entity.prazoEstimado,
+        'observacoes': entity.observacoes,
         'syncVersion': entity.metadata.version,
         'createdAt': entity.metadata.createdAt.toIso8601String(),
         'updatedAt': entity.metadata.updatedAt.toIso8601String(),
@@ -72,6 +75,12 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
     if (taxa.tenantId != activeTenantId) {
       throw StateError('Violação de Tenancy ao salvar TaxaEntrega');
     }
+
+    // Garantia de runtime: adiciona colunas no SQLite caso o schema local não tenha sido atualizado
+    try { await db.customStatement('ALTER TABLE taxas_entrega_table ADD COLUMN pedido_minimo_centavos INTEGER'); } catch (_) {}
+    try { await db.customStatement('ALTER TABLE taxas_entrega_table ADD COLUMN prazo_estimado TEXT'); } catch (_) {}
+    try { await db.customStatement('ALTER TABLE taxas_entrega_table ADD COLUMN observacoes TEXT'); } catch (_) {}
+
     await db.into(db.taxasEntregaTable).insertOnConflictUpdate(
           TaxasEntregaTableCompanion.insert(
             id: taxa.id,
@@ -83,6 +92,9 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
             cepFinal: Value(taxa.cepFinal),
             valorCentavos: taxa.valorCentavos,
             ativo: taxa.ativo,
+            pedidoMinimoCentavos: Value(taxa.pedidoMinimoCentavos),
+            prazoEstimado: Value(taxa.prazoEstimado),
+            observacoes: Value(taxa.observacoes),
             createdAt: taxa.metadata.createdAt,
             updatedAt: DateTime.now().toUtc(),
             createdBy: taxa.metadata.createdBy,
@@ -109,6 +121,25 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
   Future<TaxaEntrega> save(TaxaEntrega taxa) => saveWithSync(taxa);
   Future<void> delete(String id) => deleteWithSync(id);
 
+  /// Busca a taxa de entrega cadastrada para um determinado bairro
+  Future<TaxaEntrega?> findByBairro(String bairro) async {
+    final search = bairro.trim().toLowerCase();
+    if (search.isEmpty) return null;
+    final all = await findAll();
+    for (final t in all) {
+      if (t.ativo && t.bairro != null && t.bairro!.trim().toLowerCase() == search) {
+        return t;
+      }
+    }
+    // Tenta correspondencia parcial se nao encontrar exata
+    for (final t in all) {
+      if (t.ativo && t.bairro != null && (t.bairro!.trim().toLowerCase().contains(search) || search.contains(t.bairro!.trim().toLowerCase()))) {
+        return t;
+      }
+    }
+    return null;
+  }
+
   TaxaEntrega _mapToDomain(TaxaEntregaData data) {
     return TaxaEntrega(
       id: data.id,
@@ -122,6 +153,9 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
       cepFinal: data.cepFinal,
       valorCentavos: data.valorCentavos,
       ativo: data.ativo,
+      pedidoMinimoCentavos: data.pedidoMinimoCentavos ?? 0,
+      prazoEstimado: data.prazoEstimado,
+      observacoes: data.observacoes,
       metadata: SyncMetadata(
         version: data.syncVersion,
         createdAt: data.createdAt,

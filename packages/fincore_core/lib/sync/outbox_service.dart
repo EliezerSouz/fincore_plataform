@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
 import '../common/domain_primitives.dart';
 import '../context/tenant_context.dart';
 import '../database/fincore_database.dart';
@@ -152,6 +153,32 @@ class OutboxService {
         errorMessage: Value(errorMessage),
       );
       await db.update(db.outboxSync).replace(updated);
+
+      if (status == SyncStatus.failed) {
+        try {
+          final auditCompanion = AuditLogsTableCompanion.insert(
+            id: const Uuid().v4(),
+            targetEntity: 'SyncEngine',
+            entityId: entry.entityId,
+            tenantId: entry.tenantId,
+            userId: 'system',
+            action: 'SYNC_ERROR',
+            timestamp: DateTime.now().toUtc(),
+            entityDisplayName: Value('Falha de Sincronização: ${entry.entity}'),
+            entityModule: const Value('Sync Center'),
+            diff: Value(jsonEncode({
+              '_summary': 'Falha na sincronização da entidade ${entry.entity}: ${errorMessage ?? "Erro de sincronização"}',
+              'entidade': entry.entity,
+              'entityId': entry.entityId,
+              'action': entry.action,
+              'erro': errorMessage ?? 'Erro desconhecido',
+              'tentativas': entry.attemptsCount + 1,
+              'status': 'failed',
+            })),
+          );
+          await db.into(db.auditLogsTable).insert(auditCompanion);
+        } catch (_) {}
+      }
     }
   }
 
@@ -160,5 +187,68 @@ class OutboxService {
     return await (db.delete(db.outboxSync)
           ..where((t) => t.status.equals(SyncStatus.synced.name)))
         .go();
+  }
+
+  /// Reprocessa todas as entradas com falha ou retentativa, voltando o status para 'pending'.
+  Future<int> retryFailedEntries() async {
+    final activeTenantId = context.tenantId;
+    final failedEntries = await (db.select(db.outboxSync)
+          ..where((t) =>
+              t.tenantId.equals(activeTenantId) &
+              (t.status.equals(SyncStatus.failed.name) |
+                  t.status.equals(SyncStatus.retrying.name))))
+        .get();
+
+    for (final entry in failedEntries) {
+      final updated = entry.copyWith(
+        status: SyncStatus.pending.name,
+        attemptsCount: 0,
+        errorMessage: const Value(null),
+      );
+      await db.update(db.outboxSync).replace(updated);
+    }
+
+    return failedEntries.length;
+  }
+
+  /// Reprocessa uma entrada específica pelo ID da transação no outbox.
+  Future<bool> retryEntry(int id) async {
+    final entry = await (db.select(db.outboxSync)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+
+    if (entry == null) return false;
+
+    final updated = entry.copyWith(
+      status: SyncStatus.pending.name,
+      attemptsCount: 0,
+      errorMessage: const Value(null),
+    );
+    await db.update(db.outboxSync).replace(updated);
+    return true;
+  }
+
+  /// Retorna estatísticas estruturadas da fila de sincronização (Outbox) para a UI.
+  Future<({int pending, int retrying, int failed, int total})> getOutboxStats() async {
+    final activeTenantId = context.tenantId;
+    final entries = await (db.select(db.outboxSync)
+          ..where((t) => t.tenantId.equals(activeTenantId)))
+        .get();
+
+    int pending = 0;
+    int retrying = 0;
+    int failed = 0;
+
+    for (final e in entries) {
+      if (e.status == SyncStatus.pending.name) {
+        pending++;
+      } else if (e.status == SyncStatus.retrying.name) {
+        retrying++;
+      } else if (e.status == SyncStatus.failed.name) {
+        failed++;
+      }
+    }
+
+    return (pending: pending, retrying: retrying, failed: failed, total: entries.length);
   }
 }

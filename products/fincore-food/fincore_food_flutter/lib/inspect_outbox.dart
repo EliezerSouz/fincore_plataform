@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:fincore_core/database/fincore_database.dart';

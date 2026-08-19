@@ -89,7 +89,7 @@ class AppSection extends StatelessWidget {
           children: [
             Text(
               title.toUpperCase(),
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textMuted,
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
@@ -150,7 +150,7 @@ class AppToolbar extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: FincoreColors.textPrimary,
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -160,7 +160,7 @@ class AppToolbar extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: FincoreColors.textMuted,
                         fontSize: 13,
                       ),
@@ -174,7 +174,7 @@ class AppToolbar extends StatelessWidget {
         ),
         if (showDivider) ...[
           const SizedBox(height: 16),
-          const Divider(color: FincoreColors.border, height: 1),
+          Divider(color: FincoreColors.border, height: 1),
           const SizedBox(height: 16),
         ],
       ],

@@ -64,6 +64,7 @@ void main() {
       country: 'BR',
       createdFrom: 'Web-Admin',
       version: 1,
+      tipoPessoa: 'JURIDICA',
       metadata: mockMetadata,
     );
 
@@ -137,8 +138,8 @@ void main() {
       expect(outboxId, greaterThan(0));
 
       // 4. Processar fila de sincronização via SyncEngine
-      final processedCount = await syncEngine.processPendingQueue();
-      expect(processedCount, equals(1));
+      final processedResult = await syncEngine.processPendingQueue();
+      expect(processedResult.successCount, equals(1));
 
       // 5. Registrar e verificar evento imutável de Auditoria
       await auditService.log(

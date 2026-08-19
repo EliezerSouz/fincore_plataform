@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import '../context/tenant_context.dart';
 import '../database/fincore_database.dart';
 import 'outbox_service.dart';
@@ -6,6 +7,7 @@ import 'sync_engine.dart';
 import '../di/dependency_injection.dart';
 import '../repository/audit_log_repository.dart';
 import '../common/diff_util.dart';
+import '../src/logging/log_service.dart';
 
 /// Contrato de sincronização obrigatório para todas as entidades do domínio.
 ///
@@ -114,6 +116,16 @@ abstract class SyncableRepository<T> {
       }
     });
 
+    final diffDetails = (isUpdate && diff != null && diff.isNotEmpty)
+        ? ' | Alteracoes: ${jsonEncode(diff)}'
+        : '';
+
+    LogService.instance.info(
+      LogModule.database,
+      'MUTACAO [${isUpdate ? "UPDATE" : "CREATE"}] Entidade [$entityName] ID: $id (v$newVersion)$diffDetails',
+      tenantId: context.hasContext ? context.tenantId : null,
+    );
+
     // 3. Tenta push imediato (fire-and-forget — não bloqueia a UI)
     _triggerPush();
 
@@ -154,6 +166,12 @@ abstract class SyncableRepository<T> {
         // Ignorar falha se o repositório não estiver registrado
       }
     });
+
+    LogService.instance.info(
+      LogModule.database,
+      'Entidade [$entityName] id=$id removida localmente (soft delete)',
+      tenantId: context.tenantId,
+    );
 
     _triggerPush();
   }

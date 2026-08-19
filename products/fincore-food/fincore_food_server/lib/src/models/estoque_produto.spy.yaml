@@ -1,0 +1,30 @@
+class: EstoqueProduto
+table: estoque_produto
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  produtoId: UuidValue
+
+  quantidadeAtual: int, default=0
+  quantidadeMinima: int, default=0
+  quantidadeMaxima: int, default=9999
+  unidade: String, default='un'
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  estoque_produto_tenant_produto_idx:
+    fields: tenantId, produtoId
+    unique: true

@@ -8,8 +8,11 @@ bootstrap:
   - bootstrapTenant:
 greeting:
   - hello:
+mapRoute:
+  - calculateRoute:
 onboarding:
   - criarEmpresa:
+  - minhaEmpresa:
   - status:
   - progressoSetup:
 sync:

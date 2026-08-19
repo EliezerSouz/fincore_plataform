@@ -10,9 +10,14 @@ class TabelasPrecificacaoTable extends Table with IdentityColumns, AuditColumns,
   IntColumn get prioridade => integer()();
   BoolColumn get ativo => boolean()();
 
-  // Novos campos de negócio
+  // Vigência
   DateTimeColumn get vigenciaInicio => dateTime().nullable()();
   DateTimeColumn get vigenciaFim => dateTime().nullable()();
+
+  // P1-07: Canal de venda estruturado — elimina resolução por substring do nome.
+  // Valores aceitos: 'todos' (padrão) | 'delivery' | 'retirada'
+  // 'todos' significa que a tabela se aplica a qualquer canal.
+  TextColumn get canal => text().withDefault(const Constant('todos'))();
 
   @override
   Set<Column> get primaryKey => {id};

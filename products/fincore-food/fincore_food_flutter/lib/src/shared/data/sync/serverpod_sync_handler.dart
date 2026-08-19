@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'package:fincore_core/fincore_core.dart';
 import 'package:fincore_food_client/fincore_food_client.dart';
 import 'package:drift/drift.dart';
@@ -39,9 +40,6 @@ class ServerpodSyncHandler {
              EmpresaConfiguracaoTableCompanion.insert(
                id: remoteConfig.id.toString(),
                tenantId: remoteConfig.tenantId,
-               timezone: Value(remoteConfig.timezone),
-               locale: Value(remoteConfig.locale),
-               currency: Value(remoteConfig.currency),
                taxaServico: Value(remoteConfig.taxaServico),
                usarWhatsApp: Value(remoteConfig.usarWhatsApp),
                tema: Value(remoteConfig.tema),
@@ -57,6 +55,9 @@ class ServerpodSyncHandler {
                pixKey: Value(remoteConfig.pixKey),
                printerConfig: Value(remoteConfig.printerConfig),
                logoUrl: Value(remoteConfig.logoUrl),
+               margemSegurancaMinutos: Value(remoteConfig.margemSegurancaMinutos ?? 10),
+               taxaEntregaPorKm: Value(remoteConfig.taxaEntregaPorKm ?? false),
+               valorPorKmCentavos: Value(remoteConfig.valorPorKmCentavos ?? 0),
              )
            );
         }

@@ -48,7 +48,7 @@ class FincoreTopbar extends StatelessWidget {
                 children: [
                   Text(
                     title.toUpperCase(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: FincoreColors.textPrimary,
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -57,7 +57,7 @@ class FincoreTopbar extends StatelessWidget {
                   ),
                   Text(
                     subtitle,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: FincoreColors.textSecondary,
                       fontSize: 12,
                     ),
@@ -88,7 +88,7 @@ class FincoreTopbar extends StatelessWidget {
                       children: [
                         Text(
                           userName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: FincoreColors.textPrimary,
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -96,7 +96,7 @@ class FincoreTopbar extends StatelessWidget {
                         ),
                         Text(
                           userRole.toUpperCase(),
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: FincoreColors.primary, // Laranja Forno
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
@@ -126,7 +126,7 @@ class FincoreTopbar extends StatelessWidget {
                           ),
                         ),
                     ],
-                    child: const CircleAvatar(
+                    child: CircleAvatar(
                       radius: 16,
                       backgroundColor: FincoreColors.border,
                       child: Icon(Icons.person, color: FincoreColors.textSecondary, size: 20),
@@ -150,7 +150,7 @@ class FincoreTopbar extends StatelessWidget {
             value: tenant,
             child: Text(
               tenant,
-              style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
+              style: TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
             ),
           );
         }).toList();
@@ -165,18 +165,18 @@ class FincoreTopbar extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.storefront, color: FincoreColors.primary, size: 16),
+            Icon(Icons.storefront, color: FincoreColors.primary, size: 16),
             const SizedBox(width: 8),
             Text(
               activeTenantName,
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textPrimary,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(width: 6),
-            const Icon(Icons.arrow_drop_down, color: FincoreColors.textSecondary, size: 18),
+            Icon(Icons.arrow_drop_down, color: FincoreColors.textSecondary, size: 18),
           ],
         ),
       ),

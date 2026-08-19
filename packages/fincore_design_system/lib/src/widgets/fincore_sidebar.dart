@@ -38,7 +38,7 @@ class FincoreSidebar extends StatelessWidget {
         children: [
           // Logo do FINCORE
           _buildLogo(),
-          const Divider(color: FincoreColors.border, height: 1),
+          Divider(color: FincoreColors.border, height: 1),
           const SizedBox(height: 16),
           
           // Lista de Items de Navegação
@@ -101,16 +101,15 @@ class FincoreSidebar extends StatelessWidget {
             ),
           ),
           
-          // Rodapé Neutro
-          const Divider(color: FincoreColors.border, height: 1),
+          Divider(color: FincoreColors.border, height: 1),
           Padding(
             padding: const EdgeInsets.all(16),
             child: isCollapsed
-                ? const Center(child: Icon(Icons.info_outline, color: FincoreColors.textMuted, size: 18))
-                : const Row(
+                ? Icon(Icons.info_outline, color: FincoreColors.textMuted, size: 18)
+                : Row(
                     children: [
                       Icon(Icons.info_outline, color: FincoreColors.textMuted, size: 18),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Text(
                         'v1.0.0 (v106)',
                         style: TextStyle(color: FincoreColors.textMuted, fontSize: 11),
@@ -168,7 +167,7 @@ class FincoreSidebar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Text(
+                Text(
                   'FINCORE',
                   style: TextStyle(
                     color: FincoreColors.textPrimary,

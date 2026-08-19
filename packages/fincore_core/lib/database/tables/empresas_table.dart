@@ -18,6 +18,21 @@ class EmpresasTable extends Table with AuditColumns, SyncColumns {
   TextColumn get createdFrom => text()();
   DateTimeColumn get vencimento => dateTime().nullable()();
   TextColumn get segmento => text().nullable()();
+  
+  // Novos campos fiscais e cadastrais da reengenharia funcional
+  TextColumn get tipoPessoa => text().withDefault(const Constant('JURIDICA'))(); // FISICA | JURIDICA
+  TextColumn get inscricaoEstadual => text().nullable()();
+  TextColumn get inscricaoMunicipal => text().nullable()();
+  TextColumn get regimeTributario => text().nullable()();
+  // ─── Endereço Estruturado ────────────────────────────────────────
+  // Padrão idêntico ao LocaisEntregaTable
+  TextColumn get cep => text().nullable()();
+  TextColumn get logradouro => text().nullable()();
+  TextColumn get numero => text().nullable()();
+  TextColumn get complemento => text().nullable()();
+  TextColumn get bairro => text().nullable()();
+  TextColumn get cidade => text().nullable()();
+  TextColumn get estado => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

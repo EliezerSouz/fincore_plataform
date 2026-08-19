@@ -35,7 +35,7 @@ class FincoreStatCard extends StatelessWidget {
             children: [
               Text(
                 title.toUpperCase(),
-                style: const TextStyle(
+                style: TextStyle(
                   color: FincoreColors.textSecondary,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -58,7 +58,7 @@ class FincoreStatCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               subtitle!,
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textMuted,
                 fontSize: 12,
               ),

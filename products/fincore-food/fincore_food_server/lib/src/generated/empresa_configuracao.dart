@@ -16,9 +16,6 @@ abstract class EmpresaConfiguracao
   EmpresaConfiguracao._({
     _i1.UuidValue? id,
     required this.tenantId,
-    required this.timezone,
-    required this.locale,
-    required this.currency,
     this.printerConfig,
     this.pixKey,
     required this.taxaServico,
@@ -58,19 +55,21 @@ abstract class EmpresaConfiguracao
     this.pixFavorecido,
     this.pixBanco,
     required this.pixTipo,
-    required this.pixCidade,
-    this.nomeEmpresaCupom,
-    this.telefoneEmpresa,
-    this.cnpjEmpresa,
-    this.enderecoEmpresa,
+    this.modoDeliveryAtivo,
+    this.clienteObrigatorioVenda,
+    this.atendimentoPadrao,
+    this.margemSegurancaMinutos,
+    this.taxaEntregaPorKm,
+    this.valorPorKmCentavos,
+    this.mercadoPagoAtivo,
+    this.openPixAtivo,
+    this.asaasAtivo,
+    this.ifoodAtivo,
   }) : id = id ?? _i1.Uuid().v4obj();
 
   factory EmpresaConfiguracao({
     _i1.UuidValue? id,
     required String tenantId,
-    required String timezone,
-    required String locale,
-    required String currency,
     String? printerConfig,
     String? pixKey,
     required double taxaServico,
@@ -110,20 +109,22 @@ abstract class EmpresaConfiguracao
     String? pixFavorecido,
     String? pixBanco,
     required String pixTipo,
-    required String pixCidade,
-    String? nomeEmpresaCupom,
-    String? telefoneEmpresa,
-    String? cnpjEmpresa,
-    String? enderecoEmpresa,
+    bool? modoDeliveryAtivo,
+    bool? clienteObrigatorioVenda,
+    String? atendimentoPadrao,
+    int? margemSegurancaMinutos,
+    bool? taxaEntregaPorKm,
+    int? valorPorKmCentavos,
+    bool? mercadoPagoAtivo,
+    bool? openPixAtivo,
+    bool? asaasAtivo,
+    bool? ifoodAtivo,
   }) = _EmpresaConfiguracaoImpl;
 
   factory EmpresaConfiguracao.fromJson(Map<String, dynamic> jsonSerialization) {
     return EmpresaConfiguracao(
       id: _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
       tenantId: jsonSerialization['tenantId'] as String,
-      timezone: jsonSerialization['timezone'] as String,
-      locale: jsonSerialization['locale'] as String,
-      currency: jsonSerialization['currency'] as String,
       printerConfig: jsonSerialization['printerConfig'] as String?,
       pixKey: jsonSerialization['pixKey'] as String?,
       taxaServico: (jsonSerialization['taxaServico'] as num).toDouble(),
@@ -172,11 +173,18 @@ abstract class EmpresaConfiguracao
       pixFavorecido: jsonSerialization['pixFavorecido'] as String?,
       pixBanco: jsonSerialization['pixBanco'] as String?,
       pixTipo: jsonSerialization['pixTipo'] as String,
-      pixCidade: jsonSerialization['pixCidade'] as String,
-      nomeEmpresaCupom: jsonSerialization['nomeEmpresaCupom'] as String?,
-      telefoneEmpresa: jsonSerialization['telefoneEmpresa'] as String?,
-      cnpjEmpresa: jsonSerialization['cnpjEmpresa'] as String?,
-      enderecoEmpresa: jsonSerialization['enderecoEmpresa'] as String?,
+      modoDeliveryAtivo: jsonSerialization['modoDeliveryAtivo'] as bool?,
+      clienteObrigatorioVenda:
+          jsonSerialization['clienteObrigatorioVenda'] as bool?,
+      atendimentoPadrao: jsonSerialization['atendimentoPadrao'] as String?,
+      margemSegurancaMinutos:
+          jsonSerialization['margemSegurancaMinutos'] as int?,
+      taxaEntregaPorKm: jsonSerialization['taxaEntregaPorKm'] as bool?,
+      valorPorKmCentavos: jsonSerialization['valorPorKmCentavos'] as int?,
+      mercadoPagoAtivo: jsonSerialization['mercadoPagoAtivo'] as bool?,
+      openPixAtivo: jsonSerialization['openPixAtivo'] as bool?,
+      asaasAtivo: jsonSerialization['asaasAtivo'] as bool?,
+      ifoodAtivo: jsonSerialization['ifoodAtivo'] as bool?,
     );
   }
 
@@ -188,12 +196,6 @@ abstract class EmpresaConfiguracao
   _i1.UuidValue id;
 
   String tenantId;
-
-  String timezone;
-
-  String locale;
-
-  String currency;
 
   String? printerConfig;
 
@@ -273,15 +275,25 @@ abstract class EmpresaConfiguracao
 
   String pixTipo;
 
-  String pixCidade;
+  bool? modoDeliveryAtivo;
 
-  String? nomeEmpresaCupom;
+  bool? clienteObrigatorioVenda;
 
-  String? telefoneEmpresa;
+  String? atendimentoPadrao;
 
-  String? cnpjEmpresa;
+  int? margemSegurancaMinutos;
 
-  String? enderecoEmpresa;
+  bool? taxaEntregaPorKm;
+
+  int? valorPorKmCentavos;
+
+  bool? mercadoPagoAtivo;
+
+  bool? openPixAtivo;
+
+  bool? asaasAtivo;
+
+  bool? ifoodAtivo;
 
   @override
   _i1.Table<_i1.UuidValue> get table => t;
@@ -292,9 +304,6 @@ abstract class EmpresaConfiguracao
   EmpresaConfiguracao copyWith({
     _i1.UuidValue? id,
     String? tenantId,
-    String? timezone,
-    String? locale,
-    String? currency,
     String? printerConfig,
     String? pixKey,
     double? taxaServico,
@@ -334,20 +343,22 @@ abstract class EmpresaConfiguracao
     String? pixFavorecido,
     String? pixBanco,
     String? pixTipo,
-    String? pixCidade,
-    String? nomeEmpresaCupom,
-    String? telefoneEmpresa,
-    String? cnpjEmpresa,
-    String? enderecoEmpresa,
+    bool? modoDeliveryAtivo,
+    bool? clienteObrigatorioVenda,
+    String? atendimentoPadrao,
+    int? margemSegurancaMinutos,
+    bool? taxaEntregaPorKm,
+    int? valorPorKmCentavos,
+    bool? mercadoPagoAtivo,
+    bool? openPixAtivo,
+    bool? asaasAtivo,
+    bool? ifoodAtivo,
   });
   @override
   Map<String, dynamic> toJson() {
     return {
       'id': id.toJson(),
       'tenantId': tenantId,
-      'timezone': timezone,
-      'locale': locale,
-      'currency': currency,
       if (printerConfig != null) 'printerConfig': printerConfig,
       if (pixKey != null) 'pixKey': pixKey,
       'taxaServico': taxaServico,
@@ -388,11 +399,18 @@ abstract class EmpresaConfiguracao
       if (pixFavorecido != null) 'pixFavorecido': pixFavorecido,
       if (pixBanco != null) 'pixBanco': pixBanco,
       'pixTipo': pixTipo,
-      'pixCidade': pixCidade,
-      if (nomeEmpresaCupom != null) 'nomeEmpresaCupom': nomeEmpresaCupom,
-      if (telefoneEmpresa != null) 'telefoneEmpresa': telefoneEmpresa,
-      if (cnpjEmpresa != null) 'cnpjEmpresa': cnpjEmpresa,
-      if (enderecoEmpresa != null) 'enderecoEmpresa': enderecoEmpresa,
+      if (modoDeliveryAtivo != null) 'modoDeliveryAtivo': modoDeliveryAtivo,
+      if (clienteObrigatorioVenda != null)
+        'clienteObrigatorioVenda': clienteObrigatorioVenda,
+      if (atendimentoPadrao != null) 'atendimentoPadrao': atendimentoPadrao,
+      if (margemSegurancaMinutos != null)
+        'margemSegurancaMinutos': margemSegurancaMinutos,
+      if (taxaEntregaPorKm != null) 'taxaEntregaPorKm': taxaEntregaPorKm,
+      if (valorPorKmCentavos != null) 'valorPorKmCentavos': valorPorKmCentavos,
+      if (mercadoPagoAtivo != null) 'mercadoPagoAtivo': mercadoPagoAtivo,
+      if (openPixAtivo != null) 'openPixAtivo': openPixAtivo,
+      if (asaasAtivo != null) 'asaasAtivo': asaasAtivo,
+      if (ifoodAtivo != null) 'ifoodAtivo': ifoodAtivo,
     };
   }
 
@@ -401,9 +419,6 @@ abstract class EmpresaConfiguracao
     return {
       'id': id.toJson(),
       'tenantId': tenantId,
-      'timezone': timezone,
-      'locale': locale,
-      'currency': currency,
       if (printerConfig != null) 'printerConfig': printerConfig,
       if (pixKey != null) 'pixKey': pixKey,
       'taxaServico': taxaServico,
@@ -444,11 +459,18 @@ abstract class EmpresaConfiguracao
       if (pixFavorecido != null) 'pixFavorecido': pixFavorecido,
       if (pixBanco != null) 'pixBanco': pixBanco,
       'pixTipo': pixTipo,
-      'pixCidade': pixCidade,
-      if (nomeEmpresaCupom != null) 'nomeEmpresaCupom': nomeEmpresaCupom,
-      if (telefoneEmpresa != null) 'telefoneEmpresa': telefoneEmpresa,
-      if (cnpjEmpresa != null) 'cnpjEmpresa': cnpjEmpresa,
-      if (enderecoEmpresa != null) 'enderecoEmpresa': enderecoEmpresa,
+      if (modoDeliveryAtivo != null) 'modoDeliveryAtivo': modoDeliveryAtivo,
+      if (clienteObrigatorioVenda != null)
+        'clienteObrigatorioVenda': clienteObrigatorioVenda,
+      if (atendimentoPadrao != null) 'atendimentoPadrao': atendimentoPadrao,
+      if (margemSegurancaMinutos != null)
+        'margemSegurancaMinutos': margemSegurancaMinutos,
+      if (taxaEntregaPorKm != null) 'taxaEntregaPorKm': taxaEntregaPorKm,
+      if (valorPorKmCentavos != null) 'valorPorKmCentavos': valorPorKmCentavos,
+      if (mercadoPagoAtivo != null) 'mercadoPagoAtivo': mercadoPagoAtivo,
+      if (openPixAtivo != null) 'openPixAtivo': openPixAtivo,
+      if (asaasAtivo != null) 'asaasAtivo': asaasAtivo,
+      if (ifoodAtivo != null) 'ifoodAtivo': ifoodAtivo,
     };
   }
 
@@ -488,9 +510,6 @@ class _EmpresaConfiguracaoImpl extends EmpresaConfiguracao {
   _EmpresaConfiguracaoImpl({
     _i1.UuidValue? id,
     required String tenantId,
-    required String timezone,
-    required String locale,
-    required String currency,
     String? printerConfig,
     String? pixKey,
     required double taxaServico,
@@ -530,17 +549,19 @@ class _EmpresaConfiguracaoImpl extends EmpresaConfiguracao {
     String? pixFavorecido,
     String? pixBanco,
     required String pixTipo,
-    required String pixCidade,
-    String? nomeEmpresaCupom,
-    String? telefoneEmpresa,
-    String? cnpjEmpresa,
-    String? enderecoEmpresa,
+    bool? modoDeliveryAtivo,
+    bool? clienteObrigatorioVenda,
+    String? atendimentoPadrao,
+    int? margemSegurancaMinutos,
+    bool? taxaEntregaPorKm,
+    int? valorPorKmCentavos,
+    bool? mercadoPagoAtivo,
+    bool? openPixAtivo,
+    bool? asaasAtivo,
+    bool? ifoodAtivo,
   }) : super._(
           id: id,
           tenantId: tenantId,
-          timezone: timezone,
-          locale: locale,
-          currency: currency,
           printerConfig: printerConfig,
           pixKey: pixKey,
           taxaServico: taxaServico,
@@ -580,11 +601,16 @@ class _EmpresaConfiguracaoImpl extends EmpresaConfiguracao {
           pixFavorecido: pixFavorecido,
           pixBanco: pixBanco,
           pixTipo: pixTipo,
-          pixCidade: pixCidade,
-          nomeEmpresaCupom: nomeEmpresaCupom,
-          telefoneEmpresa: telefoneEmpresa,
-          cnpjEmpresa: cnpjEmpresa,
-          enderecoEmpresa: enderecoEmpresa,
+          modoDeliveryAtivo: modoDeliveryAtivo,
+          clienteObrigatorioVenda: clienteObrigatorioVenda,
+          atendimentoPadrao: atendimentoPadrao,
+          margemSegurancaMinutos: margemSegurancaMinutos,
+          taxaEntregaPorKm: taxaEntregaPorKm,
+          valorPorKmCentavos: valorPorKmCentavos,
+          mercadoPagoAtivo: mercadoPagoAtivo,
+          openPixAtivo: openPixAtivo,
+          asaasAtivo: asaasAtivo,
+          ifoodAtivo: ifoodAtivo,
         );
 
   /// Returns a shallow copy of this [EmpresaConfiguracao]
@@ -594,9 +620,6 @@ class _EmpresaConfiguracaoImpl extends EmpresaConfiguracao {
   EmpresaConfiguracao copyWith({
     _i1.UuidValue? id,
     String? tenantId,
-    String? timezone,
-    String? locale,
-    String? currency,
     Object? printerConfig = _Undefined,
     Object? pixKey = _Undefined,
     double? taxaServico,
@@ -636,18 +659,20 @@ class _EmpresaConfiguracaoImpl extends EmpresaConfiguracao {
     Object? pixFavorecido = _Undefined,
     Object? pixBanco = _Undefined,
     String? pixTipo,
-    String? pixCidade,
-    Object? nomeEmpresaCupom = _Undefined,
-    Object? telefoneEmpresa = _Undefined,
-    Object? cnpjEmpresa = _Undefined,
-    Object? enderecoEmpresa = _Undefined,
+    Object? modoDeliveryAtivo = _Undefined,
+    Object? clienteObrigatorioVenda = _Undefined,
+    Object? atendimentoPadrao = _Undefined,
+    Object? margemSegurancaMinutos = _Undefined,
+    Object? taxaEntregaPorKm = _Undefined,
+    Object? valorPorKmCentavos = _Undefined,
+    Object? mercadoPagoAtivo = _Undefined,
+    Object? openPixAtivo = _Undefined,
+    Object? asaasAtivo = _Undefined,
+    Object? ifoodAtivo = _Undefined,
   }) {
     return EmpresaConfiguracao(
       id: id ?? this.id,
       tenantId: tenantId ?? this.tenantId,
-      timezone: timezone ?? this.timezone,
-      locale: locale ?? this.locale,
-      currency: currency ?? this.currency,
       printerConfig:
           printerConfig is String? ? printerConfig : this.printerConfig,
       pixKey: pixKey is String? ? pixKey : this.pixKey,
@@ -696,15 +721,28 @@ class _EmpresaConfiguracaoImpl extends EmpresaConfiguracao {
           pixFavorecido is String? ? pixFavorecido : this.pixFavorecido,
       pixBanco: pixBanco is String? ? pixBanco : this.pixBanco,
       pixTipo: pixTipo ?? this.pixTipo,
-      pixCidade: pixCidade ?? this.pixCidade,
-      nomeEmpresaCupom: nomeEmpresaCupom is String?
-          ? nomeEmpresaCupom
-          : this.nomeEmpresaCupom,
-      telefoneEmpresa:
-          telefoneEmpresa is String? ? telefoneEmpresa : this.telefoneEmpresa,
-      cnpjEmpresa: cnpjEmpresa is String? ? cnpjEmpresa : this.cnpjEmpresa,
-      enderecoEmpresa:
-          enderecoEmpresa is String? ? enderecoEmpresa : this.enderecoEmpresa,
+      modoDeliveryAtivo: modoDeliveryAtivo is bool?
+          ? modoDeliveryAtivo
+          : this.modoDeliveryAtivo,
+      clienteObrigatorioVenda: clienteObrigatorioVenda is bool?
+          ? clienteObrigatorioVenda
+          : this.clienteObrigatorioVenda,
+      atendimentoPadrao: atendimentoPadrao is String?
+          ? atendimentoPadrao
+          : this.atendimentoPadrao,
+      margemSegurancaMinutos: margemSegurancaMinutos is int?
+          ? margemSegurancaMinutos
+          : this.margemSegurancaMinutos,
+      taxaEntregaPorKm:
+          taxaEntregaPorKm is bool? ? taxaEntregaPorKm : this.taxaEntregaPorKm,
+      valorPorKmCentavos: valorPorKmCentavos is int?
+          ? valorPorKmCentavos
+          : this.valorPorKmCentavos,
+      mercadoPagoAtivo:
+          mercadoPagoAtivo is bool? ? mercadoPagoAtivo : this.mercadoPagoAtivo,
+      openPixAtivo: openPixAtivo is bool? ? openPixAtivo : this.openPixAtivo,
+      asaasAtivo: asaasAtivo is bool? ? asaasAtivo : this.asaasAtivo,
+      ifoodAtivo: ifoodAtivo is bool? ? ifoodAtivo : this.ifoodAtivo,
     );
   }
 }
@@ -714,18 +752,6 @@ class EmpresaConfiguracaoTable extends _i1.Table<_i1.UuidValue> {
       : super(tableName: 'empresa_configuracao') {
     tenantId = _i1.ColumnString(
       'tenantId',
-      this,
-    );
-    timezone = _i1.ColumnString(
-      'timezone',
-      this,
-    );
-    locale = _i1.ColumnString(
-      'locale',
-      this,
-    );
-    currency = _i1.ColumnString(
-      'currency',
       this,
     );
     printerConfig = _i1.ColumnString(
@@ -884,35 +910,49 @@ class EmpresaConfiguracaoTable extends _i1.Table<_i1.UuidValue> {
       'pixTipo',
       this,
     );
-    pixCidade = _i1.ColumnString(
-      'pixCidade',
+    modoDeliveryAtivo = _i1.ColumnBool(
+      'modoDeliveryAtivo',
       this,
     );
-    nomeEmpresaCupom = _i1.ColumnString(
-      'nomeEmpresaCupom',
+    clienteObrigatorioVenda = _i1.ColumnBool(
+      'clienteObrigatorioVenda',
       this,
     );
-    telefoneEmpresa = _i1.ColumnString(
-      'telefoneEmpresa',
+    atendimentoPadrao = _i1.ColumnString(
+      'atendimentoPadrao',
       this,
     );
-    cnpjEmpresa = _i1.ColumnString(
-      'cnpjEmpresa',
+    margemSegurancaMinutos = _i1.ColumnInt(
+      'margemSegurancaMinutos',
       this,
     );
-    enderecoEmpresa = _i1.ColumnString(
-      'enderecoEmpresa',
+    taxaEntregaPorKm = _i1.ColumnBool(
+      'taxaEntregaPorKm',
+      this,
+    );
+    valorPorKmCentavos = _i1.ColumnInt(
+      'valorPorKmCentavos',
+      this,
+    );
+    mercadoPagoAtivo = _i1.ColumnBool(
+      'mercadoPagoAtivo',
+      this,
+    );
+    openPixAtivo = _i1.ColumnBool(
+      'openPixAtivo',
+      this,
+    );
+    asaasAtivo = _i1.ColumnBool(
+      'asaasAtivo',
+      this,
+    );
+    ifoodAtivo = _i1.ColumnBool(
+      'ifoodAtivo',
       this,
     );
   }
 
   late final _i1.ColumnString tenantId;
-
-  late final _i1.ColumnString timezone;
-
-  late final _i1.ColumnString locale;
-
-  late final _i1.ColumnString currency;
 
   late final _i1.ColumnString printerConfig;
 
@@ -992,23 +1032,30 @@ class EmpresaConfiguracaoTable extends _i1.Table<_i1.UuidValue> {
 
   late final _i1.ColumnString pixTipo;
 
-  late final _i1.ColumnString pixCidade;
+  late final _i1.ColumnBool modoDeliveryAtivo;
 
-  late final _i1.ColumnString nomeEmpresaCupom;
+  late final _i1.ColumnBool clienteObrigatorioVenda;
 
-  late final _i1.ColumnString telefoneEmpresa;
+  late final _i1.ColumnString atendimentoPadrao;
 
-  late final _i1.ColumnString cnpjEmpresa;
+  late final _i1.ColumnInt margemSegurancaMinutos;
 
-  late final _i1.ColumnString enderecoEmpresa;
+  late final _i1.ColumnBool taxaEntregaPorKm;
+
+  late final _i1.ColumnInt valorPorKmCentavos;
+
+  late final _i1.ColumnBool mercadoPagoAtivo;
+
+  late final _i1.ColumnBool openPixAtivo;
+
+  late final _i1.ColumnBool asaasAtivo;
+
+  late final _i1.ColumnBool ifoodAtivo;
 
   @override
   List<_i1.Column> get columns => [
         id,
         tenantId,
-        timezone,
-        locale,
-        currency,
         printerConfig,
         pixKey,
         taxaServico,
@@ -1048,11 +1095,16 @@ class EmpresaConfiguracaoTable extends _i1.Table<_i1.UuidValue> {
         pixFavorecido,
         pixBanco,
         pixTipo,
-        pixCidade,
-        nomeEmpresaCupom,
-        telefoneEmpresa,
-        cnpjEmpresa,
-        enderecoEmpresa,
+        modoDeliveryAtivo,
+        clienteObrigatorioVenda,
+        atendimentoPadrao,
+        margemSegurancaMinutos,
+        taxaEntregaPorKm,
+        valorPorKmCentavos,
+        mercadoPagoAtivo,
+        openPixAtivo,
+        asaasAtivo,
+        ifoodAtivo,
       ];
 }
 

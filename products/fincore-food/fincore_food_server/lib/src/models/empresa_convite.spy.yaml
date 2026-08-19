@@ -1,0 +1,27 @@
+class: EmpresaConvite
+table: empresa_convite
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: UuidValue, relation(parent=empresa, onDelete=Restrict)
+  email: String
+  role: String
+  status: String
+  expiracaoEm: DateTime
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  convite_tenant_idx:
+    fields: tenantId

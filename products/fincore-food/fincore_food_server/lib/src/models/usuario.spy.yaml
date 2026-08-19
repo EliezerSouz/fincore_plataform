@@ -2,7 +2,17 @@ class: Usuario
 table: usuarios
 fields:
   id: UuidValue, defaultModel=random
-  email: String
+  tenantId: String
+  authUserId: String?
+  username: String
+  email: String?
   nome: String
+  avatarUrl: String?
+  ativo: bool
   criadoEm: DateTime
   atualizadoEm: DateTime
+
+indexes:
+  usr_tenant_username_idx:
+    fields: tenantId, username
+    unique: true

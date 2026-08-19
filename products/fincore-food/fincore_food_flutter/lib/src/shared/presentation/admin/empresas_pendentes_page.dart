@@ -41,6 +41,7 @@ class _EmpresasPendentesPageState extends State<EmpresasPendentesPage> {
     setState(() => _isLoading = true);
     try {
       final success = await client.admin.ativarEmpresa(tenantId);
+      if (!mounted) return;
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -59,6 +60,7 @@ class _EmpresasPendentesPageState extends State<EmpresasPendentesPage> {
         setState(() => _isLoading = false);
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Erro ao ativar: $e'),

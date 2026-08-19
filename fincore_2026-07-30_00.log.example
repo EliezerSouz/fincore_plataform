@@ -1,0 +1,37 @@
+════════════════════════════════════════════════════════════════════════
+  FINCORE  v1.2.0  |  Log de Operação
+  Sessão iniciada em: 2026-07-30 00:22:04.217
+  Módulo: Integração Local ↔ Nuvem (Supabase)
+════════════════════════════════════════════════════════════════════════
+
+2026-07-30 00:22:04.218  [STARTUP  ]       FINCORE v1.2.0 inicializando...
+2026-07-30 00:22:04.219  [STARTUP  ]       Banco local: fincore_v3.db  OK
+2026-07-30 00:22:04.391  [STARTUP  ]       Supabase: nlaxdeqb.supabase.co  conectado
+2026-07-30 00:22:04.392  [DATABASE ]       Inicialização do schema local concluída
+2026-07-30 00:22:04.612  [STARTUP  ]       Sync Engine: ativo (outbox + push/pull)
+2026-07-30 00:22:04.613  [STARTUP  ]       Bootstrap concluído em 395ms
+
+───────────────── CICLO DE ENVIO (PUSH) ─────────────────────────────
+2026-07-30 00:22:10.004  [SYNC     ]       Eliezer S. @ Delivery do Eli  |  Outbox: 3 registro(s) pendente(s) — iniciando envio ao Supabase
+2026-07-30 00:22:10.158  [SYNC     ]       Categoria                    id=f3a1b2c4...  ENVIADO   INSERT  (154ms)
+2026-07-30 00:22:10.389  [SYNC     ]       Produto                      id=9e7d2f1a...  ENVIADO   INSERT  (231ms)
+2026-07-30 00:22:10.601  [SYNC     ]       Cliente                      id=c4f8a3b1...  ENVIADO   INSERT  (212ms)
+2026-07-30 00:22:10.602  [SYNC     ]       Ciclo encerrado: 3 enviado(s)  0 falha(s)  598ms  OK — Outbox limpo, pronto para PULL
+─────────────────────── FIM DO CICLO DE ENVIO ───────────────────────
+
+───────────────── CICLO DE ENVIO (PUSH) ─────────────────────────────
+2026-07-30 00:41:05.881  [SYNC     ]       Eliezer S. @ Delivery do Eli  |  Outbox: 2 registro(s) pendente(s) — iniciando envio ao Supabase
+2026-07-30 00:41:06.010  [SYNC     ]       membro_empresa               id=b7d3e9f2...  ENVIADO   UPDATE  (129ms)
+⚠ 2026-07-30 00:41:06.298  [SYNC     ] AVISO membro_empresa               id=d1c5a8e4...  FALHA     tentativa 1/5 — Coluna não encontrada no banco remoto
+  2026-07-30 00:41:06.298                   >>> PostgrestException(message: Could not find the 'syncStatus' column of 'membro_empresa')
+✖ 2026-07-30 00:41:06.299  [SYNC     ] ERRO  Detalhe do erro
+  2026-07-30 00:41:06.299                   >>> PostgrestException: code: PGRST204, details: Bad Request
+2026-07-30 00:41:06.300  [SYNC     ]       Ciclo encerrado: 1 enviado(s)  1 falha(s)  419ms  Modo degradado — PULL suspenso (ainda há pendências)
+─────────────────────── FIM DO CICLO DE ENVIO ───────────────────────
+
+2026-07-30 00:55:14.002  [SYNC     ]       Eliezer S. @ Delivery do Eli  |  Tentativa de reconexão após modo degradado
+2026-07-30 00:55:14.003  [API      ]       GET /sync/health  →  200 OK  (38ms)
+
+───────────────── CICLO DE ENVIO (PUSH) ─────────────────────────────
+2026-07-30 01:10:00.512  [SYNC     ]       Eliezer S. @ Delivery do Eli  |  Outbox: 0 registro(s) pendente(s) — nenhuma ação necessária
+─────────────────────── FIM DO CICLO DE ENVIO ───────────────────────

@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:uuid/uuid.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_food_flutter/main.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -76,6 +74,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
       );
 
       if (success) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Empresa criada com sucesso! Aguardando ativação.'),
@@ -84,6 +83,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
         );
         widget.onCreated();
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Falha ao criar empresa. Tente novamente.'),
@@ -92,6 +92,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
         );
       }
     } on OnboardingException catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.message),
@@ -99,6 +100,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Erro: $e'),
@@ -159,7 +161,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                 Text(
                   'Passo ${_currentStep + 1} de 2',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: FincoreColors.primary,
                     fontWeight: FontWeight.bold,
                   ),
@@ -168,7 +170,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                 LinearProgressIndicator(
                   value: (_currentStep + 1) / 2,
                   backgroundColor: FincoreColors.border,
-                  valueColor: const AlwaysStoppedAnimation(FincoreColors.primary),
+                  valueColor: AlwaysStoppedAnimation(FincoreColors.primary),
                   minHeight: 6,
                   borderRadius: BorderRadius.circular(3),
                 ),
@@ -254,7 +256,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.primary),
+                    borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
                 validator: (value) => value == null || value.isEmpty ? 'Informe a Razão Social' : null,
@@ -272,7 +274,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.primary),
+                    borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
               ),
@@ -290,7 +292,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.primary),
+                    borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
                 items: ['Food Service', 'Varejo Geral', 'Logística', 'Outro']
@@ -324,7 +326,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.primary),
+                    borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
                 validator: (value) => value == null || value.isEmpty ? 'Informe o CNPJ/CPF' : null,
@@ -344,7 +346,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.primary),
+                    borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
                 validator: (value) => value == null || value.isEmpty ? 'Informe o telefone' : null,
@@ -363,7 +365,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.primary),
+                    borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
                 validator: (value) => value == null || value.isEmpty ? 'Informe o e-mail comercial' : null,

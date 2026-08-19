@@ -1,7 +1,5 @@
-import 'package:intl/intl.dart';
 import '../models/print_config.dart';
 import '../models/print_data.dart';
-import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
 import '../components/print_header.dart';
 import '../components/print_footer.dart';
 import '../components/print_pix.dart';
@@ -9,7 +7,6 @@ import '../components/print_address.dart';
 import '../components/print_money.dart';
 import '../components/print_phone.dart';
 import '../components/print_date.dart';
-import '../components/print_qrcode.dart';
 
 /// Motor de templates para geração de conteúdo textual para impressoras térmicas.
 /// Gera linhas de texto ESC/POS-friendly por via de impressão baseadas no layout clássico da Salgaderia.

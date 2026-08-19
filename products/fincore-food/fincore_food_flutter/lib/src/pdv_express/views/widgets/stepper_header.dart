@@ -2,14 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import '../../controllers/pdv_express_controller.dart';
 
-/// StepperHeader do PDV Express.
-///
-/// Exibe as 3 etapas do fluxo de venda com:
-/// - Indicador numérico circular com cor ativa/inativa
-/// - Texto da etapa com peso de fonte dinâmico
-/// - Linha divisória colorida conforme progresso
-/// - Borda de foco Laranja Forno 2px na etapa corrente (PRD-006)
-/// - Feedback de atalho de teclado [F1], [F2], [F3] visível abaixo do rótulo
+/// StepperHeader do PDV Express conforme Mockup Original (1-Cliente --- 2-Produtos --- 3-Pagamento)
 class StepperHeader extends StatelessWidget {
   final PdvExpressController controller;
 
@@ -21,142 +14,91 @@ class StepperHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final etapas = [
-      _StepInfo(label: 'Cliente & Entrega', shortcut: 'F2'),
-      _StepInfo(label: 'Seleção de Produtos', shortcut: 'F1'),
-      _StepInfo(label: 'Forma de Pagamento', shortcut: 'F3'),
+      _StepInfo(number: 1, label: '1  Cliente & Entrega'),
+      _StepInfo(number: 2, label: '2  Produtos'),
+      _StepInfo(number: 3, label: '3  Pagamento & Confirmação'),
     ];
     final passoAtual = controller.passoAtual;
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
       decoration: BoxDecoration(
         color: FincoreColors.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: FincoreColors.border),
       ),
-      child: Row(
-        children: List.generate(etapas.length, (index) {
-          final ativo    = index <= passoAtual;
-          final corrente = index == passoAtual;
-          final etapa    = etapas[index];
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(etapas.length * 2 - 1, (i) {
+          if (i.isOdd) {
+            // Linha Conectora entre Etapas
+            final stepBeforeIndex = i ~/ 2;
+            final isCompleted = stepBeforeIndex < passoAtual;
+            return Container(
+              width: 24,
+              height: 2,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: isCompleted
+                    ? FincoreColors.primary
+                    : FincoreColors.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            );
+          }
 
-          return Expanded(
-            child: Row(
-              children: [
-                // ── Indicador Circular da Etapa ─────────────────────
-                GestureDetector(
-                  onTap: () => controller.setPassoAtual(index),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: corrente
+          final stepIndex = i ~/ 2;
+          final isCurrent = stepIndex == passoAtual;
+          final isPast = stepIndex < passoAtual;
+          final step = etapas[stepIndex];
+
+          return GestureDetector(
+            onTap: () => controller.setPassoAtual(stepIndex),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isCurrent
+                    ? FincoreColors.primary
+                    : (isPast
+                        ? FincoreColors.primary.withValues(alpha: 0.15)
+                        : Colors.transparent),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: isCurrent
+                      ? FincoreColors.primary
+                      : (isPast ? FincoreColors.primary : Colors.transparent),
+                  width: 1.5,
+                ),
+              ),
+              child: Text(
+                step.label,
+                style: TextStyle(
+                  color: isCurrent
+                      ? Colors.white
+                      : (isPast
                           ? FincoreColors.primary
-                          : (ativo
-                              ? FincoreColors.primary.withValues(alpha: 0.2)
-                              : FincoreColors.border),
-                      // Borda Laranja Forno 2px na etapa corrente (PRD-006)
-                      border: Border.all(
-                        color: corrente
-                            ? FincoreColors.primary
-                            : (ativo ? FincoreColors.primary : Colors.transparent),
-                        width: corrente ? 2.0 : 1.5,
-                      ),
-                      // Glow sutil na etapa ativa
-                      boxShadow: corrente
-                          ? [
-                              BoxShadow(
-                                color: FincoreColors.primary.withValues(alpha: 0.35),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              )
-                            ]
-                          : null,
-                    ),
-                    child: Center(
-                      child: Text(
-                        '${index + 1}',
-                        style: TextStyle(
-                          color: (corrente || ativo) ? Colors.white : FincoreColors.textMuted,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ),
+                          : FincoreColors.textSecondary),
+                  fontWeight: isCurrent || isPast
+                      ? FontWeight.bold
+                      : FontWeight.w500,
+                  fontSize: 14,
                 ),
-
-                const SizedBox(width: 10),
-
-                // ── Rótulo da Etapa com atalho de teclado ────────────
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => controller.setPassoAtual(index),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          etapa.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: corrente ? FontWeight.bold : FontWeight.normal,
-                            color: corrente
-                                ? FincoreColors.textPrimary
-                                : (ativo
-                                    ? FincoreColors.textSecondary
-                                    : FincoreColors.textMuted),
-                            fontSize: 12.5,
-                          ),
-                        ),
-                        // Atalho de teclado visível abaixo do rótulo
-                        Text(
-                          '[${etapa.shortcut}]',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            color: corrente
-                                ? FincoreColors.primary
-                                : FincoreColors.textMuted,
-                            fontWeight: corrente ? FontWeight.bold : FontWeight.normal,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // ── Linha de Progresso entre etapas ──────────────────
-                if (index < etapas.length - 1)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        height: 2,
-                        decoration: BoxDecoration(
-                          color: ativo
-                              ? FincoreColors.primary.withValues(alpha: 0.6)
-                              : FincoreColors.border,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
           );
         }),
       ),
-    );
+    ),
+  );
   }
 }
 
 class _StepInfo {
+  final int number;
   final String label;
-  final String shortcut;
-  const _StepInfo({required this.label, required this.shortcut});
+  const _StepInfo({required this.number, required this.label});
 }
+

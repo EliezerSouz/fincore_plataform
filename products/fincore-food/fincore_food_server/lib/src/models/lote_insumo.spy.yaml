@@ -1,0 +1,32 @@
+﻿class: LoteInsumo
+table: lotes_insumo
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  produtoId: String
+  codigoLote: String?
+  quantidadeInicial: int
+  quantidadeDisponivel: int
+  quantidadeReservada: int
+  unidade: String
+  dataValidade: DateTime?
+  dataEntrada: DateTime
+  statusLote: String          # ativo | zerado | vencido | cancelado
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronizacao
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  lotes_insumo_tenant_produto_idx:
+    fields: tenantId, produtoId

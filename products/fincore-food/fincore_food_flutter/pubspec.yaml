@@ -50,6 +50,7 @@ dependencies:
   pdf: ^3.11.1
   printing: ^5.13.2
   esc_pos_utils_plus: ^2.0.4
+  image: ^4.2.0
 
 
   # The following adds the Cupertino Icons font to your application.
@@ -58,9 +59,24 @@ dependencies:
   drift_db_viewer: ^2.1.0
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.14.1
   flutter_lints: '>=3.0.0 <7.0.0'
   flutter_test:
     sdk: flutter
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/app_launcher_icon.png"
+  windows:
+    generate: true
+    image_path: "assets/images/app_launcher_icon.png"
+    icon_size: 256
+  web:
+    generate: true
+    image_path: "assets/images/app_launcher_icon.png"
+    background_color: "#18181B"
+    theme_color: "#F97316"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -72,6 +88,7 @@ flutter:
 
   assets:
     - .env
+    - assets/images/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware.

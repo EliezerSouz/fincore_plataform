@@ -202,7 +202,7 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                       borderRadius: BorderRadius.circular(4),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
+                          color: Colors.black.withValues(alpha: 0.3),
                           blurRadius: 12,
                           offset: const Offset(0, 4),
                         ),
@@ -217,6 +217,13 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                           child: Column(
                             children: [
                               // Cabeçalho
+                              Image.asset(
+                                'assets/images/app_launcher_icon.png',
+                                width: 28,
+                                height: 28,
+                                fit: BoxFit.contain,
+                              ),
+                              const SizedBox(height: 6),
                               _CupomTexto('FINCORE FOOD', bold: true, center: true, size: 15),
                               _CupomTexto('CUPOM NAO FISCAL', center: true, muted: true),
                               _CupomDivisor(double: true),
@@ -251,36 +258,6 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                                   _CupomTexto('Favorecido: $_pixFavorecido', center: true, size: 10),
                                 if (_pixBanco != null)
                                   _CupomTexto('Banco: $_pixBanco', center: true, size: 10),
-                                if (_exibirQrCode) ...[
-                                  const SizedBox(height: 8),
-                                  // QR Code real gerado a partir do PIX Copia e Cola
-                                  Builder(builder: (ctx) {
-                                    final copiaCola = PixGenerator.gerarCopiaCola(
-                                      chave: _pixKey!,
-                                      favorecido: _pixFavorecido ?? 'Estabelecimento',
-                                      cidade: 'Sorocaba',
-                                      valor: widget.totalCentavos / 100.0,
-                                      mensagem: _nomeEmpresa ?? 'Salgaderia',
-                                    );
-                                    return Column(
-                                      children: [
-                                        _QrCodeWidget(data: copiaCola, size: 120),
-                                        if (_exibirCopiaCola) ...[
-                                          const SizedBox(height: 6),
-                                          _CupomTexto('PIX COPIA E COLA:', bold: true, size: 9),
-                                          SelectableText(
-                                            copiaCola,
-                                            style: const TextStyle(
-                                              fontFamily: 'Courier New',
-                                              fontSize: 7,
-                                              color: Colors.black54,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    );
-                                  }),
-                                ],
                                 const SizedBox(height: 4),
                                 _CupomTexto('Envie o comprovante apos o pagamento', center: true, muted: true, size: 9),
                                 _CupomDivisor(),
@@ -308,13 +285,13 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: _lastSuccess
-                            ? const Color(0xFF10B981).withOpacity(0.1)
-                            : const Color(0xFFEF4444).withOpacity(0.1),
+                            ? const Color(0xFF10B981).withValues(alpha: 0.1)
+                            : const Color(0xFFEF4444).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: _lastSuccess
-                              ? const Color(0xFF10B981).withOpacity(0.4)
-                              : const Color(0xFFEF4444).withOpacity(0.4),
+                              ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                              : const Color(0xFFEF4444).withValues(alpha: 0.4),
                         ),
                       ),
                       child: Row(

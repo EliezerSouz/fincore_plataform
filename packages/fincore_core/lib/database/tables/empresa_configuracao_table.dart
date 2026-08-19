@@ -3,9 +3,6 @@ import '../../src/database/tables/base_entity_columns.dart';
 
 @DataClassName('EmpresaConfiguracaoData')
 class EmpresaConfiguracaoTable extends Table with IdentityColumns, AuditColumns, SyncColumns {
-  TextColumn get timezone => text().withDefault(const Constant('America/Sao_Paulo'))();
-  TextColumn get locale => text().withDefault(const Constant('pt_BR'))();
-  TextColumn get currency => text().withDefault(const Constant('BRL'))();
   TextColumn get printerConfig => text().nullable()(); // Legado — mantido para compatibilidade
   TextColumn get pixKey => text().nullable()();
   RealColumn get taxaServico => real().withDefault(const Constant(0.10))();
@@ -47,13 +44,18 @@ class EmpresaConfiguracaoTable extends Table with IdentityColumns, AuditColumns,
   TextColumn get pixFavorecido => text().nullable()();
   TextColumn get pixBanco => text().nullable()();
   TextColumn get pixTipo => text().withDefault(const Constant('CPF'))();
-  TextColumn get pixCidade => text().withDefault(const Constant('Sorocaba'))();
-
-  // ─── CAP.PRINTING: Dados do Cupom ────────────────────────────────
-  TextColumn get nomeEmpresaCupom => text().nullable()();
-  TextColumn get telefoneEmpresa => text().nullable()();
-  TextColumn get cnpjEmpresa => text().nullable()();
-  TextColumn get enderecoEmpresa => text().nullable()();
+  // ─── PARAMETRIZAÇÃO DE VENDAS & PDV ──────────────────────────────
+  BoolColumn get modoDeliveryAtivo => boolean().withDefault(const Constant(true))();
+  BoolColumn get modoComandasAtivo => boolean().withDefault(const Constant(false))();
+  BoolColumn get clienteObrigatorioVenda => boolean().withDefault(const Constant(false))();
+  TextColumn get atendimentoPadrao => text().withDefault(const Constant('Delivery'))();
+  BoolColumn get mercadoPagoAtivo => boolean().withDefault(const Constant(false))();
+  BoolColumn get openPixAtivo => boolean().withDefault(const Constant(false))();
+  BoolColumn get asaasAtivo => boolean().withDefault(const Constant(false))();
+  BoolColumn get ifoodAtivo => boolean().withDefault(const Constant(false))();
+  IntColumn get margemSegurancaMinutos => integer().nullable().withDefault(const Constant(10))();
+  BoolColumn get taxaEntregaPorKm => boolean().nullable().withDefault(const Constant(false))();
+  IntColumn get valorPorKmCentavos => integer().nullable().withDefault(const Constant(0))();
 
   @override
   Set<Column> get primaryKey => {id};

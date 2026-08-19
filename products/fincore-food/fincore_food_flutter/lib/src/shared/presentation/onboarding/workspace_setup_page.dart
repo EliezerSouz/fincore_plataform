@@ -1,11 +1,8 @@
-import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_flutter/main.dart';
 import 'package:fincore_food_client/fincore_food_client.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/database/fincore_database.dart';
@@ -55,7 +52,7 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: const Color(0xFF0F0F11),
         body: Center(child: CircularProgressIndicator(color: FincoreColors.primary)),
       );
@@ -84,7 +81,7 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
               height: 320,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: FincoreColors.primary.withOpacity(0.08),
+                color: FincoreColors.primary.withValues(alpha: 0.08),
               ),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 90, sigmaY: 90),
@@ -101,7 +98,7 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
               height: 350,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: FincoreColors.accent.withOpacity(0.05),
+                color: FincoreColors.accent.withValues(alpha: 0.05),
               ),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 100, sigmaY: 100),
@@ -117,15 +114,15 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 560),
                 decoration: BoxDecoration(
-                  color: FincoreColors.surface.withOpacity(0.85),
+                  color: FincoreColors.surface.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
-                    color: FincoreColors.border.withOpacity(0.4),
+                    color: FincoreColors.border.withValues(alpha: 0.4),
                     width: 1.5,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.3),
+                      color: Colors.black.withValues(alpha: 0.3),
                       blurRadius: 25,
                       offset: const Offset(0, 10),
                     )
@@ -135,7 +132,16 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Cabeçalho da Marca
+                    // Cabeçalho da Marca com Logo 3D Oficial
+                    Center(
+                      child: Image.asset(
+                        'assets/images/app_launcher_icon.png',
+                        width: 64,
+                        height: 64,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     const Text(
                       'BEM-VINDO AO FINCORE',
                       textAlign: TextAlign.center,
@@ -147,7 +153,7 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       'Seu negócio. Mais simples.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
@@ -163,9 +169,9 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       decoration: BoxDecoration(
-                        color: FincoreColors.background.withOpacity(0.6),
+                        color: FincoreColors.background.withValues(alpha: 0.6),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: FincoreColors.border.withOpacity(0.5)),
+                        border: Border.all(color: FincoreColors.border.withValues(alpha: 0.5)),
                       ),
                       child: Row(
                         children: [
@@ -185,8 +191,8 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: (widget.authUserInfo.vencimento != null) 
-                                  ? FincoreColors.success.withOpacity(0.15) 
-                                  : FincoreColors.accent.withOpacity(0.15),
+                                  ? FincoreColors.success.withValues(alpha: 0.15) 
+                                  : FincoreColors.accent.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: Text(
@@ -219,7 +225,7 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
                         ),
                         Text(
                           '${percentual.toStringAsFixed(0)}%',
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: FincoreColors.primary,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -231,7 +237,7 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
                     LinearProgressIndicator(
                       value: percentual / 100,
                       backgroundColor: FincoreColors.border,
-                      valueColor: const AlwaysStoppedAnimation(FincoreColors.primary),
+                      valueColor: AlwaysStoppedAnimation(FincoreColors.primary),
                       minHeight: 8,
                       borderRadius: BorderRadius.circular(4),
                     ),
@@ -287,7 +293,7 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         elevation: 4,
-                        shadowColor: FincoreColors.primary.withOpacity(0.2),
+                        shadowColor: FincoreColors.primary.withValues(alpha: 0.2),
                       ),
                       child: const Text(
                         'IR PARA O PAINEL PRINCIPAL',
@@ -329,12 +335,12 @@ class _WorkspaceSetupPageState extends State<WorkspaceSetupPage> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: FincoreColors.background.withOpacity(0.4),
+        color: FincoreColors.background.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isCompleted
-              ? FincoreColors.success.withOpacity(0.3)
-              : FincoreColors.border.withOpacity(0.6),
+              ? FincoreColors.success.withValues(alpha: 0.3)
+              : FincoreColors.border.withValues(alpha: 0.6),
         ),
       ),
       child: Row(

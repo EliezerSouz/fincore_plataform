@@ -1,5 +1,8 @@
 import 'package:fincore_core/common/kds_models.dart';
 import 'package:intl/intl.dart';
+import 'package:fincore_core/context/tenant_context.dart';
+import 'package:fincore_core/di/dependency_injection.dart';
+import 'permissao_service.dart';
 
 class DadosOrdemKanban {
   final String cliente;
@@ -114,6 +117,20 @@ class DadosOrdemKanban {
       }
       obsRestantes = [limpa];
       dataAgendada = agendada;
+    }
+
+    // Filtro de segurança baseado nas permissões do papel do usuário
+    String? role;
+    try {
+      final tenantCtx = DependencyInjection().get<TenantContext>();
+      if (tenantCtx.hasContext) {
+        role = tenantCtx.usuario.role;
+      }
+    } catch (_) {}
+
+    if (!PermissaoService.podeVerFinanceiro(role)) {
+      pagamento = '';
+      totalCentavos = 0;
     }
 
     return DadosOrdemKanban(

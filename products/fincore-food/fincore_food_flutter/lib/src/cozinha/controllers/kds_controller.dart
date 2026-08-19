@@ -5,6 +5,9 @@ import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/repository/ordem_preparo_repository.dart';
 import 'package:fincore_core/usecase/estornar_lote_estoque_usecase.dart';
+import 'package:drift/drift.dart' hide Column;
+import 'package:fincore_core/database/fincore_database.dart';
+import '../../estoque/controllers/estoque_controller.dart';
 
 /// Controller do KDS (Kitchen Display System)
 ///
@@ -136,6 +139,23 @@ class KdsController extends ChangeNotifier {
     );
 
     await _ordemRepo.save(updated);
+
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+      await (db.update(db.pedidosTable)
+            ..where((t) => t.id.equals(ordem.pedidoId)))
+          .write(PedidosTableCompanion(
+        status: const Value('entregue'),
+        updatedAt: Value(agora.toUtc()),
+        syncStatus: const Value(SyncStatus.pending),
+      ));
+
+      final estoqueCtrl = DependencyInjection().get<EstoqueController>();
+      await estoqueCtrl.recalcularReservasEEstoques();
+    } catch (e) {
+      debugPrint('[KDS] Erro ao sincronizar entregue com estoque: $e');
+    }
+
     _ordens.removeAt(index);
     notifyListeners();
   }

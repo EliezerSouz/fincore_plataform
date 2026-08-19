@@ -18,11 +18,13 @@ import 'package:fincore_food_server/src/generated/auth_user_info.dart' as _i4;
 import 'package:fincore_food_server/src/generated/bootstrap_payload.dart'
     as _i5;
 import 'package:fincore_food_server/src/generated/greeting.dart' as _i6;
+import 'package:fincore_food_server/src/generated/map_route_result.dart' as _i7;
+import 'package:fincore_food_server/src/generated/empresa.dart' as _i8;
 import 'package:fincore_food_server/src/generated/workspace_setup_progress_info.dart'
-    as _i7;
-import 'package:fincore_food_server/src/generated/sync_push_entry.dart' as _i8;
-import 'package:fincore_food_server/src/generated/sync_pull_payload.dart'
     as _i9;
+import 'package:fincore_food_server/src/generated/sync_push_entry.dart' as _i10;
+import 'package:fincore_food_server/src/generated/sync_pull_payload.dart'
+    as _i11;
 import 'package:fincore_food_server/src/generated/protocol.dart';
 import 'package:fincore_food_server/src/generated/endpoints.dart';
 export 'package:serverpod_test/serverpod_test_public_exports.dart';
@@ -117,6 +119,8 @@ class TestEndpoints {
 
   late final _GreetingEndpoint greeting;
 
+  late final _MapRouteEndpoint mapRoute;
+
   late final _OnboardingEndpoint onboarding;
 
   late final _SyncEndpoint sync;
@@ -142,6 +146,10 @@ class _InternalTestEndpoints extends TestEndpoints
       serializationManager,
     );
     greeting = _GreetingEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    mapRoute = _MapRouteEndpoint(
       endpoints,
       serializationManager,
     );
@@ -365,6 +373,50 @@ class _GreetingEndpoint {
   }
 }
 
+class _MapRouteEndpoint {
+  _MapRouteEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<_i7.MapRouteResult> calculateRoute(
+    _i1.TestSessionBuilder sessionBuilder,
+    String origin,
+    String destination,
+  ) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+        endpoint: 'mapRoute',
+        method: 'calculateRoute',
+      );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'mapRoute',
+          methodName: 'calculateRoute',
+          parameters: _i1.testObjectToJson({
+            'origin': origin,
+            'destination': destination,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue = await (_localCallContext.method.call(
+          _localUniqueSession,
+          _localCallContext.arguments,
+        ) as _i3.Future<_i7.MapRouteResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
 class _OnboardingEndpoint {
   _OnboardingEndpoint(
     this._endpointDispatch,
@@ -385,6 +437,7 @@ class _OnboardingEndpoint {
     required String telefoneEmpresa,
     required String usuarioNome,
     required String segmento,
+    String? plano,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -406,6 +459,7 @@ class _OnboardingEndpoint {
             'telefoneEmpresa': telefoneEmpresa,
             'usuarioNome': usuarioNome,
             'segmento': segmento,
+            'plano': plano,
           }),
           serializationManager: _serializationManager,
         );
@@ -413,6 +467,33 @@ class _OnboardingEndpoint {
           _localUniqueSession,
           _localCallContext.arguments,
         ) as _i3.Future<bool>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i8.Empresa?> minhaEmpresa(
+      _i1.TestSessionBuilder sessionBuilder) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+        endpoint: 'onboarding',
+        method: 'minhaEmpresa',
+      );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'onboarding',
+          methodName: 'minhaEmpresa',
+          parameters: _i1.testObjectToJson({}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue = await (_localCallContext.method.call(
+          _localUniqueSession,
+          _localCallContext.arguments,
+        ) as _i3.Future<_i8.Empresa?>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -446,7 +527,7 @@ class _OnboardingEndpoint {
     });
   }
 
-  _i3.Future<_i7.WorkspaceSetupProgressInfo> progressoSetup(
+  _i3.Future<_i9.WorkspaceSetupProgressInfo> progressoSetup(
     _i1.TestSessionBuilder sessionBuilder,
     String tenantId,
   ) async {
@@ -467,7 +548,7 @@ class _OnboardingEndpoint {
         var _localReturnValue = await (_localCallContext.method.call(
           _localUniqueSession,
           _localCallContext.arguments,
-        ) as _i3.Future<_i7.WorkspaceSetupProgressInfo>);
+        ) as _i3.Future<_i9.WorkspaceSetupProgressInfo>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -488,7 +569,7 @@ class _SyncEndpoint {
 
   _i3.Future<bool> push(
     _i1.TestSessionBuilder sessionBuilder,
-    List<_i8.SyncPushEntry> changes,
+    List<_i10.SyncPushEntry> changes,
   ) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -515,7 +596,7 @@ class _SyncEndpoint {
     });
   }
 
-  _i3.Future<_i9.SyncPullPayload> pull(
+  _i3.Future<_i11.SyncPullPayload> pull(
     _i1.TestSessionBuilder sessionBuilder,
     DateTime lastSyncAt,
   ) async {
@@ -536,7 +617,7 @@ class _SyncEndpoint {
         var _localReturnValue = await (_localCallContext.method.call(
           _localUniqueSession,
           _localCallContext.arguments,
-        ) as _i3.Future<_i9.SyncPullPayload>);
+        ) as _i3.Future<_i11.SyncPullPayload>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

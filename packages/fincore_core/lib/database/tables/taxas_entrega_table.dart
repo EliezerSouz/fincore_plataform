@@ -11,6 +11,9 @@ class TaxasEntregaTable extends Table with IdentityColumns, AuditColumns, SyncCo
   TextColumn get cepFinal => text().nullable()();
   IntColumn get valorCentavos => integer()();
   BoolColumn get ativo => boolean()();
+  IntColumn get pedidoMinimoCentavos => integer().nullable().withDefault(const Constant(0))();
+  TextColumn get prazoEstimado => text().nullable()();
+  TextColumn get observacoes => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

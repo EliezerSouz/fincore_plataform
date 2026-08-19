@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:fincore_food_client/fincore_food_client.dart';
 import 'package:flutter/material.dart';
 import 'package:serverpod_flutter/serverpod_flutter.dart';
@@ -7,6 +8,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'src/shared/presentation/router/fincore_root_router.dart';
 import 'src/shared/database_initializer.dart';
 import 'package:fincore_core/fincore_core.dart';
+import 'package:intl/date_symbol_data_local.dart';
+
+class FincoreHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..findProxy = (uri) => 'DIRECT';
+  }
+}
 
 late final Client client;
 
@@ -14,24 +24,39 @@ void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      await initializeDateFormatting('pt_BR', null);
+      HttpOverrides.global = FincoreHttpOverrides();
 
       // Captura erros de framework Flutter
       FlutterError.onError = (FlutterErrorDetails details) {
+        final errorString = details.exceptionAsString();
+        
+        // Ignora bug interno de asserts do RawKeyboard no Windows Desktop
+        if (errorString.contains('Attempted to send a key down event') ||
+            errorString.contains('keysPressed') ||
+            errorString.contains('raw_keyboard.dart')) {
+          debugPrint('⚠️ Ignorando crash conhecido de RawKeyboard no Windows: $errorString');
+          return;
+        }
+
         try {
           LogService.instance.error(
             LogModule.crash,
-            'Erro de framework Flutter: ${details.exceptionAsString()}',
+            'Erro de framework Flutter: $errorString',
             stackTrace: details.stack?.toString(),
           );
         } catch (_) {
           debugPrint('═══ FLUTTER ERROR (FALLBACK) ═══');
-          debugPrint(details.exceptionAsString());
+          debugPrint(errorString);
         }
+
+        // Repassa erros reais para apresentação
+        FlutterError.presentError(details);
       };
 
       const serverUrlFromEnv = String.fromEnvironment('SERVER_URL');
       final serverUrl =
-          serverUrlFromEnv.isEmpty ? 'http://localhost:8080/' : serverUrlFromEnv;
+          serverUrlFromEnv.isEmpty ? 'http://127.0.0.1:18080/' : serverUrlFromEnv;
 
       debugPrint('Conectando ao servidor: $serverUrl');
 
@@ -65,16 +90,35 @@ void main() {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    ThemeController.instance.init();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'FINCORE Food Platform',
-      debugShowCheckedModeBanner: false,
-      theme: FincoreTheme.darkTheme,
-      home: const FincoreRootRouter(),
+    return ListenableBuilder(
+      listenable: ThemeController.instance,
+      builder: (context, _) {
+        final controller = ThemeController.instance;
+        return MaterialApp(
+          title: 'FINCORE Food Platform',
+          debugShowCheckedModeBanner: false,
+          themeMode: controller.themeMode,
+          theme: controller.lightTheme,
+          darkTheme: controller.darkTheme,
+          home: const FincoreRootRouter(),
+        );
+      },
     );
   }
 }

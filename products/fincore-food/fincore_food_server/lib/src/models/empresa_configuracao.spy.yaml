@@ -3,9 +3,6 @@ table: empresa_configuracao
 fields:
   id: UuidValue, defaultModel=random
   tenantId: String
-  timezone: String
-  locale: String
-  currency: String
   printerConfig: String?
   pixKey: String?
   taxaServico: double
@@ -61,10 +58,22 @@ fields:
   pixFavorecido: String?
   pixBanco: String?
   pixTipo: String
-  pixCidade: String
 
-  # CAP.PRINTING: Dados do Cupom
-  nomeEmpresaCupom: String?
-  telefoneEmpresa: String?
-  cnpjEmpresa: String?
-  enderecoEmpresa: String?
+  # Parametrização PDV e Vendas
+  modoDeliveryAtivo: bool?
+  clienteObrigatorioVenda: bool?
+  atendimentoPadrao: String?
+  margemSegurancaMinutos: int?
+  taxaEntregaPorKm: bool?
+  valorPorKmCentavos: int?
+  
+  # Conectores de Integração
+  mercadoPagoAtivo: bool?
+  openPixAtivo: bool?
+  asaasAtivo: bool?
+  ifoodAtivo: bool?
+
+indexes:
+  empresa_config_tenant_unique:
+    fields: tenantId
+    unique: true

@@ -52,7 +52,7 @@ class _KdsScreenState extends State<KdsScreen> {
       listenable: _controller,
       builder: (context, _) {
         if (_controller.isLoading) {
-          return const Center(
+          return Center(
             child: CircularProgressIndicator(color: FincoreColors.primary),
           );
         }
@@ -311,7 +311,7 @@ class _KdsScreenState extends State<KdsScreen> {
                       Container(
                         width: 10,
                         height: 10,
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           color: FincoreColors.primary,
                           shape: BoxShape.circle,
                         ),

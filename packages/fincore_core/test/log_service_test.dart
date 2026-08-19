@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:test/test.dart';
 import 'package:fincore_core/fincore_core.dart';
@@ -16,7 +15,7 @@ void main() {
     }
   });
 
-  test('LogService cria arquivos de log estruturados em JSON Lines', () async {
+  test('LogService cria arquivos de log narrativos', () async {
     LogService.init(tempDir.path, runCleanup: false);
 
     final logger = LogService.instance;
@@ -24,57 +23,43 @@ void main() {
     await logger.info(LogModule.app, 'Mensagem informativa', tenantId: 'tenant-123', userId: 'user-456');
     await logger.error(LogModule.sync, 'Falha catastrófica no sync', tenantId: 'tenant-123', exception: 'SocketException: timeout');
 
-    // Validar pasta app
-    final appLogDir = Directory('${tempDir.path}/logs/app');
-    expect(await appLogDir.exists(), isTrue);
+    // Validar pasta logs
+    final logDir = Directory('${tempDir.path}/logs');
+    expect(await logDir.exists(), isTrue);
 
-    final appFiles = appLogDir.listSync();
-    expect(appFiles.length, equals(1));
-    expect(appFiles.first, isA<File>());
+    final files = logDir.listSync(recursive: true).whereType<File>().toList();
+    expect(files.length, equals(1));
+    expect(files.first, isA<File>());
 
-    final appLogContent = await (appFiles.first as File).readAsString();
-    final appJson = jsonDecode(appLogContent.trim());
-    expect(appJson['message'], equals('Mensagem informativa'));
-    expect(appJson['level'], equals('INFO'));
-    expect(appJson['module'], equals('APP'));
-    expect(appJson['tenantId'], equals('tenant-123'));
-    expect(appJson['userId'], equals('user-456'));
-    expect(appJson['timestamp'], isNotNull);
-
-    // Validar pasta sync
-    final syncLogDir = Directory('${tempDir.path}/logs/sync');
-    expect(await syncLogDir.exists(), isTrue);
-
-    final syncFiles = syncLogDir.listSync();
-    expect(syncFiles.length, equals(1));
-    
-    final syncLogContent = await (syncFiles.first as File).readAsString();
-    final syncJson = jsonDecode(syncLogContent.trim());
-    expect(syncJson['message'], equals('Falha catastrófica no sync'));
-    expect(syncJson['level'], equals('ERROR'));
-    expect(syncJson['module'], equals('SYNC'));
-    expect(syncJson['exception'], equals('SocketException: timeout'));
+    final logContent = await files.first.readAsString();
+    expect(logContent, contains('[SISTEMA    ]'));
+    expect(logContent, contains('Mensagem informativa'));
+    expect(logContent, contains('[SINCRONISMO]'));
+    expect(logContent, contains('Falha catastrófica no sync'));
   });
 
-  test('LogService remove arquivos de log mais velhos que 90 dias no startup', () async {
-    // 1. Criar pasta e arquivo simulando log antigo
-    final oldLogsDir = Directory('${tempDir.path}/logs/app');
-    await oldLogsDir.create(recursive: true);
-    final oldFile = File('${oldLogsDir.path}/fincore_app_2020-01-01.log');
+  test('LogService remove arquivos de log mais velhos que 30 dias no startup', () async {
+    final oldDir = Directory('${tempDir.path}/logs/2020-01/01');
+    await oldDir.create(recursive: true);
+    
+    // 1. Criar arquivo simulando log antigo (deve terminar com .log)
+    final oldFile = File('${oldDir.path}/fincore_10.log');
     await oldFile.writeAsString('{"old_log": true}');
     
     // Configurar data de modificação antiga
-    final backThen = DateTime.now().subtract(const Duration(days: 95));
+    final backThen = DateTime.now().subtract(const Duration(days: 35));
     await oldFile.setLastModified(backThen);
 
     // Criar um arquivo recente que NÃO deve ser excluído
-    final recentFile = File('${oldLogsDir.path}/fincore_app_today.log');
+    final recentFile = File('${oldDir.path}/fincore_today_10.log');
     await recentFile.writeAsString('{"recent": true}');
     await recentFile.setLastModified(DateTime.now());
 
-    // 2. Inicializar o LogService e forçar a limpeza síncrona
-    LogService.init(tempDir.path, runCleanup: false);
-    await LogService.instance.forceCleanup();
+    // 2. Inicializar o LogService (que chama _scheduleCleanup)
+    LogService.init(tempDir.path, runCleanup: true);
+
+    // Dar um pequeno tempo para a microtask de cleanup rodar
+    await Future.delayed(const Duration(milliseconds: 100));
 
     // 3. Verificar que o arquivo antigo foi deletado e o novo permaneceu
     expect(await oldFile.exists(), isFalse);

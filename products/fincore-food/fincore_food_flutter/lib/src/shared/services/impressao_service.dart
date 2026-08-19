@@ -370,18 +370,22 @@ class FincorePdfGerador {
                         pw.Center(child: pw.Text('Favorecido: ${cfg.pixFavorecido}', style: defaultStyle)),
                       if (cfg.pixBanco.isNotEmpty)
                         pw.Center(child: pw.Text('Banco: ${cfg.pixBanco}', style: defaultStyle)),
-                      pw.SizedBox(height: 6),
-                      pw.Center(
-                        child: pw.BarcodeWidget(
-                          barcode: pw.Barcode.qrCode(),
-                          data: copiaCola,
-                          width: 80,
-                          height: 80,
+                      if (cfg.habilitarQrCodePix) ...[
+                        pw.SizedBox(height: 6),
+                        pw.Center(
+                          child: pw.BarcodeWidget(
+                            barcode: pw.Barcode.qrCode(),
+                            data: copiaCola,
+                            width: 80,
+                            height: 80,
+                          ),
                         ),
-                      ),
-                      pw.SizedBox(height: 6),
-                      pw.Text('PIX COPIA E COLA:', style: boldStyle),
-                      pw.Text(copiaCola, style: pw.TextStyle(fontSize: is58 ? 6 : 7)),
+                      ],
+                      if (cfg.habilitarCopiaCola) ...[
+                        pw.SizedBox(height: 6),
+                        pw.Text('PIX COPIA E COLA:', style: boldStyle),
+                        pw.Text(copiaCola, style: pw.TextStyle(fontSize: is58 ? 6 : 7)),
+                      ],
                       pw.SizedBox(height: 4),
                       pw.Center(
                         child: pw.Text('Envie o comprovante após o pagamento', style: pw.TextStyle(fontSize: is58 ? 7 : 8, fontStyle: pw.FontStyle.italic)),
@@ -512,7 +516,7 @@ class _DialogImpressaoWidget extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6B2B).withOpacity(0.15),
+                color: const Color(0xFFFF6B2B).withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: const Icon(

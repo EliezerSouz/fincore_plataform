@@ -20,6 +20,10 @@ class TabelaPrecificacao {
   final bool ativo;
   final SyncMetadata metadata;
 
+  /// P1-07: Canal de venda ao qual esta tabela se aplica.
+  /// Valores: 'todos' (padrão) | 'delivery' | 'retirada'
+  final String canal;
+
   const TabelaPrecificacao({
     required this.id,
     required this.tenantId,
@@ -29,6 +33,7 @@ class TabelaPrecificacao {
     required this.prioridade,
     required this.ativo,
     required this.metadata,
+    this.canal = 'todos',
   });
 }
 
@@ -77,3 +82,28 @@ class ProdutoTabelaPrecificacao {
     required this.metadata,
   });
 }
+
+class CategoriaTabelaPrecificacao {
+  final String id;
+  final String tenantId;
+  final String categoriaId;
+  final String tabelaPrecificacaoId;
+  final bool ativo;
+  final int prioridade;
+  final DateTime? dataInicio;
+  final DateTime? dataFim;
+  final SyncMetadata metadata;
+
+  const CategoriaTabelaPrecificacao({
+    required this.id,
+    required this.tenantId,
+    required this.categoriaId,
+    required this.tabelaPrecificacaoId,
+    required this.ativo,
+    required this.prioridade,
+    this.dataInicio,
+    this.dataFim,
+    required this.metadata,
+  });
+}
+

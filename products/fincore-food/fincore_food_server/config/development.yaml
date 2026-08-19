@@ -5,23 +5,26 @@
 
 # ─── API Server ─────────────────────────────────────────────────────
 apiServer:
-  port: 8080
+  address: 127.0.0.1
+  port: 18080
   publicHost: localhost
-  publicPort: 8080
+  publicPort: 18080
   publicScheme: http
 
 # ─── Insights Server ────────────────────────────────────────────────
 insightsServer:
-  port: 8081
+  address: 127.0.0.1
+  port: 18081
   publicHost: localhost
-  publicPort: 8081
+  publicPort: 18081
   publicScheme: http
 
 # ─── Web Server ─────────────────────────────────────────────────────
 webServer:
-  port: 8082
+  address: 127.0.0.1
+  port: 18082
   publicHost: localhost
-  publicPort: 8082
+  publicPort: 18082
   publicScheme: http
 
 # ─── Supabase PostgreSQL (Banco Central) ────────────────────────────
@@ -33,7 +36,7 @@ database:
   name: postgres
   user: postgres
   requireSsl: true
-  poolSize: 20
+  poolSize: 3
 
 # ─── Redis (desabilitado por ora) ───────────────────────────────────
 redis:

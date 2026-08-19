@@ -14,11 +14,14 @@ import 'dart:async' as _i2;
 import 'package:fincore_food_client/src/protocol/auth_user_info.dart' as _i3;
 import 'package:fincore_food_client/src/protocol/bootstrap_payload.dart' as _i4;
 import 'package:fincore_food_client/src/protocol/greeting.dart' as _i5;
+import 'package:fincore_food_client/src/protocol/map_route_result.dart' as _i6;
+import 'package:fincore_food_client/src/protocol/empresa.dart' as _i7;
 import 'package:fincore_food_client/src/protocol/workspace_setup_progress_info.dart'
-    as _i6;
-import 'package:fincore_food_client/src/protocol/sync_push_entry.dart' as _i7;
-import 'package:fincore_food_client/src/protocol/sync_pull_payload.dart' as _i8;
-import 'protocol.dart' as _i9;
+    as _i8;
+import 'package:fincore_food_client/src/protocol/sync_push_entry.dart' as _i9;
+import 'package:fincore_food_client/src/protocol/sync_pull_payload.dart'
+    as _i10;
+import 'protocol.dart' as _i11;
 
 /// {@category Endpoint}
 class EndpointAdmin extends _i1.EndpointRef {
@@ -101,6 +104,31 @@ class EndpointGreeting extends _i1.EndpointRef {
 }
 
 /// {@category Endpoint}
+class EndpointMapRoute extends _i1.EndpointRef {
+  EndpointMapRoute(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'mapRoute';
+
+  /// Calcula a distância (metros) e duração (segundos) de deslocamento
+  /// entre a origem (empresa) e o destino (entrega do cliente).
+  ///
+  /// Utiliza cache persistente no banco PostgreSQL (Supabase) via queries diretas.
+  _i2.Future<_i6.MapRouteResult> calculateRoute(
+    String origin,
+    String destination,
+  ) =>
+      caller.callServerEndpoint<_i6.MapRouteResult>(
+        'mapRoute',
+        'calculateRoute',
+        {
+          'origin': origin,
+          'destination': destination,
+        },
+      );
+}
+
+/// {@category Endpoint}
 class EndpointOnboarding extends _i1.EndpointRef {
   EndpointOnboarding(_i1.EndpointCaller caller) : super(caller);
 
@@ -117,6 +145,7 @@ class EndpointOnboarding extends _i1.EndpointRef {
     required String telefoneEmpresa,
     required String usuarioNome,
     required String segmento,
+    String? plano,
   }) =>
       caller.callServerEndpoint<bool>(
         'onboarding',
@@ -130,7 +159,16 @@ class EndpointOnboarding extends _i1.EndpointRef {
           'telefoneEmpresa': telefoneEmpresa,
           'usuarioNome': usuarioNome,
           'segmento': segmento,
+          'plano': plano,
         },
+      );
+
+  /// Consulta os dados da empresa vinculada ao usuário autenticado
+  _i2.Future<_i7.Empresa?> minhaEmpresa() =>
+      caller.callServerEndpoint<_i7.Empresa?>(
+        'onboarding',
+        'minhaEmpresa',
+        {},
       );
 
   /// Consulta o status de ativação da empresa vinculada ao usuário
@@ -141,8 +179,8 @@ class EndpointOnboarding extends _i1.EndpointRef {
       );
 
   /// Calcula o progresso do setup do workspace (categorias, produtos, etc.)
-  _i2.Future<_i6.WorkspaceSetupProgressInfo> progressoSetup(String tenantId) =>
-      caller.callServerEndpoint<_i6.WorkspaceSetupProgressInfo>(
+  _i2.Future<_i8.WorkspaceSetupProgressInfo> progressoSetup(String tenantId) =>
+      caller.callServerEndpoint<_i8.WorkspaceSetupProgressInfo>(
         'onboarding',
         'progressoSetup',
         {'tenantId': tenantId},
@@ -157,8 +195,12 @@ class EndpointSync extends _i1.EndpointRef {
   String get name => 'sync';
 
   /// Recebe uma lista de alterações geradas no FincoreCore (Outbox)
-  /// e as aplica no banco Postgres usando Last-Write-Wins
-  _i2.Future<bool> push(List<_i7.SyncPushEntry> changes) =>
+  /// e as aplica no banco Postgres usando Last-Write-Wins.
+  ///
+  /// ⚠️  INCOMPLETO: Apenas 'empresa_configuracao' é tratado.
+  /// Os demais casos caem no `default` com log de warning.
+  /// O sync real acontece via SupabaseSyncService no Flutter.
+  _i2.Future<bool> push(List<_i9.SyncPushEntry> changes) =>
       caller.callServerEndpoint<bool>(
         'sync',
         'push',
@@ -166,8 +208,8 @@ class EndpointSync extends _i1.EndpointRef {
       );
 
   /// Retorna as modificações que ocorreram no servidor desde a última sincronização local
-  _i2.Future<_i8.SyncPullPayload> pull(DateTime lastSyncAt) =>
-      caller.callServerEndpoint<_i8.SyncPullPayload>(
+  _i2.Future<_i10.SyncPullPayload> pull(DateTime lastSyncAt) =>
+      caller.callServerEndpoint<_i10.SyncPullPayload>(
         'sync',
         'pull',
         {'lastSyncAt': lastSyncAt},
@@ -190,7 +232,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
           host,
-          _i9.Protocol(),
+          _i11.Protocol(),
           securityContext: securityContext,
           authenticationKeyManager: authenticationKeyManager,
           streamingConnectionTimeout: streamingConnectionTimeout,
@@ -204,6 +246,7 @@ class Client extends _i1.ServerpodClientShared {
     auth = EndpointAuth(this);
     bootstrap = EndpointBootstrap(this);
     greeting = EndpointGreeting(this);
+    mapRoute = EndpointMapRoute(this);
     onboarding = EndpointOnboarding(this);
     sync = EndpointSync(this);
   }
@@ -216,6 +259,8 @@ class Client extends _i1.ServerpodClientShared {
 
   late final EndpointGreeting greeting;
 
+  late final EndpointMapRoute mapRoute;
+
   late final EndpointOnboarding onboarding;
 
   late final EndpointSync sync;
@@ -226,6 +271,7 @@ class Client extends _i1.ServerpodClientShared {
         'auth': auth,
         'bootstrap': bootstrap,
         'greeting': greeting,
+        'mapRoute': mapRoute,
         'onboarding': onboarding,
         'sync': sync,
       };

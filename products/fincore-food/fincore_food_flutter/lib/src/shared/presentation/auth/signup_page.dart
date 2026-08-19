@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:uuid/uuid.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_food_flutter/main.dart';
@@ -32,6 +31,7 @@ class _SignupPageState extends State<SignupPage> {
   final _documentoController = TextEditingController();
   final _telefoneController = TextEditingController();
   String _segmento = 'Food Service';
+  String _plano = 'prata';
 
   @override
   void dispose() {
@@ -82,23 +82,38 @@ class _SignupPageState extends State<SignupPage> {
 
       // 3. Criar empresa no Serverpod Backend
       final tenantId = const Uuid().v4();
+      final nomeFantasiaFinal = _nomeFantasiaController.text.trim().isEmpty 
+          ? _razaoSocialController.text.trim()
+          : _nomeFantasiaController.text.trim();
+
       final success = await client.onboarding.criarEmpresa(
         tenantId: tenantId,
         razaoSocial: _razaoSocialController.text.trim(),
-        nomeFantasia: _nomeFantasiaController.text.trim().isEmpty 
-            ? _razaoSocialController.text.trim()
-            : _nomeFantasiaController.text.trim(),
+        nomeFantasia: nomeFantasiaFinal,
         documentoFiscal: _documentoController.text.trim(),
         emailEmpresa: _emailController.text.trim(),
         telefoneEmpresa: _telefoneController.text.trim(),
         usuarioNome: _nameController.text.trim(),
         segmento: _segmento,
+        plano: _plano,
       );
 
       if (!success) {
         throw Exception('Falha ao registrar espaço da empresa no servidor.');
       }
 
+      // Salvar em cache local para exibição imediata na tela de liberação
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('pending_empresa_nome', nomeFantasiaFinal);
+        await prefs.setString('pending_empresa_email', _emailController.text.trim());
+        await prefs.setString('pending_empresa_plano', _plano);
+        await prefs.setString('pending_empresa_doc', _documentoController.text.trim());
+        await prefs.setString('pending_empresa_tel', _telefoneController.text.trim());
+        await prefs.setString('pending_empresa_seg', _segmento);
+      } catch (_) {}
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Conta e Espaço criados com sucesso! Aguardando ativação.'),
@@ -109,6 +124,7 @@ class _SignupPageState extends State<SignupPage> {
       widget.onSignupSuccess();
       Navigator.of(context).pop();
     } on OnboardingException catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.message),
@@ -116,6 +132,7 @@ class _SignupPageState extends State<SignupPage> {
         ),
       );
     } on AuthException catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.message),
@@ -123,6 +140,7 @@ class _SignupPageState extends State<SignupPage> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Erro ao cadastrar: $e'),
@@ -183,7 +201,7 @@ class _SignupPageState extends State<SignupPage> {
               border: Border.all(color: FincoreColors.border, width: 1.5),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
+                  color: Colors.black.withValues(alpha: 0.3),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 )
@@ -211,7 +229,7 @@ class _SignupPageState extends State<SignupPage> {
                         ? 'Etapa 1 de 2: Seus Dados de Acesso'
                         : 'Etapa 2 de 2: Dados do Estabelecimento',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: FincoreColors.primary,
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
@@ -221,18 +239,24 @@ class _SignupPageState extends State<SignupPage> {
                   LinearProgressIndicator(
                     value: (_currentStep + 1) / 2,
                     backgroundColor: FincoreColors.border,
-                    valueColor: const AlwaysStoppedAnimation(FincoreColors.primary),
+                    valueColor: AlwaysStoppedAnimation(FincoreColors.primary),
                     minHeight: 6,
                     borderRadius: BorderRadius.circular(3),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 20),
                   
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: _currentStep == 0 ? _buildStep1() : _buildStep2(),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 380),
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _currentStep == 0 ? _buildStep1() : _buildStep2(),
+                      ),
+                    ),
                   ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -300,7 +324,7 @@ class _SignupPageState extends State<SignupPage> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           validator: (value) {
@@ -323,7 +347,7 @@ class _SignupPageState extends State<SignupPage> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           validator: (value) {
@@ -354,7 +378,7 @@ class _SignupPageState extends State<SignupPage> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           validator: (value) {
@@ -380,7 +404,7 @@ class _SignupPageState extends State<SignupPage> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           validator: (value) {
@@ -411,7 +435,7 @@ class _SignupPageState extends State<SignupPage> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           validator: (value) {
@@ -419,7 +443,7 @@ class _SignupPageState extends State<SignupPage> {
             return null;
           },
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         TextFormField(
           controller: _nomeFantasiaController,
           style: const TextStyle(color: FincoreColors.textPrimary),
@@ -427,17 +451,18 @@ class _SignupPageState extends State<SignupPage> {
             labelText: 'Nome Fantasia (Opcional)',
             labelStyle: const TextStyle(color: FincoreColors.textSecondary),
             prefixIcon: const Icon(Icons.storefront_outlined, color: FincoreColors.textMuted),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: const BorderSide(color: FincoreColors.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         TextFormField(
           controller: _documentoController,
           style: const TextStyle(color: FincoreColors.textPrimary),
@@ -446,13 +471,14 @@ class _SignupPageState extends State<SignupPage> {
             labelText: 'CNPJ / CPF',
             labelStyle: const TextStyle(color: FincoreColors.textSecondary),
             prefixIcon: const Icon(Icons.badge_outlined, color: FincoreColors.textMuted),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: const BorderSide(color: FincoreColors.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           validator: (value) {
@@ -460,7 +486,7 @@ class _SignupPageState extends State<SignupPage> {
             return null;
           },
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         TextFormField(
           controller: _telefoneController,
           keyboardType: TextInputType.phone,
@@ -470,13 +496,14 @@ class _SignupPageState extends State<SignupPage> {
             labelText: 'Telefone de Contato',
             labelStyle: const TextStyle(color: FincoreColors.textSecondary),
             prefixIcon: const Icon(Icons.phone_outlined, color: FincoreColors.textMuted),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: const BorderSide(color: FincoreColors.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           validator: (value) {
@@ -484,21 +511,22 @@ class _SignupPageState extends State<SignupPage> {
             return null;
           },
         ),
-        const SizedBox(height: 16),
-        const Text('Segmento de Atuação', style: TextStyle(fontSize: 13, color: FincoreColors.textSecondary)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
+        const Text('Segmento de Atuação', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
+        const SizedBox(height: 6),
         DropdownButtonFormField<String>(
           value: _segmento,
           dropdownColor: FincoreColors.surface,
           style: const TextStyle(color: FincoreColors.textPrimary),
           decoration: InputDecoration(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: const BorderSide(color: FincoreColors.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.primary),
+              borderSide: BorderSide(color: FincoreColors.primary),
             ),
           ),
           items: ['Food Service', 'Varejo Geral', 'Logística', 'Outro']
@@ -506,6 +534,33 @@ class _SignupPageState extends State<SignupPage> {
               .toList(),
           onChanged: (val) {
             if (val != null) setState(() => _segmento = val);
+          },
+        ),
+        const SizedBox(height: 12),
+        const Text('Plano de Assinatura Desejado', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          value: _plano,
+          dropdownColor: FincoreColors.surface,
+          style: const TextStyle(color: FincoreColors.textPrimary),
+          decoration: InputDecoration(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: FincoreColors.border),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: FincoreColors.primary),
+            ),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'bronze', child: Text('Essencial (Bronze) — 30 dias grátis')),
+            DropdownMenuItem(value: 'prata', child: Text('Profissional (Prata) — Recomendado')),
+            DropdownMenuItem(value: 'ouro', child: Text('Enterprise (Ouro)')),
+          ],
+          onChanged: (val) {
+            if (val != null) setState(() => _plano = val);
           },
         ),
       ],

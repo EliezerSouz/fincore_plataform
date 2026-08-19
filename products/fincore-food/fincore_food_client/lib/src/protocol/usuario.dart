@@ -14,16 +14,26 @@ import 'package:serverpod_client/serverpod_client.dart' as _i1;
 abstract class Usuario implements _i1.SerializableModel {
   Usuario._({
     _i1.UuidValue? id,
-    required this.email,
+    required this.tenantId,
+    this.authUserId,
+    required this.username,
+    this.email,
     required this.nome,
+    this.avatarUrl,
+    required this.ativo,
     required this.criadoEm,
     required this.atualizadoEm,
   }) : id = id ?? _i1.Uuid().v4obj();
 
   factory Usuario({
     _i1.UuidValue? id,
-    required String email,
+    required String tenantId,
+    String? authUserId,
+    required String username,
+    String? email,
     required String nome,
+    String? avatarUrl,
+    required bool ativo,
     required DateTime criadoEm,
     required DateTime atualizadoEm,
   }) = _UsuarioImpl;
@@ -31,8 +41,13 @@ abstract class Usuario implements _i1.SerializableModel {
   factory Usuario.fromJson(Map<String, dynamic> jsonSerialization) {
     return Usuario(
       id: _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
-      email: jsonSerialization['email'] as String,
+      tenantId: jsonSerialization['tenantId'] as String,
+      authUserId: jsonSerialization['authUserId'] as String?,
+      username: jsonSerialization['username'] as String,
+      email: jsonSerialization['email'] as String?,
       nome: jsonSerialization['nome'] as String,
+      avatarUrl: jsonSerialization['avatarUrl'] as String?,
+      ativo: jsonSerialization['ativo'] as bool,
       criadoEm:
           _i1.DateTimeJsonExtension.fromJson(jsonSerialization['criadoEm']),
       atualizadoEm:
@@ -45,9 +60,19 @@ abstract class Usuario implements _i1.SerializableModel {
   /// the id will be null.
   _i1.UuidValue id;
 
-  String email;
+  String tenantId;
+
+  String? authUserId;
+
+  String username;
+
+  String? email;
 
   String nome;
+
+  String? avatarUrl;
+
+  bool ativo;
 
   DateTime criadoEm;
 
@@ -58,8 +83,13 @@ abstract class Usuario implements _i1.SerializableModel {
   @_i1.useResult
   Usuario copyWith({
     _i1.UuidValue? id,
+    String? tenantId,
+    String? authUserId,
+    String? username,
     String? email,
     String? nome,
+    String? avatarUrl,
+    bool? ativo,
     DateTime? criadoEm,
     DateTime? atualizadoEm,
   });
@@ -67,8 +97,13 @@ abstract class Usuario implements _i1.SerializableModel {
   Map<String, dynamic> toJson() {
     return {
       'id': id.toJson(),
-      'email': email,
+      'tenantId': tenantId,
+      if (authUserId != null) 'authUserId': authUserId,
+      'username': username,
+      if (email != null) 'email': email,
       'nome': nome,
+      if (avatarUrl != null) 'avatarUrl': avatarUrl,
+      'ativo': ativo,
       'criadoEm': criadoEm.toJson(),
       'atualizadoEm': atualizadoEm.toJson(),
     };
@@ -80,17 +115,29 @@ abstract class Usuario implements _i1.SerializableModel {
   }
 }
 
+class _Undefined {}
+
 class _UsuarioImpl extends Usuario {
   _UsuarioImpl({
     _i1.UuidValue? id,
-    required String email,
+    required String tenantId,
+    String? authUserId,
+    required String username,
+    String? email,
     required String nome,
+    String? avatarUrl,
+    required bool ativo,
     required DateTime criadoEm,
     required DateTime atualizadoEm,
   }) : super._(
           id: id,
+          tenantId: tenantId,
+          authUserId: authUserId,
+          username: username,
           email: email,
           nome: nome,
+          avatarUrl: avatarUrl,
+          ativo: ativo,
           criadoEm: criadoEm,
           atualizadoEm: atualizadoEm,
         );
@@ -101,15 +148,25 @@ class _UsuarioImpl extends Usuario {
   @override
   Usuario copyWith({
     _i1.UuidValue? id,
-    String? email,
+    String? tenantId,
+    Object? authUserId = _Undefined,
+    String? username,
+    Object? email = _Undefined,
     String? nome,
+    Object? avatarUrl = _Undefined,
+    bool? ativo,
     DateTime? criadoEm,
     DateTime? atualizadoEm,
   }) {
     return Usuario(
       id: id ?? this.id,
-      email: email ?? this.email,
+      tenantId: tenantId ?? this.tenantId,
+      authUserId: authUserId is String? ? authUserId : this.authUserId,
+      username: username ?? this.username,
+      email: email is String? ? email : this.email,
       nome: nome ?? this.nome,
+      avatarUrl: avatarUrl is String? ? avatarUrl : this.avatarUrl,
+      ativo: ativo ?? this.ativo,
       criadoEm: criadoEm ?? this.criadoEm,
       atualizadoEm: atualizadoEm ?? this.atualizadoEm,
     );

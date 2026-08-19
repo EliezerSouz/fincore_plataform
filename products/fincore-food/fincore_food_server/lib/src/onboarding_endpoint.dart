@@ -19,6 +19,7 @@ class OnboardingEndpoint extends Endpoint {
     required String telefoneEmpresa,
     required String usuarioNome,
     required String segmento,
+    String? plano,
   }) async {
     final usuarioId = session.context['usuarioId'] as String;
     final usuarioEmail = session.context['email'] as String? ?? '';
@@ -54,8 +55,12 @@ class OnboardingEndpoint extends Endpoint {
         if (existingUser == null) {
           final user = Usuario(
             id: userUuid,
+            tenantId: tenantId,
+            authUserId: usuarioId,
+            username: usuarioEmail.split('@').first,
             email: usuarioEmail,
             nome: usuarioNome,
+            ativo: true,
             criadoEm: now,
             atualizadoEm: now,
           );
@@ -68,6 +73,7 @@ class OnboardingEndpoint extends Endpoint {
         }
 
         // 2. Inserir na tabela empresa
+        final tipoPessoa = docTrim.replaceAll(RegExp(r'\D'), '').length <= 11 ? 'FISICA' : 'JURIDICA';
         final empresa = Empresa(
           id: tenantUuid,
           razaoSocial: razaoSocial,
@@ -76,7 +82,7 @@ class OnboardingEndpoint extends Endpoint {
           email: emailTrim,
           telefone: telefoneEmpresa,
           status: 'PENDENTE_ATIVACAO',
-          plano: 'bronze',
+          plano: (plano != null && plano.trim().isNotEmpty) ? plano.trim() : 'bronze',
           timezone: 'America/Sao_Paulo',
           locale: 'pt_BR',
           currency: 'BRL',
@@ -89,6 +95,7 @@ class OnboardingEndpoint extends Endpoint {
           createdBy: userUuid,
           updatedBy: userUuid,
           syncVersion: 1,
+          tipoPessoa: tipoPessoa,
         );
         await Empresa.db.insertRow(session, empresa);
 
@@ -112,9 +119,6 @@ class OnboardingEndpoint extends Endpoint {
         final config = EmpresaConfiguracao(
           id: UuidValue.fromString(Uuid().v4()),
           tenantId: tenantId,
-          timezone: 'America/Sao_Paulo',
-          locale: 'pt_BR',
-          currency: 'BRL',
           taxaServico: 0.10,
           usarWhatsApp: true,
           tema: 'escuro',
@@ -146,7 +150,6 @@ class OnboardingEndpoint extends Endpoint {
           
           // PIX Defaults
           pixTipo: 'CPF',
-          pixCidade: 'Sorocaba',
         );
         await EmpresaConfiguracao.db.insertRow(session, config);
 
@@ -193,6 +196,25 @@ class OnboardingEndpoint extends Endpoint {
     } catch (e) {
       session.log('Erro ao criar empresa no banco central: $e', level: LogLevel.error);
       return false;
+    }
+  }
+
+  /// Consulta os dados da empresa vinculada ao usuário autenticado
+  Future<Empresa?> minhaEmpresa(Session session) async {
+    final usuarioId = session.context['usuarioId'] as String?;
+    if (usuarioId == null) return null;
+    try {
+      final userUuid = UuidValue.fromString(usuarioId);
+      final membro = await MembroEmpresa.db.findFirstRow(
+        session,
+        where: (t) => t.usuarioId.equals(userUuid),
+      );
+      if (membro == null) return null;
+
+      return await Empresa.db.findById(session, membro.tenantId);
+    } catch (e) {
+      session.log('Erro ao buscar minha empresa: $e', level: LogLevel.error);
+      return null;
     }
   }
 

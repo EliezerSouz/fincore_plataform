@@ -1,0 +1,41 @@
+class: SessaoCaixa
+table: sessao_caixa
+fields:
+  id: UuidValue, defaultModel=random
+  tenantId: String
+  operadorId: UuidValue
+  operadorNome: String, default='Operador'
+
+  # Status: 'aberta' | 'em_conferencia' | 'fechada'
+  status: String, default='aberta'
+
+  dataAbertura: DateTime
+  dataFechamento: DateTime?
+
+  # Valores em centavos
+  valorAberturaCentavos: int, default=0
+  valorFechamentoCentavos: int?
+  totalVendasCentavos: int, default=0
+  totalDespesasCentavos: int, default=0
+  diferencaCentavos: int?
+  observacoes: String?
+
+  # Auditoria
+  createdAt: DateTime
+  updatedAt: DateTime
+  createdBy: UuidValue
+  updatedBy: UuidValue
+  deletedAt: DateTime?
+  deletedBy: UuidValue?
+
+  # Sincronização
+  syncVersion: int
+  originDeviceId: String?
+  lastModifiedByDevice: String?
+  entityHash: String?
+
+indexes:
+  sessao_caixa_tenant_status_idx:
+    fields: tenantId, status
+  sessao_caixa_operador_idx:
+    fields: tenantId, operadorId

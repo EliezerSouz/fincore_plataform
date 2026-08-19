@@ -1,4 +1,3 @@
-import 'print_config.dart';
 
 /// Dados do pedido necessários para gerar o template de impressão.
 /// Imutável — contém tudo que um template precisa para renderizar.

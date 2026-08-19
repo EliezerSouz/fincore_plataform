@@ -3,6 +3,7 @@ import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/repository/base_repository.dart';
+import 'package:fincore_core/src/logging/log_service.dart';
 
 class MockEntity {
   final String id;
@@ -55,6 +56,10 @@ class SecurityError extends Error {
 }
 
 void main() {
+  setUpAll(() {
+    LogService.init('.');
+  });
+
   group('BaseRepository Tenant Isolation Tests', () {
     final context = TenantContext();
     late MockRepository repo;
@@ -74,6 +79,7 @@ void main() {
 
     final mockEmpresa = CoreEmpresa(
       id: 'tenant-123',
+      tipoPessoa: 'JURIDICA',
       razaoSocial: 'Empresa Teste',
       nomeFantasia: 'Teste',
       documentoFiscal: '123',
@@ -134,6 +140,7 @@ void main() {
       // Alterar context para outro tenant
       final otherEmpresa = CoreEmpresa(
         id: 'tenant-other',
+        tipoPessoa: 'JURIDICA',
         razaoSocial: 'Other',
         nomeFantasia: 'Other',
         documentoFiscal: '123',

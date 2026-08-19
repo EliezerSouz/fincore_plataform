@@ -22,20 +22,20 @@ InputDecoration _fincoreDecoration({
     errorText: errorText,
     filled: true,
     fillColor: FincoreColors.background,
-    labelStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 13),
-    hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 13),
-    errorStyle: const TextStyle(color: FincoreColors.danger, fontSize: 11),
+    labelStyle: TextStyle(color: FincoreColors.textMuted, fontSize: 13),
+    hintStyle: TextStyle(color: FincoreColors.textMuted, fontSize: 13),
+    errorStyle: TextStyle(color: FincoreColors.danger, fontSize: 11),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: FincoreColors.border),
+      borderSide: BorderSide(color: FincoreColors.border),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: FincoreColors.border),
+      borderSide: BorderSide(color: FincoreColors.border),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: FincoreColors.primary, width: 1.5),
+      borderSide: BorderSide(color: FincoreColors.primary, width: 1.5),
     ),
     errorBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
@@ -97,7 +97,7 @@ class PhoneField extends StatelessWidget {
         hint: '(15) 99999-9999',
         prefix: const Icon(Icons.phone_outlined, size: 18),
       ),
-      style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
+      style: TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
       validator: validator ??
           (required ? FincorePhoneValidator.formValidator : null),
       onChanged: onChanged != null
@@ -144,7 +144,7 @@ class CpfCnpjField extends StatelessWidget {
         hint: '000.000.000-00 ou 00.000.000/0001-00',
         prefix: const Icon(Icons.badge_outlined, size: 18),
       ),
-      style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
+      style: TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
       validator: required
           ? (v) {
               final doc = FinCoreCpfCnpj.parse(v ?? '');
@@ -228,14 +228,14 @@ class _MoneyFieldState extends State<MoneyField> {
       decoration: _fincoreDecoration(
         label: widget.label,
         hint: '0,00',
-        prefix: const Padding(
-          padding: EdgeInsets.only(left: 12, right: 4),
+        prefix: Padding(
+          padding: const EdgeInsets.only(left: 12, right: 4),
           child: Text('R\$',
               style: TextStyle(
                   color: FincoreColors.textSecondary, fontSize: 13)),
         ),
       ),
-      style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
+      style: TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
       validator: widget.required
           ? (v) {
               final centavos = _parseCentavos(v ?? '');
@@ -283,7 +283,7 @@ class PostalCodeField extends StatelessWidget {
         hint: '00000-000',
         prefix: const Icon(Icons.location_on_outlined, size: 18),
       ),
-      style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
+      style: TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
       validator: required ? FincorePostalCodeValidator.formValidator : null,
       onChanged: onChanged != null
           ? (v) => onChanged!(FincorePostalCode.parse(v))
@@ -354,7 +354,7 @@ class _SearchFieldState extends State<SearchField> {
               : const SizedBox.shrink(),
         ),
       ).copyWith(labelText: null, hintText: widget.hint),
-      style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
+      style: TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
     );
   }
 }
@@ -411,7 +411,7 @@ class _QuantityFieldState extends State<QuantityField> {
         if (widget.label.isNotEmpty)
           Text(
             widget.label,
-            style: const TextStyle(
+            style: TextStyle(
                 color: FincoreColors.textMuted, fontSize: 12),
           ),
         const SizedBox(height: 6),
@@ -425,7 +425,7 @@ class _QuantityFieldState extends State<QuantityField> {
             const SizedBox(width: 12),
             Text(
               _value.toString(),
-              style: const TextStyle(
+              style: TextStyle(
                 color: FincoreColors.textPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -541,10 +541,10 @@ class _TextAreaFieldState extends State<TextAreaField> {
         counterText: widget.maxLength != null
             ? '${_ctrl.text.length}/${widget.maxLength}'
             : null,
-        counterStyle: const TextStyle(
+        counterStyle: TextStyle(
             color: FincoreColors.textMuted, fontSize: 11),
       ),
-      style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
+      style: TextStyle(color: FincoreColors.textPrimary, fontSize: 14),
       validator: widget.required
           ? (v) => FincoreStringValidator.formValidatorRequired(v,
               fieldName: widget.label)

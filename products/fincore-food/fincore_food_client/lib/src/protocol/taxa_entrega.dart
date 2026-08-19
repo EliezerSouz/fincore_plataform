@@ -22,6 +22,9 @@ abstract class TaxaEntrega implements _i1.SerializableModel {
     this.cepFinal,
     required this.valorCentavos,
     required this.ativo,
+    int? pedidoMinimoCentavos,
+    this.prazoEstimado,
+    this.observacoes,
     required this.createdAt,
     required this.updatedAt,
     required this.createdBy,
@@ -32,7 +35,8 @@ abstract class TaxaEntrega implements _i1.SerializableModel {
     this.originDeviceId,
     this.lastModifiedByDevice,
     this.entityHash,
-  }) : id = id ?? _i1.Uuid().v4obj();
+  })  : id = id ?? _i1.Uuid().v4obj(),
+        pedidoMinimoCentavos = pedidoMinimoCentavos ?? 0;
 
   factory TaxaEntrega({
     _i1.UuidValue? id,
@@ -44,6 +48,9 @@ abstract class TaxaEntrega implements _i1.SerializableModel {
     String? cepFinal,
     required int valorCentavos,
     required bool ativo,
+    int? pedidoMinimoCentavos,
+    String? prazoEstimado,
+    String? observacoes,
     required DateTime createdAt,
     required DateTime updatedAt,
     required _i1.UuidValue createdBy,
@@ -67,6 +74,9 @@ abstract class TaxaEntrega implements _i1.SerializableModel {
       cepFinal: jsonSerialization['cepFinal'] as String?,
       valorCentavos: jsonSerialization['valorCentavos'] as int,
       ativo: jsonSerialization['ativo'] as bool,
+      pedidoMinimoCentavos: jsonSerialization['pedidoMinimoCentavos'] as int,
+      prazoEstimado: jsonSerialization['prazoEstimado'] as String?,
+      observacoes: jsonSerialization['observacoes'] as String?,
       createdAt:
           _i1.DateTimeJsonExtension.fromJson(jsonSerialization['createdAt']),
       updatedAt:
@@ -110,6 +120,12 @@ abstract class TaxaEntrega implements _i1.SerializableModel {
 
   bool ativo;
 
+  int pedidoMinimoCentavos;
+
+  String? prazoEstimado;
+
+  String? observacoes;
+
   DateTime createdAt;
 
   DateTime updatedAt;
@@ -143,6 +159,9 @@ abstract class TaxaEntrega implements _i1.SerializableModel {
     String? cepFinal,
     int? valorCentavos,
     bool? ativo,
+    int? pedidoMinimoCentavos,
+    String? prazoEstimado,
+    String? observacoes,
     DateTime? createdAt,
     DateTime? updatedAt,
     _i1.UuidValue? createdBy,
@@ -166,6 +185,9 @@ abstract class TaxaEntrega implements _i1.SerializableModel {
       if (cepFinal != null) 'cepFinal': cepFinal,
       'valorCentavos': valorCentavos,
       'ativo': ativo,
+      'pedidoMinimoCentavos': pedidoMinimoCentavos,
+      if (prazoEstimado != null) 'prazoEstimado': prazoEstimado,
+      if (observacoes != null) 'observacoes': observacoes,
       'createdAt': createdAt.toJson(),
       'updatedAt': updatedAt.toJson(),
       'createdBy': createdBy.toJson(),
@@ -199,6 +221,9 @@ class _TaxaEntregaImpl extends TaxaEntrega {
     String? cepFinal,
     required int valorCentavos,
     required bool ativo,
+    int? pedidoMinimoCentavos,
+    String? prazoEstimado,
+    String? observacoes,
     required DateTime createdAt,
     required DateTime updatedAt,
     required _i1.UuidValue createdBy,
@@ -219,6 +244,9 @@ class _TaxaEntregaImpl extends TaxaEntrega {
           cepFinal: cepFinal,
           valorCentavos: valorCentavos,
           ativo: ativo,
+          pedidoMinimoCentavos: pedidoMinimoCentavos,
+          prazoEstimado: prazoEstimado,
+          observacoes: observacoes,
           createdAt: createdAt,
           updatedAt: updatedAt,
           createdBy: createdBy,
@@ -245,6 +273,9 @@ class _TaxaEntregaImpl extends TaxaEntrega {
     Object? cepFinal = _Undefined,
     int? valorCentavos,
     bool? ativo,
+    int? pedidoMinimoCentavos,
+    Object? prazoEstimado = _Undefined,
+    Object? observacoes = _Undefined,
     DateTime? createdAt,
     DateTime? updatedAt,
     _i1.UuidValue? createdBy,
@@ -266,6 +297,10 @@ class _TaxaEntregaImpl extends TaxaEntrega {
       cepFinal: cepFinal is String? ? cepFinal : this.cepFinal,
       valorCentavos: valorCentavos ?? this.valorCentavos,
       ativo: ativo ?? this.ativo,
+      pedidoMinimoCentavos: pedidoMinimoCentavos ?? this.pedidoMinimoCentavos,
+      prazoEstimado:
+          prazoEstimado is String? ? prazoEstimado : this.prazoEstimado,
+      observacoes: observacoes is String? ? observacoes : this.observacoes,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,

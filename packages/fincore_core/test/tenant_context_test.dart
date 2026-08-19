@@ -2,8 +2,13 @@ import 'package:test/test.dart';
 import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
+import 'package:fincore_core/src/logging/log_service.dart';
 
 void main() {
+  setUpAll(() {
+    LogService.init('.');
+  });
+
   group('TenantContext Tests', () {
     final context = TenantContext();
 
@@ -34,6 +39,7 @@ void main() {
       country: 'BR',
       createdFrom: 'Web',
       version: 1,
+      tipoPessoa: 'JURIDICA',
       metadata: mockMetadata,
     );
 

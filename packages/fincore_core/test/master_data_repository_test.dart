@@ -12,8 +12,14 @@ import 'package:fincore_core/repository/cliente_repository.dart';
 import 'package:fincore_core/repository/local_entrega_repository.dart';
 import 'package:fincore_core/repository/forma_pagamento_repository.dart';
 import 'package:fincore_core/repository/taxa_entrega_repository.dart';
+import 'package:fincore_core/sync/outbox_service.dart';
+import 'package:fincore_core/src/logging/log_service.dart';
 
 void main() {
+  setUpAll(() {
+    LogService.init('.');
+  });
+
   late FincoreDatabase db;
   late TenantContext context;
   late CategoriaRepository categoriaRepo;
@@ -35,7 +41,7 @@ void main() {
     );
     context.setContext(
       empresa: CoreEmpresa(
-        id: 'tenant-demo-001',
+        id: FincoreSeeds.seedTenantId,
         razaoSocial: 'Demo Empresa',
         nomeFantasia: 'Demo',
         documentoFiscal: '00000000000',
@@ -49,6 +55,7 @@ void main() {
         country: 'BR',
         createdFrom: 'Web',
         version: 1,
+        tipoPessoa: 'JURIDICA',
         metadata: mockMetadata,
       ),
       usuario: CoreUsuario(
@@ -60,12 +67,13 @@ void main() {
       ),
     );
 
-    categoriaRepo = CategoriaRepository(db: db, context: context);
-    produtoRepo = ProdutoRepository(db: db, context: context);
-    clienteRepo = ClienteRepository(db: db, context: context);
-    localRepo = LocalEntregaRepository(db: db, context: context);
-    pagamentoRepo = FormaPagamentoRepository(db: db, context: context);
-    taxaRepo = TaxaEntregaRepository(db: db, context: context);
+    final outboxService = OutboxService(db: db, context: context);
+    categoriaRepo = CategoriaRepository(db: db, context: context, outbox: outboxService);
+    produtoRepo = ProdutoRepository(db: db, context: context, outbox: outboxService);
+    clienteRepo = ClienteRepository(db: db, context: context, outbox: outboxService);
+    localRepo = LocalEntregaRepository(db: db, context: context, outbox: outboxService);
+    pagamentoRepo = FormaPagamentoRepository(db: db, context: context, outbox: outboxService);
+    taxaRepo = TaxaEntregaRepository(db: db, context: context, outbox: outboxService);
 
     // Rodar os Seeds
     await FincoreSeeds.populate(db);
@@ -106,7 +114,7 @@ void main() {
     test('Deve salvar nova Categoria com sucesso sob o tenant correto', () async {
       final cat = Categoria(
         id: 'cat-nova-001',
-        tenantId: 'tenant-demo-001',
+        tenantId: FincoreSeeds.seedTenantId,
         nome: 'Sobremesas',
         descricao: 'Doces e bolos',
         ordemExibicao: 4,
@@ -150,21 +158,50 @@ void main() {
     });
 
     test('Deve deletar logicamente (Soft Delete) um produto', () async {
-      const prodId = 'prod-mini-coxinha';
+      const prodId = '00000000-0000-4000-a000-000000000201';
       final fetchedBefore = await produtoRepo.findById(prodId);
+      expect(fetchedBefore, isNotNull, reason: 'Produto deve existir antes do delete');
       expect(fetchedBefore!.metadata.deletedAt, isNull);
 
       await produtoRepo.delete(prodId);
 
+      // P1-03: findById retorna null para produto deletado (soft-delete filter)
       final fetchedAfter = await produtoRepo.findById(prodId);
-      expect(fetchedAfter!.metadata.deletedAt, isNotNull);
-      expect(fetchedAfter.metadata.syncStatus, equals(SyncStatus.pending));
+      expect(fetchedAfter, isNull,
+          reason: 'findById deve retornar null após soft-delete (P1-03)');
+
+      // Verifica diretamente na tabela que deletedAt foi preenchido
+      final row = await (db.select(db.produtosTable)
+            ..where((t) => t.id.equals(prodId)))
+          .getSingleOrNull();
+      expect(row?.deletedAt, isNotNull,
+          reason: 'deletedAt deve ser preenchido no banco após soft-delete');
+      expect(row?.syncStatus, equals(SyncStatus.pending));
     });
 
     test('Deve salvar e buscar locais de entrega do cliente', () async {
+      final mockCliente = Cliente(
+        id: 'cliente-balcao-001',
+        tenantId: FincoreSeeds.seedTenantId,
+        nome: 'Cliente Balcão',
+        telefone: '11988887777',
+        email: 'caixa@fincore.com',
+        documento: '123.456.789-00',
+        observacoes: '',
+        ativo: true,
+        metadata: SyncMetadata(
+          version: 1,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          createdBy: 'test',
+          updatedBy: 'test',
+        ),
+      );
+      await clienteRepo.save(mockCliente);
+
       final local = LocalEntrega(
         id: 'local-novo-001',
-        tenantId: 'tenant-demo-001',
+        tenantId: FincoreSeeds.seedTenantId,
         clienteId: 'cliente-balcao-001',
         nomeIdentificador: 'Trabalho',
         logradouro: 'Av Central',
@@ -193,7 +230,7 @@ void main() {
     test('Deve salvar e buscar taxas de entrega por tenant', () async {
       final taxa = TaxaEntrega(
         id: 'taxa-nova-001',
-        tenantId: 'tenant-demo-001',
+        tenantId: FincoreSeeds.seedTenantId,
         nome: 'Taxa Centro',
         tipoRegra: TipoRegraTaxaEntrega.fixo,
         valorCentavos: 500, // R$ 5,00

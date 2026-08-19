@@ -18,6 +18,7 @@ export 'repository/categoria_repository.dart';
 export 'repository/cliente_repository.dart';
 export 'repository/empresa_repository.dart';
 export 'repository/empresa_configuracao_repository.dart';
+export 'repository/empresa_convite_repository.dart';
 export 'repository/forma_pagamento_repository.dart';
 export 'repository/local_entrega_repository.dart';
 export 'repository/lote_insumo_repository.dart';

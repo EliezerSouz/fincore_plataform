@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 /// Módulos do sistema FINCORE para categorização dos logs.
@@ -12,8 +14,53 @@ enum LogModule {
   app,
 }
 
-/// Nível de severidade do evento.
-enum LogLevel { debug, info, warning, error }
+/// Nível de severidade do evento (Estilo Serilog / OpenTelemetry).
+enum LogSeverity { trace, debug, info, warning, error, critical }
+
+/// Alias de compatibilidade com código existente.
+typedef LogLevel = LogSeverity;
+
+/// Categoria da observabilidade (Pilares do FINCORE Enterprise).
+enum LogCategory {
+  audit,
+  sync,
+  error,
+  performance,
+  database,
+  security,
+  printer,
+  api,
+  system,
+  business,
+}
+
+/// Destino de roteamento de telemetria e auditoria (Estratégia de 3 Níveis).
+enum LogDestination {
+  /// Nível 1 & 2: Logs operacionais e técnicos de infraestrutura (Exceções Flutter, SQLite, Impressoras, Retries).
+  /// Armazenados exclusivamente em arquivos locais com retenção automática de 30 dias.
+  localOnly,
+
+  /// Eventos direcionados exclusivamente para a nuvem.
+  cloudOnly,
+
+  /// Nível 3: Auditoria de Negócio (CRUD, Preços, Pedidos, Usuários) e Crashes Fatais.
+  /// Salvos no SQLite local E sincronizados permanentemente no Supabase Cloud.
+  both,
+}
+
+/// Helper para geração de IDs correlacionados e prefixados (Correlation ID).
+class CorrelationIdGenerator {
+  static String generateCorrelationId() {
+    final rand = DateTime.now().microsecondsSinceEpoch.toRadixString(36).toUpperCase();
+    return 'REQ-$rand';
+  }
+
+  static String prefixId(String prefix, String rawId) {
+    final clean = rawId.replaceAll('-', '').toUpperCase();
+    final shortId = clean.length > 8 ? clean.substring(0, 8) : clean;
+    return '$prefix-$shortId';
+  }
+}
 
 /// ─────────────────────────────────────────────────────────────────────────────
 /// FincoreLogger
@@ -86,19 +133,16 @@ class FincoreLogger {
   /// Loga o início de um ciclo de operação (ex: ciclo de sync, startup, etc.)
   /// Cria uma linha divisória visível no arquivo para fácil localização.
   Future<void> beginCycle(LogModule module, String title, {String? context}) async {
-    final now = DateTime.now();
     final line = _divider(title);
-    await _writeLine(line, now);
+    await _write(LogLevel.info, module, line);
     if (context != null) {
-      await _writeLine(_formatLine(now, module, LogLevel.info, context), now);
+      await _write(LogLevel.info, module, context);
     }
   }
 
   /// Loga o fim de um ciclo com um resumo de uma linha.
   Future<void> endCycle(LogModule module, String summary) async {
-    final now = DateTime.now();
-    await _writeLine(_formatLine(now, module, LogLevel.info, summary), now);
-    await _writeLine('', now); // linha em branco após o ciclo
+    await _write(LogLevel.info, module, summary);
   }
 
   // ── Formatação ─────────────────────────────────────────────────────────────
@@ -130,10 +174,12 @@ class FincoreLogger {
 
   static String _levelTag(LogLevel level) {
     return switch (level) {
-      LogLevel.debug   => '',
-      LogLevel.info    => '',
-      LogLevel.warning => 'AVISO: ',
-      LogLevel.error   => 'ERRO: ',
+      LogSeverity.trace    => '[TRACE]: ',
+      LogSeverity.debug    => '',
+      LogSeverity.info     => '',
+      LogSeverity.warning  => 'AVISO: ',
+      LogSeverity.error    => 'ERRO: ',
+      LogSeverity.critical => 'CRÍTICO: ',
     };
   }
 
@@ -148,8 +194,8 @@ class FincoreLogger {
     const width = 72;
     final inner = ' $title ';
     final pad   = ((width - inner.length) / 2).floor();
-    final line  = ('─' * pad) + inner + ('─' * pad);
-    return line.padRight(width, '─');
+    final line  = ('-' * pad) + inner + ('-' * pad);
+    return line.padRight(width, '-');
   }
 
   // ── Escrita ────────────────────────────────────────────────────────────────
@@ -169,11 +215,15 @@ class FincoreLogger {
     // ── Monta as linhas ──
     final lines = <String>[];
 
-    // Linha principal de narrativa
-    String mainMsg = message;
-    if (context != null) mainMsg = '$context | $mainMsg';
-    if (traceId != null) mainMsg = '$mainMsg [Rastreio: $traceId]';
-    lines.add(_formatLine(now, module, level, mainMsg));
+    final rawLines = message.split('\n');
+    for (int i = 0; i < rawLines.length; i++) {
+      final lineStr = rawLines[i];
+      if (lineStr.trim().isEmpty && i > 0 && i < rawLines.length - 1) continue;
+      String formattedMsg = lineStr;
+      if (i == 0 && context != null) formattedMsg = '$context | $formattedMsg';
+      if (i == 0 && traceId != null) formattedMsg = '$formattedMsg [Rastreio: $traceId]';
+      lines.add(_formatLine(now, module, level, formattedMsg));
+    }
 
     // Detalhes de erro/exceção (opcional)
     if (detail != null && detail.trim().isNotEmpty) {
@@ -192,13 +242,21 @@ class FincoreLogger {
     _printToConsole(level, lines);
   }
 
+  Future<void> _writeQueue = Future.value();
+
   Future<void> _writeLine(String line, DateTime now) async {
-    try {
-      final file = await _getFile(now);
-      await file.writeAsString('$line\n', mode: FileMode.append, flush: true);
-    } catch (e) {
-      stderr.writeln('⚠ FINCORE LOG IO ERROR: $e');
-    }
+    final completer = Completer<void>();
+    _writeQueue = _writeQueue.then((_) async {
+      try {
+        final file = await _getFile(now);
+        await file.writeAsString('$line\n', mode: FileMode.append, encoding: utf8, flush: true);
+      } catch (e) {
+        stderr.writeln('! FINCORE LOG IO ERROR: $e');
+      } finally {
+        completer.complete();
+      }
+    });
+    return completer.future;
   }
 
   // ── Rotação de arquivo por hora ────────────────────────────────────────────
@@ -208,21 +266,21 @@ class FincoreLogger {
       return _currentFile!;
     }
 
-    final dateStr = '${now.year}-'
-        '${now.month.toString().padLeft(2, '0')}-'
-        '${now.day.toString().padLeft(2, '0')}';
+    final monthStr = now.month.toString().padLeft(2, '0');
+    final dayStr = now.day.toString().padLeft(2, '0');
     final hourStr = now.hour.toString().padLeft(2, '0');
 
-    final dir = Directory('$baseDirectory/logs');
+    final dir = Directory('$baseDirectory/logs/${now.year}-$monthStr/$dayStr');
     if (!await dir.exists()) await dir.create(recursive: true);
 
-    final file = File('${dir.path}/fincore_${dateStr}_$hourStr.log');
+    final file = File('${dir.path}/fincore_$hourStr.log');
 
     // Escreve cabeçalho se o arquivo é novo
     if (!await file.exists()) {
       await file.writeAsString(
         _fileHeader(now),
         mode: FileMode.write,
+        encoding: utf8,
         flush: true,
       );
     }
@@ -234,12 +292,12 @@ class FincoreLogger {
 
   static String _fileHeader(DateTime now) {
     final ts = _formatTimestamp(now);
-    return '''
-════════════════════════════════════════════════════════════════════════
+    return '\uFEFF' '''
+========================================================================
   FINCORE Platform v1.2.0 | Log de Operação e Sincronização
   Sessão iniciada em: $ts
-  Ambiente: Local (SQLite) ↔ Nuvem (Supabase)
-════════════════════════════════════════════════════════════════════════
+  Ambiente: Local (SQLite) <-> Nuvem (Supabase)
+========================================================================
 
 ''';
   }
@@ -263,7 +321,7 @@ class FincoreLogger {
         final dir = Directory('$baseDirectory/logs');
         if (!await dir.exists()) return;
         final cutoff = DateTime.now().subtract(const Duration(days: 30));
-        await for (final f in dir.list()) {
+        await for (final f in dir.list(recursive: true)) {
           if (f is File && f.path.endsWith('.log')) {
             final modified = await f.lastModified();
             if (modified.isBefore(cutoff)) {
@@ -332,13 +390,15 @@ class LogService {
     if (exception != null) detailStr = exception;
 
     switch (level) {
-      case LogLevel.debug:
+      case LogSeverity.trace:
+      case LogSeverity.debug:
         await FincoreLogger.instance.debug(module, message, context: ctxStr, traceId: traceId);
-      case LogLevel.info:
+      case LogSeverity.info:
         await FincoreLogger.instance.info(module, message, context: ctxStr, traceId: traceId);
-      case LogLevel.warning:
+      case LogSeverity.warning:
         await FincoreLogger.instance.warning(module, message, context: ctxStr, traceId: traceId, detail: detailStr);
-      case LogLevel.error:
+      case LogSeverity.error:
+      case LogSeverity.critical:
         await FincoreLogger.instance.error(module, message, context: ctxStr, traceId: traceId, detail: detailStr);
     }
   }
