@@ -44,9 +44,16 @@ class EstoqueProdutosTable extends Table
 
   // ─── Limiares de Alerta ───────────────────────────────────────────────────
 
-  /// Limiar mínimo de DISPONÍVEL — abaixo disso gera alerta "Estoque Baixo" (laranja).
-  /// Alerta baseado em `quantidadeAtual - quantidadeReservada`.
+  /// Estoque de segurança — margem de proteção operacional contra imprevistos
+  IntColumn get quantidadeSeguranca =>
+      integer().withDefault(const Constant(0))();
+
+  /// Limiar mínimo de DISPONÍVEL — abaixo disso gera alerta de Atenção (amarelo/laranja)
   IntColumn get quantidadeMinima =>
+      integer().withDefault(const Constant(0))();
+
+  /// Estoque crítico — nível que exige ação operacional imediata (vermelho)
+  IntColumn get quantidadeCritica =>
       integer().withDefault(const Constant(0))();
 
   /// Limiar máximo — teto de reposição (para planejamento)
@@ -64,6 +71,23 @@ class EstoqueProdutosTable extends Table
   /// Usado no planejamento preditivo: "Se o ritmo diário é X, preciso de diasCoberturaAlvo * X unidades disponíveis."
   IntColumn get diasCoberturaAlvo =>
       integer().withDefault(const Constant(3))();
+
+  /// Capacidade de produção por campanha (referência de planejamento — NÃO é limite hard).
+  /// Ex: 1000 = uma campanha típica de coxinha produz até 1.000 unidades.
+  IntColumn get capacidadeCampanha =>
+      integer().withDefault(const Constant(0))();
+
+  /// Estratégia de produção: 'concentrada' | 'mista' | 'flexivel'
+  /// - concentrada: campanha dedicada a um único produto (padrão)
+  /// - mista: múltiplos produtos na mesma campanha
+  /// - flexivel: futuro — planejamento automático
+  TextColumn get estrategiaProducao =>
+      text().withDefault(const Constant('concentrada'))();
+
+  /// Tempo de preparação de insumos antes da produção (em minutos).
+  /// Ex: 30 = 30 min para preparar recheio antes de iniciar a modelagem.
+  IntColumn get tempoPreparacao =>
+      integer().withDefault(const Constant(0))();
 
   /// Unidade de medida: 'un' | 'kg' | 'L' | 'g' | 'mL'
   TextColumn get unidade => text().withDefault(const Constant('un'))();

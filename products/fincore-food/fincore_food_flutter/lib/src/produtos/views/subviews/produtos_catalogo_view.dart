@@ -18,6 +18,7 @@ import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_tex
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_section_card.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/validators/fincore_validators.dart';
 import 'package:fincore_food_flutter/src/shared/services/commercial_pricing_engine.dart';
+import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:uuid/uuid.dart';
@@ -150,6 +151,13 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
   final _precoBaseCtrl = TextEditingController();
   final _estoqueMinCtrl = TextEditingController();
   final _estoqueMaxCtrl = TextEditingController();
+  final _estoqueSegurancaCtrl = TextEditingController();
+  final _estoqueCriticoCtrl = TextEditingController();
+  final _loteProducaoCtrl = TextEditingController();
+  final _diasCoberturaCtrl = TextEditingController();
+  final _capacidadeCampanhaCtrl = TextEditingController();
+  final _tempoPreparacaoCtrl = TextEditingController();
+  String _estrategiaProducao = 'concentrada';
   final _ncmCtrl = TextEditingController();
   final _cestCtrl = TextEditingController();
 
@@ -219,6 +227,12 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
     _precoBaseCtrl.dispose();
     _estoqueMinCtrl.dispose();
     _estoqueMaxCtrl.dispose();
+    _estoqueSegurancaCtrl.dispose();
+    _estoqueCriticoCtrl.dispose();
+    _loteProducaoCtrl.dispose();
+    _diasCoberturaCtrl.dispose();
+    _capacidadeCampanhaCtrl.dispose();
+    _tempoPreparacaoCtrl.dispose();
     _ncmCtrl.dispose();
     _cestCtrl.dispose();
     super.dispose();
@@ -352,8 +366,14 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
         final Map<String, dynamic> jsonMap = jsonDecode(cat.metadataPayload!);
 
         if (_herdarProducao) {
-          _setorImpressao = jsonMap['setor_impressao'] ?? 'Cozinha';
+          final rawSetor = jsonMap['setor_impressao'] ?? 'Cozinha';
+          _setorImpressao = rawSetor == 'Balcão' ? 'Balcao' : (rawSetor == 'Copa' || rawSetor == 'Produção' ? 'Producao' : (rawSetor == 'Expedição' ? 'Expedicao' : rawSetor));
           _tempoCtrl.text = (jsonMap['tempo_medio'] ?? 30).toString();
+          _loteProducaoCtrl.text = (jsonMap['lote_producao'] ?? 100).toString();
+          _diasCoberturaCtrl.text = (jsonMap['dias_cobertura_alvo'] ?? 3).toString();
+          _capacidadeCampanhaCtrl.text = (jsonMap['capacidade_campanha'] ?? 0).toString();
+          _tempoPreparacaoCtrl.text = (jsonMap['tempo_preparacao'] ?? 0).toString();
+          _estrategiaProducao = jsonMap['estrategia_producao'] ?? 'concentrada';
           if (jsonMap['modo_producao'] != null) {
             _modoProducao = ModoProducao.values.firstWhere(
               (e) => e.name == jsonMap['modo_producao'],
@@ -366,6 +386,8 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
           _controlaEstoque = jsonMap['controla_estoque'] ?? true;
           _estoqueMinCtrl.text = (jsonMap['estoque_minimo'] ?? 100).toString();
           _estoqueMaxCtrl.text = (jsonMap['estoque_maximo'] ?? 1000).toString();
+          _estoqueSegurancaCtrl.text = (jsonMap['estoque_seguranca'] ?? 0).toString();
+          _estoqueCriticoCtrl.text = (jsonMap['estoque_critico'] ?? 50).toString();
           if (jsonMap['tipo_estoque'] != null) {
             _tipoEstoque = TipoItemEstoque.values.firstWhere(
               (e) => e.name == jsonMap['tipo_estoque'],
@@ -396,11 +418,18 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
       if (_herdarProducao) {
         _setorImpressao = 'Cozinha';
         _tempoCtrl.text = '30';
+        _loteProducaoCtrl.text = '100';
+        _diasCoberturaCtrl.text = '3';
+        _capacidadeCampanhaCtrl.text = '0';
+        _tempoPreparacaoCtrl.text = '0';
+        _estrategiaProducao = 'concentrada';
       }
       if (_herdarEstoque) {
         _controlaEstoque = true;
         _estoqueMinCtrl.text = '100';
         _estoqueMaxCtrl.text = '1000';
+        _estoqueSegurancaCtrl.text = '0';
+        _estoqueCriticoCtrl.text = '50';
       }
       if (_herdarComercial) {
         _ncmCtrl.text = '1902.20.00';
@@ -488,6 +517,8 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
         if (!_herdarEstoque) {
           _estoqueMinCtrl.text = (jsonMap['estoque_minimo'] ?? 100).toString();
           _estoqueMaxCtrl.text = (jsonMap['estoque_maximo'] ?? 1000).toString();
+          _estoqueSegurancaCtrl.text = (jsonMap['estoque_seguranca'] ?? 0).toString();
+          _estoqueCriticoCtrl.text = (jsonMap['estoque_critico'] ?? 50).toString();
           if (jsonMap['tipo_estoque'] != null) {
             _tipoEstoque = TipoItemEstoque.values.firstWhere(
               (e) => e.name == jsonMap['tipo_estoque'],
@@ -498,7 +529,13 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
         // Se não herda produção, carrega valores salvos
         if (!_herdarProducao) {
           _tempoCtrl.text = (jsonMap['tempo_medio'] ?? 30).toString();
-          _setorImpressao = jsonMap['setor_impressao'] ?? 'Cozinha';
+          final rawSetor = jsonMap['setor_impressao'] ?? 'Cozinha';
+          _setorImpressao = rawSetor == 'Balcão' ? 'Balcao' : (rawSetor == 'Copa' || rawSetor == 'Produção' ? 'Producao' : (rawSetor == 'Expedição' ? 'Expedicao' : rawSetor));
+          _loteProducaoCtrl.text = (jsonMap['lote_producao'] ?? 100).toString();
+          _diasCoberturaCtrl.text = (jsonMap['dias_cobertura_alvo'] ?? 3).toString();
+          _capacidadeCampanhaCtrl.text = (jsonMap['capacidade_campanha'] ?? 0).toString();
+          _tempoPreparacaoCtrl.text = (jsonMap['tempo_preparacao'] ?? 0).toString();
+          _estrategiaProducao = jsonMap['estrategia_producao'] ?? 'concentrada';
           if (jsonMap['modo_producao'] != null) {
             _modoProducao = ModoProducao.values.firstWhere(
               (e) => e.name == jsonMap['modo_producao'],
@@ -663,8 +700,15 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
         'tempo_medio': int.tryParse(_tempoCtrl.text) ?? 30,
         'modo_producao': _modoProducao.name,
         'tipo_estoque': _tipoEstoque.name,
-        'estoque_minimo': int.tryParse(_estoqueMinCtrl.text) ?? 100,
-        'estoque_maximo': int.tryParse(_estoqueMaxCtrl.text) ?? 1000,
+        'estoque_minimo': _herdarEstoque ? null : (int.tryParse(_estoqueMinCtrl.text) ?? 100),
+        'estoque_maximo': _herdarEstoque ? null : (int.tryParse(_estoqueMaxCtrl.text) ?? 1000),
+        'estoque_seguranca': _herdarEstoque ? null : (int.tryParse(_estoqueSegurancaCtrl.text) ?? 0),
+        'estoque_critico': _herdarEstoque ? null : (int.tryParse(_estoqueCriticoCtrl.text) ?? 50),
+        'lote_producao': _herdarProducao ? null : (int.tryParse(_loteProducaoCtrl.text) ?? 100),
+        'dias_cobertura_alvo': _herdarProducao ? null : (int.tryParse(_diasCoberturaCtrl.text) ?? 3),
+        'capacidade_campanha': _herdarProducao ? null : (int.tryParse(_capacidadeCampanhaCtrl.text) ?? 0),
+        'tempo_preparacao': _herdarProducao ? null : (int.tryParse(_tempoPreparacaoCtrl.text) ?? 0),
+        'estrategia_producao': _herdarProducao ? null : _estrategiaProducao,
         'ncm': _ncmCtrl.text.trim(),
         'cest': _cestCtrl.text.trim(),
         'canais': {
@@ -712,6 +756,10 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
       );
 
       await _produtoRepo.save(produto);
+
+      // Aplica os parâmetros no registro de estoque do produto
+      final estoqueCtrl = DependencyInjection().get<EstoqueController>();
+      await estoqueCtrl.aplicarParametrosProduto(produto.id);
 
       // Auto-vincular produto a tabelas de preço da categoria
       try {
@@ -2342,7 +2390,41 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const _FormFieldLabel(label: 'Estoque Mínimo (Alerta)', isOptional: true),
+                                      const _FormFieldLabel(label: 'Estoque de Segurança', isOptional: true),
+                                      FincoreTextField(
+                                        controller: _estoqueSegurancaCtrl,
+                                        hintText: 'Ex.: 10',
+                                        keyboardType: TextInputType.number,
+                                        validator: FincoreValidators.nonNegativeInteger,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const _FormFieldLabel(label: 'Estoque Crítico (Alerta Vermelho)', isOptional: true),
+                                      FincoreTextField(
+                                        controller: _estoqueCriticoCtrl,
+                                        hintText: 'Ex.: 30',
+                                        keyboardType: TextInputType.number,
+                                        validator: FincoreValidators.nonNegativeInteger,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const _FormFieldLabel(label: 'Estoque Mínimo (Atenção Laranja)', isOptional: true),
                                       FincoreTextField(
                                         controller: _estoqueMinCtrl,
                                         hintText: 'Ex.: 50',
@@ -2357,7 +2439,7 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const _FormFieldLabel(label: 'Estoque Ideal (Segurança)', isOptional: true),
+                                      const _FormFieldLabel(label: 'Capacidade Máxima / Teto', isOptional: true),
                                       FincoreTextField(
                                         controller: _estoqueMaxCtrl,
                                         hintText: 'Ex.: 300',
@@ -2451,7 +2533,7 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
                                     const _FormFieldLabel(label: 'Setor / Rota KDS', isOptional: true),
                                     DropdownButtonFormField<String>(
                                       isExpanded: true,
-                                      value: _setorImpressao,
+                                      value: ['Cozinha', 'Balcao', 'Producao', 'Expedicao'].contains(_setorImpressao) ? _setorImpressao : 'Cozinha',
                                       dropdownColor: FincoreColors.surface,
                                       decoration: const InputDecoration(
                                         border: OutlineInputBorder(),
@@ -2460,9 +2542,12 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
                                         fillColor: FincoreColors.background,
                                       ),
                                       style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
-                                      items: ['Cozinha', 'Copa', 'Balcão', 'Expedição']
-                                          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                                          .toList(),
+                                      items: const [
+                                        DropdownMenuItem(value: 'Cozinha', child: Text('Cozinha')),
+                                        DropdownMenuItem(value: 'Balcao', child: Text('Balcão')),
+                                        DropdownMenuItem(value: 'Producao', child: Text('Produção')),
+                                        DropdownMenuItem(value: 'Expedicao', child: Text('Expedição')),
+                                      ],
                                       onChanged: (v) {
                                         if (v != null) setState(() => _setorImpressao = v);
                                       },
@@ -2919,10 +3004,15 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
           const FincoreFieldLabel(label: 'SETOR DE IMPRESSÃO / ROTA KDS'),
           DropdownButtonFormField<String>(
             isExpanded: true,
-            value: _setorImpressao,
+            value: ['Cozinha', 'Balcao', 'Producao', 'Expedicao'].contains(_setorImpressao) ? _setorImpressao : 'Cozinha',
             dropdownColor: FincoreColors.surface,
             decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-            items: ['Cozinha', 'Copa', 'Balcão', 'Expedição'].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis))).toList(),
+            items: const [
+              DropdownMenuItem(value: 'Cozinha', child: Text('Cozinha', style: TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
+              DropdownMenuItem(value: 'Balcao', child: Text('Balcão', style: TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
+              DropdownMenuItem(value: 'Producao', child: Text('Produção', style: TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
+              DropdownMenuItem(value: 'Expedicao', child: Text('Expedição', style: TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
+            ],
             onChanged: _herdarCategoria ? null : (v) {
               if (v != null) setState(() => _setorImpressao = v);
             },

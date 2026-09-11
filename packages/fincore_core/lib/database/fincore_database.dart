@@ -29,6 +29,8 @@ import 'tables/pedidos_table.dart';
 import 'tables/estoque_tables.dart';
 // FINANCEIRO: Sessões de caixa e lançamentos
 import 'tables/financeiro_tables.dart';
+// PRODUÇÃO: Planejamento de produção por campanha
+import 'tables/planejamento_producao_table.dart';
 import '../src/logging/log_service.dart';
 
 part 'fincore_database.g.dart';
@@ -74,6 +76,7 @@ class OutboxSync extends Table {
   // LC-1: Onboarding
   MembrosEmpresaTable,
   EmpresaConfiguracaoTable,
+  EventosEmpresaTable,
   // CAP.PRINTING
   PrintJobsTable,
   AuditLogsTable,
@@ -86,12 +89,14 @@ class OutboxSync extends Table {
   // FINANCEIRO: Caixa e lançamentos
   SessoesCaixaTable,
   LancamentosFinanceirosTable,
+  // PRODUÇÃO: Planejamento de produção por campanha
+  PlanejamentoProducaoTable,
 ])
 class FincoreDatabase extends _$FincoreDatabase {
   FincoreDatabase(super.e);
 
   @override
-  int get schemaVersion => 20;
+  int get schemaVersion => 23;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -266,6 +271,29 @@ class FincoreDatabase extends _$FincoreDatabase {
             // Índice adicional para consultas de planejamento por data
             try { await customStatement('CREATE INDEX IF NOT EXISTS mov_estoque_data_hora_idx ON movimentacoes_estoque_table (tenant_id, data_hora)'); } catch (_) {}
             LogService.instance.info(LogModule.migration, 'Migration 020: ✔ OK — Campos de produção e reserva adicionados.');
+          }
+          if (from < 21) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 021: Criando tabela de Planejamento de Produção + colunas de capacidade...');
+            // Nova tabela de planejamento de produção por campanha
+            await m.createTable(planejamentoProducaoTable);
+            // Colunas de capacidade de produção em estoque_produtos_table
+            try { await customStatement('ALTER TABLE estoque_produtos_table ADD COLUMN capacidade_campanha INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            try { await customStatement("ALTER TABLE estoque_produtos_table ADD COLUMN estrategia_producao TEXT NOT NULL DEFAULT 'concentrada'"); } catch (_) {}
+            try { await customStatement('ALTER TABLE estoque_produtos_table ADD COLUMN tempo_preparacao INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            // Coluna de data de entrega prevista diretamente no pedido
+            try { await customStatement('ALTER TABLE pedidos_table ADD COLUMN data_hora_entrega_prevista INTEGER'); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 021: ✔ OK — Planejamento de produção criado.');
+          }
+          if (from < 22) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 022: Adicionando colunas de estoque de segurança e crítico...');
+            try { await customStatement('ALTER TABLE estoque_produtos_table ADD COLUMN quantidade_seguranca INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            try { await customStatement('ALTER TABLE estoque_produtos_table ADD COLUMN quantidade_critica INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 022: ✔ OK');
+          }
+          if (from < 23) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 023: Adicionando necessidade_origem a planejamento_producao_table...');
+            try { await customStatement('ALTER TABLE planejamento_producao_table ADD COLUMN necessidade_origem TEXT'); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 023: ✔ OK');
           }
           LogService.instance.info(LogModule.migration, 'Atualização de schema concluída com sucesso (v$to)');
         },

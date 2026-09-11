@@ -19,7 +19,8 @@ import 'package:fincore_food_flutter/src/pdv_express/views/pdv_express_screen.da
 /// Gaveta Lateral (Inspector) no lado direito para visualização das abas (Resumo, Pedidos, Endereço),
 /// e Formulário de Edição/Criação exibido em Modal Centralizado (tela no meio).
 class ClientesPage extends StatefulWidget {
-  const ClientesPage({super.key});
+  final int initialTab;
+  const ClientesPage({super.key, this.initialTab = 0});
 
   @override
   State<ClientesPage> createState() => _ClientesPageState();
@@ -34,7 +35,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   bool _isEditing = false;
 
   // Variáveis da Aba Regiões de Entrega
-  int _selectedTab = 0; // 0 = Clientes, 1 = Regiões de Entrega
+  late int _selectedTab; // 0 = Clientes, 1 = Regiões de Entrega
   final _regBuscaController = TextEditingController();
   String _regSearchQuery = '';
   String _regFiltroStatus = 'Todos';
@@ -75,6 +76,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
+    _selectedTab = widget.initialTab;
     _tabController = TabController(length: 3, vsync: this);
     _controller = DependencyInjection().get<ClientesController>();
     _controllerListener = _onControllerChanged;

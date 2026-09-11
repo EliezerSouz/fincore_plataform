@@ -201,11 +201,6 @@ class Endpoints extends _i1.EndpointDispatch {
         'criarEmpresa': _i1.MethodConnector(
           name: 'criarEmpresa',
           params: {
-            'tenantId': _i1.ParameterDescription(
-              name: 'tenantId',
-              type: _i1.getType<String>(),
-              nullable: false,
-            ),
             'razaoSocial': _i1.ParameterDescription(
               name: 'razaoSocial',
               type: _i1.getType<String>(),
@@ -253,7 +248,6 @@ class Endpoints extends _i1.EndpointDispatch {
           ) async =>
               (endpoints['onboarding'] as _i7.OnboardingEndpoint).criarEmpresa(
             session,
-            tenantId: params['tenantId'],
             razaoSocial: params['razaoSocial'],
             nomeFantasia: params['nomeFantasia'],
             documentoFiscal: params['documentoFiscal'],
@@ -262,6 +256,34 @@ class Endpoints extends _i1.EndpointDispatch {
             usuarioNome: params['usuarioNome'],
             segmento: params['segmento'],
             plano: params['plano'],
+          ),
+        ),
+        'minhasEmpresas': _i1.MethodConnector(
+          name: 'minhasEmpresas',
+          params: {},
+          call: (
+            _i1.Session session,
+            Map<String, dynamic> params,
+          ) async =>
+              (endpoints['onboarding'] as _i7.OnboardingEndpoint)
+                  .minhasEmpresas(session),
+        ),
+        'trocarEmpresa': _i1.MethodConnector(
+          name: 'trocarEmpresa',
+          params: {
+            'novoTenantId': _i1.ParameterDescription(
+              name: 'novoTenantId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            )
+          },
+          call: (
+            _i1.Session session,
+            Map<String, dynamic> params,
+          ) async =>
+              (endpoints['onboarding'] as _i7.OnboardingEndpoint).trocarEmpresa(
+            session,
+            params['novoTenantId'],
           ),
         ),
         'minhaEmpresa': _i1.MethodConnector(

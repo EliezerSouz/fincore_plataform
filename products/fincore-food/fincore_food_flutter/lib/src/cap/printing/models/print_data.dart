@@ -3,6 +3,7 @@
 /// Imutável — contém tudo que um template precisa para renderizar.
 class PrintData {
   final String pedidoId;
+  final int? numeroPedido;
   final String? clienteNome;
   final String? clienteTelefone;
   final String tipoLogistica; // 'Entrega', 'Retirada', 'Mesa'
@@ -14,12 +15,17 @@ class PrintData {
   final int totalCentavos;
   final int? taxaEntregaCentavos;
   final int? descontoCentavos;
+  final int? trocoParaCentavos;
   final List<PrintDataItem> itens;
   final DateTime dataHora;
   final String? observacao;
+  final String? status;
+  final String? cidade;
+  final String? uf;
 
   const PrintData({
     required this.pedidoId,
+    this.numeroPedido,
     this.clienteNome,
     this.clienteTelefone,
     required this.tipoLogistica,
@@ -31,9 +37,13 @@ class PrintData {
     required this.totalCentavos,
     this.taxaEntregaCentavos,
     this.descontoCentavos,
+    this.trocoParaCentavos,
     required this.itens,
     required this.dataHora,
     this.observacao,
+    this.status,
+    this.cidade,
+    this.uf,
   });
 
   String get shortId =>

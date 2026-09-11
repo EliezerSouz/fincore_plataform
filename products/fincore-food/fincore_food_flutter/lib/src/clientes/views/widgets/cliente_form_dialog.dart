@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
@@ -46,7 +48,7 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
   final _logrCtrl = TextEditingController();
   final _numCtrl = TextEditingController();
   final _bairroCtrl = TextEditingController();
-  final _cidadeCtrl = TextEditingController(text: 'São Paulo');
+  final _cidadeCtrl = TextEditingController();
   final _cepCtrl = TextEditingController();
   final _refCtrl = TextEditingController();
 
@@ -54,6 +56,8 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
   bool _aceitaWhatsapp = true;
   bool _aceitaMarketing = false;
   bool _isSaving = false;
+  bool _isSearchingCep = false;
+  LocalEntrega? _localExistente;
 
   @override
   void initState() {
@@ -70,6 +74,31 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
       _ativo = c.ativo;
       _aceitaWhatsapp = c.aceitaWhatsapp;
       _aceitaMarketing = c.aceitaMarketing;
+      _carregarEnderecoCliente(c.id);
+    }
+  }
+
+  Future<void> _carregarEnderecoCliente(String clienteId) async {
+    try {
+      final localRepo = DependencyInjection().get<LocalEntregaRepository>();
+      final locais = await localRepo.findByClienteId(clienteId);
+      if (locais.isNotEmpty && mounted) {
+        final principal = locais.firstWhere(
+          (l) => l.nomeIdentificador.toLowerCase() == 'principal',
+          orElse: () => locais.first,
+        );
+        setState(() {
+          _localExistente = principal;
+          _logrCtrl.text = principal.logradouro;
+          _numCtrl.text = principal.numero;
+          _bairroCtrl.text = principal.bairro;
+          _cidadeCtrl.text = principal.cidade;
+          _cepCtrl.text = principal.cep;
+          _refCtrl.text = principal.referencia ?? '';
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar endereço do cliente: $e');
     }
   }
 
@@ -89,6 +118,36 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
     _cepCtrl.dispose();
     _refCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _buscarCep(String cep) async {
+    final cleanCep = cep.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanCep.length != 8) return;
+
+    setState(() => _isSearchingCep = true);
+
+    try {
+      final client = HttpClient();
+      final request = await client.getUrl(Uri.parse('https://viacep.com.br/ws/$cleanCep/json/'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final json = jsonDecode(body);
+        if (json['erro'] != true) {
+          setState(() {
+            _logrCtrl.text = json['logradouro'] ?? '';
+            _bairroCtrl.text = json['bairro'] ?? '';
+            _cidadeCtrl.text = json['localidade'] ?? '';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar CEP: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isSearchingCep = false);
+      }
+    }
   }
 
   Future<void> _salvar() async {
@@ -132,25 +191,29 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
 
       await clienteRepo.save(novoCliente);
 
-      // Se informou endereço inicial no cadastro
+      // Se informou endereço no formulário
       if (_logrCtrl.text.trim().isNotEmpty) {
+        final localId = _localExistente?.id ?? const Uuid().v4();
+        final localVersion = _localExistente?.metadata.version ?? 0;
+        final localCreatedAt = _localExistente?.metadata.createdAt ?? DateTime.now().toUtc();
+
         final novoLocal = LocalEntrega(
-          id: const Uuid().v4(),
+          id: localId,
           tenantId: tenantCtx.tenantId,
           clienteId: id,
-          nomeIdentificador: 'Principal',
+          nomeIdentificador: _localExistente?.nomeIdentificador ?? 'Principal',
           logradouro: _logrCtrl.text.trim(),
           numero: _numCtrl.text.trim(),
           bairro: _bairroCtrl.text.trim(),
           cidade: _cidadeCtrl.text.trim().isEmpty ? 'São Paulo' : _cidadeCtrl.text.trim(),
           cep: _cepCtrl.text.trim(),
           referencia: _refCtrl.text.trim(),
-          ativo: true,
+          ativo: _localExistente?.ativo ?? true,
           metadata: SyncMetadata(
-            version: 1,
-            createdAt: DateTime.now().toUtc(),
+            version: localVersion + 1,
+            createdAt: localCreatedAt,
             updatedAt: DateTime.now().toUtc(),
-            createdBy: tenantCtx.usuario.id,
+            createdBy: _localExistente?.metadata.createdBy ?? tenantCtx.usuario.id,
             updatedBy: tenantCtx.usuario.id,
           ),
         );
@@ -311,6 +374,50 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
                       Row(
                         children: [
                           Expanded(
+                            child: FincoreTextField(
+                              controller: _cepCtrl,
+                              hintText: 'CEP',
+                              inputFormatters: FincoreFormatters.cep,
+                              onChanged: (v) {
+                                if (v.replaceAll(RegExp(r'\D'), '').length == 8) {
+                                  _buscarCep(v);
+                                } else {
+                                  setState(() {});
+                                }
+                              },
+                              suffixIcon: _isSearchingCep
+                                  ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(10.0),
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(FincoreColors.primary),
+                                        ),
+                                      ),
+                                    )
+                                  : _cepCtrl.text.replaceAll(RegExp(r'\D'), '').length == 8
+                                      ? IconButton(
+                                          icon: Icon(Icons.search, color: FincoreColors.primary, size: 20),
+                                          onPressed: () => _buscarCep(_cepCtrl.text),
+                                        )
+                                      : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FincoreTextField(
+                              controller: _cidadeCtrl,
+                              hintText: 'Cidade',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
                             flex: 3,
                             child: FincoreTextField(
                               controller: _logrCtrl,
@@ -327,30 +434,9 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FincoreTextField(
-                              controller: _bairroCtrl,
-                              hintText: 'Bairro',
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FincoreTextField(
-                              controller: _cidadeCtrl,
-                              hintText: 'Cidade',
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FincoreTextField(
-                              controller: _cepCtrl,
-                              hintText: 'CEP',
-                              inputFormatters: FincoreFormatters.cep,
-                            ),
-                          ),
-                        ],
+                      FincoreTextField(
+                        controller: _bairroCtrl,
+                        hintText: 'Bairro',
                       ),
                       const SizedBox(height: 12),
                       FincoreTextField(

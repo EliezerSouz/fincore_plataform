@@ -41,22 +41,21 @@ class PrintPix {
     );
 
     lines.add('[CENTER][BOLD_ON]PAGAMENTO VIA PIX[BOLD_OFF]');
-    lines.add('[CENTER][BOLD_ON]Chave: ${pixKeyVO.formatted} (${pixKeyVO.tipoLabel})[BOLD_OFF]');
     
-    if (favorecido.trim().isNotEmpty) {
-      lines.add('[CENTER]Favorecido: ${favorecido.trim()}');
-    }
-
     if (imprimirQRCode) {
       final qr = PrintQrCode.format(copiaCola);
       if (qr.isNotEmpty) {
         lines.add(qr);
       }
-    }
-
-    if (imprimirCopiaCola) {
-      lines.add('[CENTER]Pix Copia e Cola:');
-      lines.add(copiaCola);
+    } else {
+      lines.add('[CENTER][BOLD_ON]Chave: ${pixKeyVO.formatted} (${pixKeyVO.tipoLabel})[BOLD_OFF]');
+      if (favorecido.trim().isNotEmpty) {
+        lines.add('[CENTER]Favorecido: ${favorecido.trim()}');
+      }
+      if (imprimirCopiaCola) {
+        lines.add('[CENTER]Pix Copia e Cola:');
+        lines.add(copiaCola);
+      }
     }
     lines.add(divSingle);
 

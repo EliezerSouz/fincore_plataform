@@ -50,6 +50,9 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     );
     _controller.addListener(_onControllerChanged);
 
+    // Injeta callback para pedidos com data retroativa
+    _controller.onPedidoRetroativo = (dataRetroativa) => _solicitarJustificativaRetroativo(dataRetroativa);
+
     // Shake: 200ms horizontal (conforme Motion Guidelines PRD-006)
     _shakeController = AnimationController(
       vsync: this,
@@ -66,6 +69,178 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _keyboardFocusNode.requestFocus();
     });
+  }
+
+  /// Diálogo de justificativa para pedidos com data/hora retroativa
+  Future<String?> _solicitarJustificativaRetroativo(DateTime dataRetroativa) async {
+    final motivoCtrl = TextEditingController();
+    String? motivoSelecionado;
+    final dataStr = '${dataRetroativa.day.toString().padLeft(2,'0')}/'
+        '${dataRetroativa.month.toString().padLeft(2,'0')} '
+        '${dataRetroativa.hour.toString().padLeft(2,'0')}:'
+        '${dataRetroativa.minute.toString().padLeft(2,'0')}';
+
+    const motivosRetroativo = [
+      'Pedido recebido por telefone anteriormente',
+      'Sistema fora do ar no momento do pedido',
+      'Erro de digitação da hora',
+      'Pedido antecipado confirmado com cliente',
+      'Reprocessamento de pedido cancelado',
+    ];
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: FincoreColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.history_outlined, color: Color(0xFFF59E0B), size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Pedido com Data Retroativa',
+                      style: TextStyle(
+                        color: FincoreColors.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'Hora informada: $dataStr (no passado)',
+                      style: const TextStyle(
+                        color: Color(0xFFF59E0B),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Este pedido possui data/hora no passado. É obrigatório informar o motivo para registro em auditoria.',
+                          style: TextStyle(color: Color(0xFFF59E0B), fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Selecione ou descreva o motivo:',
+                  style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: motivosRetroativo.map((m) {
+                    final isSel = motivoSelecionado == m;
+                    return InkWell(
+                      onTap: () => setDialogState(() {
+                        motivoSelecionado = m;
+                        motivoCtrl.text = m;
+                      }),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isSel ? const Color(0xFFF59E0B) : FincoreColors.background,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isSel ? const Color(0xFFF59E0B) : FincoreColors.border,
+                          ),
+                        ),
+                        child: Text(
+                          m,
+                          style: TextStyle(
+                            color: isSel ? Colors.white : FincoreColors.textSecondary,
+                            fontSize: 11,
+                            fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: motivoCtrl,
+                  style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 13),
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText: 'Descreva o motivo da data retroativa...',
+                    hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+                    filled: true,
+                    fillColor: FincoreColors.background,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: FincoreColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFF59E0B)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textMuted)),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.check_circle_outline, size: 16),
+              label: const Text('Confirmar com Justificativa'),
+              onPressed: () {
+                final txt = motivoCtrl.text.trim();
+                if (txt.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Informe o motivo para criar um pedido retroativo.'),
+                      backgroundColor: Color(0xFFF59E0B),
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, txt);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF59E0B),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override

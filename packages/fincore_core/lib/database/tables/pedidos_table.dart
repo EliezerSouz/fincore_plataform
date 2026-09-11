@@ -69,6 +69,12 @@ class PedidosTable extends Table with IdentityColumns, AuditColumns, SyncColumns
   /// Canal de origem: 'pdv_express' | 'pdv_balcao' | 'delivery' | 'manual'
   TextColumn get canalOrigem => text().withDefault(const Constant('pdv_express'))();
 
+  /// Data e hora prevista de entrega ou retirada (null para pedidos imediatos).
+  /// Preenchida pelo PDV Express quando isEntregaAgendada == true.
+  /// Usada para: cálculo de demanda futura, horário de início recomendado
+  /// na cozinha e janela de produção no planejamento.
+  DateTimeColumn get dataHoraEntregaPrevista => dateTime().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }

@@ -4,6 +4,7 @@ export 'common/core_models.dart';
 export 'common/domain_primitives.dart';
 export 'common/kds_models.dart';
 export 'common/master_data_models.dart';
+export 'common/estoque_producao_models.dart';
 
 export 'context/tenant_context.dart';
 export 'database/fincore_database.dart';

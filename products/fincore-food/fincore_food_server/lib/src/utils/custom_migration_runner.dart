@@ -57,9 +57,8 @@ class CustomMigrationRunner {
         );
       ''');
 
-      // Limpeza auto-regenerativa: remove o registro das migrações de estoque que falharam no meio
-      await conn.execute("DELETE FROM public._custom_applied_migrations WHERE name = '20260816_estoque_financeiro.sql';");
-      await conn.execute("DELETE FROM public._custom_applied_migrations WHERE name = '20260816_fix_estoque_rls.sql';");
+      // Nota: as políticas RLS das migrations 20260816 foram corrigidas pela 20260820_fix_rls_uuid_cast.sql
+      // Não é necessário forçar re-execução das migrations anteriores.
       
       // Procurar arquivos .sql na pasta migrations
       final migrationDir = Directory('migrations');
@@ -85,9 +84,17 @@ class CustomMigrationRunner {
           if (result.isEmpty) {
             print('🚀 [CustomMigrationRunner] Aplicando migração: $fileName...');
              final sqlContent = await file.readAsString();
-             final trimmedUpper = sqlContent.trim().toUpperCase();
+             final cleanContent = sqlContent
+                 .split('\n')
+                 .where((l) => !l.trim().startsWith('--'))
+                 .join('\n')
+                 .trim();
+             final uppercaseClean = cleanContent.toUpperCase();
              
-             if (trimmedUpper.startsWith('DO \$\$') || trimmedUpper.startsWith('DO\$\$')) {
+             if (uppercaseClean.contains('DO \$\$') || 
+                 uppercaseClean.contains('DO\$\$') ||
+                 uppercaseClean.contains('CREATE OR REPLACE FUNCTION') ||
+                 uppercaseClean.contains('CREATE FUNCTION')) {
                await conn.execute(sqlContent);
              } else {
                final statements = sqlContent.split(';');

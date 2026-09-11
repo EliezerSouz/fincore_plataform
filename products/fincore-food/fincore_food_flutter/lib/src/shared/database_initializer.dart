@@ -21,6 +21,8 @@ import 'package:fincore_food_flutter/src/dashboard/controllers/dashboard_control
 import 'package:fincore_food_flutter/src/clientes/controllers/clientes_controller.dart';
 import 'package:fincore_core/repository/print_job_repository.dart';
 import 'package:fincore_food_flutter/src/cap/printing/usecases/print_use_case.dart';
+import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
+import 'package:fincore_food_flutter/src/estoque/controllers/planejamento_controller.dart';
 
 /// Responsável por inicializar toda a infraestrutura da FINCORE Platform:
 ///
@@ -80,35 +82,9 @@ class DatabaseInitializer {
       final dbFolder = await getApplicationDocumentsDirectory();
       final dbPath = p.join(dbFolder.path, 'fincore_v3.db');
 
-      // Auto-healer: Se o banco existe, verifica se há dados corrompidos (usuários com tenantId nulo)
-      // e deleta o arquivo para forçar um reset limpo (zero-state).
-      if (checkDatabaseExists(dbPath)) {
-        try {
-          final tempDb = FincoreDatabase(createDatabaseConnection(dbPath));
-          final corruptedUsers = await tempDb.select(tempDb.usuariosTable).get();
-          bool needReset = false;
-          for (final u in corruptedUsers) {
-            print('DEBUG USER: id=${u.id}, email=${u.email}, tenantId=${u.tenantId}');
-            // Se o usuário real (que tem email cadastrado) está com tenantId nulo, vazio ou associado à empresa de demonstração, precisamos resetar
-            if (u.email != null) {
-              if (u.tenantId == null || 
-                  u.tenantId!.isEmpty || 
-                  u.tenantId == '00000000-0000-4000-a000-000000000001') {
-                needReset = true;
-                break;
-              }
-            }
-          }
-          await tempDb.close();
-          if (needReset) {
-            deleteDatabaseFile(dbPath);
-            // Também garante que vamos limpar o token/sessão local cache para autenticar do zero
-            await Supabase.instance.client.auth.signOut();
-            LogService.instance.warning(LogModule.startup, 'Auto-healer: Banco de dados com dados corrompidos resetado com sucesso.');
-          }
-        } catch (_) {}
-      }
-
+      // O banco local é a fonte de verdade durante operação offline. Nunca o
+      // apague automaticamente: uma heurística de "correção" pode descartar
+      // pedidos e mutações ainda não enviados ao servidor.
       db = FincoreDatabase(createDatabaseConnection(dbPath));
     }
 
@@ -124,10 +100,6 @@ class DatabaseInitializer {
       // Remove registros de auditoria com IDs legados não-UUID ("AUD-XXX") que quebram o Supabase
       await (db.delete(db.outboxSync)
             ..where((t) => t.entity.equals('audit_log') & t.entityId.like('AUD-%')))
-          .go();
-      // Limpa do outbox a tabela local categorias_tabelas_precificacao que não existe no Supabase
-      await (db.delete(db.outboxSync)
-            ..where((t) => t.entity.equals('categorias_tabelas_precificacao')))
           .go();
     } catch (_) {}
 
@@ -294,6 +266,23 @@ class DatabaseInitializer {
       taxaRepo: taxaRepo,
     );
     di.register<ClientesController>(clientesController);
+
+    // CAP.ESTOQUE
+    try {
+      final oldEstoqueController = di.get<EstoqueController>();
+      oldEstoqueController.dispose();
+    } catch (_) {}
+
+    final estoqueController = EstoqueController();
+    di.register<EstoqueController>(estoqueController);
+
+    // CAP.PLANEJAMENTO — controller de planejamento de produção
+    // (registrado APÓS EstoqueController pois depende dele)
+    try {
+      final oldPlanejamento = di.get<PlanoProducaoController>();
+      oldPlanejamento.dispose();
+    } catch (_) {}
+    di.register<PlanoProducaoController>(PlanoProducaoController());
 
     // CAP.DASHBOARD
     try {

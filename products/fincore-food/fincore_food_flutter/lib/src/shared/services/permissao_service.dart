@@ -16,7 +16,7 @@ class PermissaoService {
 
   static bool _isAdmin(String? role) {
     final r = role?.toUpperCase();
-    return r == 'ADMIN' || r == 'SUPERADMIN' || r == 'ADMINISTRADOR';
+    return r == 'ADMIN' || r == 'SUPERADMIN' || r == 'ADMINISTRADOR' || r == 'OWNER';
   }
 
   static bool _isOperador(String? role) {
@@ -62,7 +62,7 @@ class PermissaoService {
 
   /// Pode marcar o pedido como entregue (pronto → entregue).
   static bool podeEntregar(String? role) =>
-      _isAdmin(role) || _isOperador(role) || _isEntregador(role);
+      _isAdmin(role) || _isOperador(role) || _isEntregador(role) || _isCozinha(role);
 
   /// Pode visualizar o bloco de "Produção Necessária".
   static bool podeVerProducao(String? role) =>

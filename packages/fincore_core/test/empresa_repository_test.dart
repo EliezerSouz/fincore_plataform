@@ -5,6 +5,7 @@ import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/repository/empresa_repository.dart';
+import 'package:fincore_core/sync/outbox_service.dart';
 import 'package:fincore_core/src/logging/log_service.dart';
 
 void main() {
@@ -58,7 +59,8 @@ void main() {
       context.clear();
       context.setContext(empresa: mockEmpresa, usuario: mockUsuario);
 
-      repository = EmpresaRepository(db: db, context: context);
+      final outbox = OutboxService(db: db, context: context);
+      repository = EmpresaRepository(db: db, context: context, outbox: outbox);
     });
 
     tearDown(() async {

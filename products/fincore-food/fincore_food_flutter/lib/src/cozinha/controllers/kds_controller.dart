@@ -5,14 +5,15 @@ import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/repository/ordem_preparo_repository.dart';
 import 'package:fincore_core/usecase/estornar_lote_estoque_usecase.dart';
+import 'package:fincore_core/sync/outbox_service.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:fincore_core/database/fincore_database.dart';
 import '../../estoque/controllers/estoque_controller.dart';
 
 /// Controller do KDS (Kitchen Display System)
 ///
-/// Gerencia a máquina de estados das ordens de preparo e aplica a regra LIFO
-/// de estorno de estoque em caso de cancelamento.
+/// Gerencia a máquina de estados das ordens de preparo e sincroniza com
+/// a tabela principal de pedidos e estoque.
 class KdsController extends ChangeNotifier {
   final OrdemPreparoRepository _ordemRepo;
   final EstornarLoteEstoqueUseCase _estornoUseCase;
@@ -47,18 +48,81 @@ class KdsController extends ChangeNotifier {
       _ordens.where((o) => o.status == StatusOrdemPreparo.pronto).toList();
 
   /// Carrega as ordens ativas da cozinha
-  Future<void> carregarOrdens() async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
+  Future<void> carregarOrdens({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _errorMessage = null;
+      notifyListeners();
+    }
 
     try {
       _ordens = await _ordemRepo.findAtivasKds();
     } catch (e) {
-      _errorMessage = 'Falha ao carregar fila do KDS: $e';
+      if (!silent) {
+        _errorMessage = 'Falha ao carregar fila do KDS: $e';
+      }
     } finally {
-      _isLoading = false;
+      if (!silent) {
+        _isLoading = false;
+      }
       notifyListeners();
+    }
+  }
+
+  Future<void> _syncPedidoStatus(
+    String pedidoId,
+    String tenantId,
+    StatusOrdemPreparo novoStatus,
+  ) async {
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final now = DateTime.now().toUtc();
+
+      final statusStr = switch (novoStatus) {
+        StatusOrdemPreparo.pendente  => 'confirmado',
+        StatusOrdemPreparo.emPreparo => 'em_preparo',
+        StatusOrdemPreparo.pronto    => 'pronto',
+        StatusOrdemPreparo.entregue  => 'entregue',
+        StatusOrdemPreparo.cancelado => 'cancelado',
+      };
+
+      await (db.update(db.pedidosTable)
+            ..where((t) => t.id.equals(pedidoId)))
+          .write(PedidosTableCompanion(
+        status: Value(statusStr),
+        updatedAt: Value(now),
+        syncStatus: const Value(SyncStatus.pending),
+      ));
+
+      try {
+        final outboxService = DependencyInjection().get<OutboxService>();
+        await outboxService.enqueue(
+          entity: 'Pedido',
+          entityId: pedidoId,
+          action: 'update',
+          payload: {
+            'id': pedidoId,
+            'tenantId': tenantId,
+            'status': statusStr,
+            'updatedAt': now.toIso8601String(),
+          },
+          version: 1,
+        );
+      } catch (e) {
+        debugPrint('[KDS] Erro ao registrar status no outbox: $e');
+      }
+
+      if (novoStatus == StatusOrdemPreparo.entregue ||
+          novoStatus == StatusOrdemPreparo.cancelado) {
+        try {
+          final estoqueCtrl = DependencyInjection().get<EstoqueController>();
+          await estoqueCtrl.recalcularReservasEEstoques();
+        } catch (e) {
+          debugPrint('[KDS] Erro ao sincronizar estoque: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[KDS] Erro ao sincronizar status do pedido: $e');
     }
   }
 
@@ -86,6 +150,8 @@ class KdsController extends ChangeNotifier {
     );
 
     await _ordemRepo.save(updated);
+    await _syncPedidoStatus(ordem.pedidoId, ordem.tenantId, StatusOrdemPreparo.emPreparo);
+
     _ordens[index] = updated;
     notifyListeners();
   }
@@ -113,6 +179,8 @@ class KdsController extends ChangeNotifier {
     );
 
     await _ordemRepo.save(updated);
+    await _syncPedidoStatus(ordem.pedidoId, ordem.tenantId, StatusOrdemPreparo.pronto);
+
     _ordens[index] = updated;
     notifyListeners();
   }
@@ -139,22 +207,7 @@ class KdsController extends ChangeNotifier {
     );
 
     await _ordemRepo.save(updated);
-
-    try {
-      final db = DependencyInjection().get<FincoreDatabase>();
-      await (db.update(db.pedidosTable)
-            ..where((t) => t.id.equals(ordem.pedidoId)))
-          .write(PedidosTableCompanion(
-        status: const Value('entregue'),
-        updatedAt: Value(agora.toUtc()),
-        syncStatus: const Value(SyncStatus.pending),
-      ));
-
-      final estoqueCtrl = DependencyInjection().get<EstoqueController>();
-      await estoqueCtrl.recalcularReservasEEstoques();
-    } catch (e) {
-      debugPrint('[KDS] Erro ao sincronizar entregue com estoque: $e');
-    }
+    await _syncPedidoStatus(ordem.pedidoId, ordem.tenantId, StatusOrdemPreparo.entregue);
 
     _ordens.removeAt(index);
     notifyListeners();
@@ -188,10 +241,10 @@ class KdsController extends ChangeNotifier {
 
     // Salvar cancelamento
     await _ordemRepo.save(updated);
+    await _syncPedidoStatus(ordem.pedidoId, ordem.tenantId, StatusOrdemPreparo.cancelado);
 
     // Executar algoritmo LIFO para cada item da ordem de preparo cancelada
     for (final item in ordem.itens) {
-      // Estorna a quantidade total consumida (quantidade convertida em centésimos de unidade)
       final qtdCentesimos = (item.quantidade * 100).toInt();
       await _estornoUseCase.execute(
         produtoId: item.produtoId,

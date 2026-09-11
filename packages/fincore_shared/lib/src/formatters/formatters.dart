@@ -66,6 +66,21 @@ class FinCoreDateFormatter {
     return '${formatDate(dt)} ${formatTime(dt)}';
   }
 
+  /// Formata como `domingo, 27/07/2025 - 14:35` or `domingo 27/07/2025 - 14:35`.
+  static String formatDateTimeWithWeekday(DateTime dt) {
+    final weekdays = [
+      'segunda-feira',
+      'terça-feira',
+      'quarta-feira',
+      'quinta-feira',
+      'sexta-feira',
+      'sábado',
+      'domingo',
+    ];
+    final weekdayStr = weekdays[dt.weekday - 1];
+    return '$weekdayStr ${formatDate(dt)} - ${formatTime(dt)}';
+  }
+
   /// Formata como `27/07` (dia/mês sem ano — útil para dashboards).
   static String formatShortDate(DateTime dt) {
     return '${_pad(dt.day)}/${_pad(dt.month)}';

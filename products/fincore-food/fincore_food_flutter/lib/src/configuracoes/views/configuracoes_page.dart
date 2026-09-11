@@ -22,6 +22,8 @@ import 'package:fincore_food_flutter/src/shared/services/impressao_service.dart'
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/audit_timeline_panel.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/log_explorer_dialog.dart';
 import 'package:fincore_food_flutter/src/configuracoes/views/subviews/personalizacao_view.dart';
+import 'package:fincore_food_flutter/src/cap/printing/print_capability.dart';
+
 
 /// Tela de Configurações da Empresa — Navegação ERP por Domínios
 /// Módulo 1 (Empresa), Módulo 2 (Operação: Regional, Fiscal, PIX), Módulo 3 (Impressão), Módulo 5 (Segurança), Módulo 6 (Auditoria), Módulo 7 (Aparência White-Label)
@@ -2246,55 +2248,34 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   }
 
   void _testarImpressora(PrinterModel printer) {
+    PrintVia via;
+    switch (printer.departamento.toLowerCase()) {
+      case 'caixa':
+        via = PrintVia.cliente;
+        break;
+      case 'cozinha':
+        via = PrintVia.cozinha;
+        break;
+      case 'balcao':
+        via = PrintVia.balcao;
+        break;
+      case 'expedicao':
+        via = PrintVia.expedicao;
+        break;
+      default:
+        via = PrintVia.cliente;
+    }
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: FincoreColors.surface,
-        title: Row(
-          children: [
-            Icon(Icons.print, color: FincoreColors.primary),
-            const SizedBox(width: 8),
-            Text('Teste: ${printer.nome}', style: const TextStyle(color: FincoreColors.textPrimary)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Enviando sinal de teste para a impressora...', style: TextStyle(color: FincoreColors.textSecondary)),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: FincoreColors.background,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: FincoreColors.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('--------------------------------', style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('TESTE DE IMPRESSAO FINCORE FOOD', style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('Impressora: ${printer.nome}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('IP/Porta: ${printer.ip}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('Depto: ${printer.departamento}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('Data: ${DateTime.now().toString().substring(0, 19)}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  const Text('--------------------------------', style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            style: ElevatedButton.styleFrom(backgroundColor: FincoreColors.primary),
-            child: const Text('OK', style: TextStyle(color: Colors.white)),
-          ),
-        ],
+      barrierDismissible: false,
+      builder: (ctx) => _TestarImpressoraDialog(
+        printer: printer,
+        via: via,
       ),
     );
   }
+
 
   void _mostrarModalImpressora([PrinterModel? printer]) {
     final nomeCtrl = TextEditingController(text: printer?.nome ?? '');
@@ -2650,3 +2631,242 @@ class PrinterModel {
     status: json['status'] ?? true,
   );
 }
+
+class _TestarImpressoraDialog extends StatefulWidget {
+  final PrinterModel printer;
+  final PrintVia via;
+
+  const _TestarImpressoraDialog({
+    required this.printer,
+    required this.via,
+  });
+
+  @override
+  State<_TestarImpressoraDialog> createState() => _TestarImpressoraDialogState();
+}
+
+class _TestarImpressoraDialogState extends State<_TestarImpressoraDialog> {
+  bool _loading = true;
+  bool _success = false;
+  String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _dispararTeste();
+  }
+
+  Future<void> _dispararTeste() async {
+    setState(() {
+      _loading = true;
+      _success = false;
+      _errorMessage = '';
+    });
+
+    try {
+      final useCase = DependencyInjection().get<PrintUseCase>();
+      final res = await useCase.testarImpressora(
+        printerPath: widget.printer.ip,
+        via: widget.via,
+      );
+
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _success = res.success;
+          if (!res.success) {
+            _errorMessage = res.message;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _success = false;
+          _errorMessage = 'Erro inesperado: $e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget statusWidget;
+
+    if (_loading) {
+      statusWidget = Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: FincoreColors.primary.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(FincoreColors.primary),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Enviando sinal de teste para a impressora...',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: FincoreColors.textPrimary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (_success) {
+      statusWidget = Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: FincoreColors.success.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: FincoreColors.success.withValues(alpha: 0.2)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.check_circle, color: FincoreColors.success, size: 20),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Sinal enviado com sucesso para a pool!',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: FincoreColors.textPrimary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      statusWidget = Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: FincoreColors.danger.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: FincoreColors.danger.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.error_outline, color: FincoreColors.danger, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Falha ao enviar impressão',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: FincoreColors.textPrimary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (_errorMessage.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                _errorMessage,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: FincoreColors.textSecondary,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _dispararTeste,
+                icon: const Icon(Icons.refresh, size: 14),
+                label: const Text('Tentar Novamente', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  foregroundColor: FincoreColors.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return AlertDialog(
+      backgroundColor: FincoreColors.surface,
+      title: Row(
+        children: [
+          Icon(Icons.print, color: FincoreColors.primary),
+          const SizedBox(width: 8),
+          Text(
+            'Teste: ${widget.printer.nome}',
+            style: const TextStyle(color: FincoreColors.textPrimary),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            statusWidget,
+            const SizedBox(height: 16),
+            const Text(
+              'Visualização da Via de Teste:',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: FincoreColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: FincoreColors.background,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: FincoreColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('--------------------------------', style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
+                  const Text('TESTE DE IMPRESSAO FINCORE FOOD', style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12, color: FincoreColors.textPrimary)),
+                  Text('Impressora: ${widget.printer.nome}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
+                  Text('IP/Porta: ${widget.printer.ip}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
+                  Text('Depto: ${widget.printer.departamento}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
+                  Text('Data: ${DateTime.now().toString().substring(0, 19)}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
+                  const Text('--------------------------------', style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(),
+          style: ElevatedButton.styleFrom(backgroundColor: FincoreColors.primary),
+          child: const Text('OK', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+}
+

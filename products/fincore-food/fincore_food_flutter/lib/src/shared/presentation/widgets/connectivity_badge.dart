@@ -17,7 +17,8 @@ import 'package:fincore_food_flutter/src/shared/data/sync/supabase_sync_service.
 /// )
 /// ```
 class ConnectivityBadge extends StatefulWidget {
-  const ConnectivityBadge({super.key});
+  final VoidCallback? onTap;
+  const ConnectivityBadge({super.key, this.onTap});
 
   @override
   State<ConnectivityBadge> createState() => _ConnectivityBadgeState();
@@ -80,7 +81,7 @@ class _ConnectivityBadgeState extends State<ConnectivityBadge> {
     final config = _badgeConfig(_status, _stats);
 
     return InkWell(
-      onTap: _handleTap,
+      onTap: widget.onTap ?? _handleTap,
       borderRadius: BorderRadius.circular(20),
       child: Tooltip(
         message: config.tooltip,

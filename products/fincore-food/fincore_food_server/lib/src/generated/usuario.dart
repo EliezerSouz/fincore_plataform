@@ -15,7 +15,7 @@ abstract class Usuario
     implements _i1.TableRow<_i1.UuidValue>, _i1.ProtocolSerialization {
   Usuario._({
     _i1.UuidValue? id,
-    required this.tenantId,
+    this.activeTenantId,
     this.authUserId,
     required this.username,
     this.email,
@@ -28,7 +28,7 @@ abstract class Usuario
 
   factory Usuario({
     _i1.UuidValue? id,
-    required String tenantId,
+    _i1.UuidValue? activeTenantId,
     String? authUserId,
     required String username,
     String? email,
@@ -42,7 +42,10 @@ abstract class Usuario
   factory Usuario.fromJson(Map<String, dynamic> jsonSerialization) {
     return Usuario(
       id: _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
-      tenantId: jsonSerialization['tenantId'] as String,
+      activeTenantId: jsonSerialization['activeTenantId'] == null
+          ? null
+          : _i1.UuidValueJsonExtension.fromJson(
+              jsonSerialization['activeTenantId']),
       authUserId: jsonSerialization['authUserId'] as String?,
       username: jsonSerialization['username'] as String,
       email: jsonSerialization['email'] as String?,
@@ -63,7 +66,7 @@ abstract class Usuario
   @override
   _i1.UuidValue id;
 
-  String tenantId;
+  _i1.UuidValue? activeTenantId;
 
   String? authUserId;
 
@@ -89,7 +92,7 @@ abstract class Usuario
   @_i1.useResult
   Usuario copyWith({
     _i1.UuidValue? id,
-    String? tenantId,
+    _i1.UuidValue? activeTenantId,
     String? authUserId,
     String? username,
     String? email,
@@ -103,7 +106,7 @@ abstract class Usuario
   Map<String, dynamic> toJson() {
     return {
       'id': id.toJson(),
-      'tenantId': tenantId,
+      if (activeTenantId != null) 'activeTenantId': activeTenantId?.toJson(),
       if (authUserId != null) 'authUserId': authUserId,
       'username': username,
       if (email != null) 'email': email,
@@ -119,7 +122,7 @@ abstract class Usuario
   Map<String, dynamic> toJsonForProtocol() {
     return {
       'id': id.toJson(),
-      'tenantId': tenantId,
+      if (activeTenantId != null) 'activeTenantId': activeTenantId?.toJson(),
       if (authUserId != null) 'authUserId': authUserId,
       'username': username,
       if (email != null) 'email': email,
@@ -166,7 +169,7 @@ class _Undefined {}
 class _UsuarioImpl extends Usuario {
   _UsuarioImpl({
     _i1.UuidValue? id,
-    required String tenantId,
+    _i1.UuidValue? activeTenantId,
     String? authUserId,
     required String username,
     String? email,
@@ -177,7 +180,7 @@ class _UsuarioImpl extends Usuario {
     required DateTime atualizadoEm,
   }) : super._(
           id: id,
-          tenantId: tenantId,
+          activeTenantId: activeTenantId,
           authUserId: authUserId,
           username: username,
           email: email,
@@ -194,7 +197,7 @@ class _UsuarioImpl extends Usuario {
   @override
   Usuario copyWith({
     _i1.UuidValue? id,
-    String? tenantId,
+    Object? activeTenantId = _Undefined,
     Object? authUserId = _Undefined,
     String? username,
     Object? email = _Undefined,
@@ -206,7 +209,9 @@ class _UsuarioImpl extends Usuario {
   }) {
     return Usuario(
       id: id ?? this.id,
-      tenantId: tenantId ?? this.tenantId,
+      activeTenantId: activeTenantId is _i1.UuidValue?
+          ? activeTenantId
+          : this.activeTenantId,
       authUserId: authUserId is String? ? authUserId : this.authUserId,
       username: username ?? this.username,
       email: email is String? ? email : this.email,
@@ -221,8 +226,8 @@ class _UsuarioImpl extends Usuario {
 
 class UsuarioTable extends _i1.Table<_i1.UuidValue> {
   UsuarioTable({super.tableRelation}) : super(tableName: 'usuarios') {
-    tenantId = _i1.ColumnString(
-      'tenantId',
+    activeTenantId = _i1.ColumnUuid(
+      'activeTenantId',
       this,
     );
     authUserId = _i1.ColumnString(
@@ -259,7 +264,7 @@ class UsuarioTable extends _i1.Table<_i1.UuidValue> {
     );
   }
 
-  late final _i1.ColumnString tenantId;
+  late final _i1.ColumnUuid activeTenantId;
 
   late final _i1.ColumnString authUserId;
 
@@ -280,7 +285,7 @@ class UsuarioTable extends _i1.Table<_i1.UuidValue> {
   @override
   List<_i1.Column> get columns => [
         id,
-        tenantId,
+        activeTenantId,
         authUserId,
         username,
         email,

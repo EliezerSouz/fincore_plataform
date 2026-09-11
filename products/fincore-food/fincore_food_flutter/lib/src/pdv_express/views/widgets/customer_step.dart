@@ -56,11 +56,15 @@ class _CustomerStepState extends State<CustomerStep> {
   bool _isCalculatingRoute = false;
   Timer? _routeDebounce;
 
+  bool _mostrarAjusteTaxa = false;
+
   @override
   void initState() {
     super.initState();
     final cliente = widget.controller.cliente;
     final entrega = widget.controller.entrega;
+
+    _mostrarAjusteTaxa = false;
 
     _nameCtrl.text = cliente.nome ?? '';
     _phoneCtrl.text = cliente.telefone ?? '';
@@ -181,6 +185,8 @@ class _CustomerStepState extends State<CustomerStep> {
     if (mounted) {
       setState(() {
         _isCalculatingRoute = true;
+        _distanciaMetros = null;
+        _tempoDeslocamentoMinutos = null;
       });
     }
 
@@ -615,7 +621,6 @@ class _CustomerStepState extends State<CustomerStep> {
       final clientesAtualizados = await widget.controller.clienteRepo.findAll();
       widget.controller.clientes.clear();
       widget.controller.clientes.addAll(clientesAtualizados);
-
       _selectClienteFromCombobox(novo);
     }
   }
@@ -637,92 +642,108 @@ class _CustomerStepState extends State<CustomerStep> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    // Combobox seletor de clientes
-                    Expanded(
-                      child: DropdownButtonFormField<Cliente>(
-                        isExpanded: true,
-                        value: _selectedCliente,
-                        decoration: InputDecoration(
-                          hintText: 'Selecione um cliente cadastrado...',
-                          prefixIcon: Icon(Icons.person_search_outlined, color: FincoreColors.primary),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: FincoreColors.border),
-                          ),
-                        ),
-                        items: widget.controller.clientes.map((c) {
-                          return DropdownMenuItem<Cliente>(
-                            value: c,
-                            child: Text(
-                              '${c.nome} • ${c.telefone}',
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: _selectClienteFromCombobox,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-
-                    // Botão +👤 (Novo Cliente Express)
-                    InkWell(
-                      onTap: _abrirModalNovoCliente,
-                      borderRadius: BorderRadius.circular(10),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: FincoreColors.primary.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: FincoreColors.primary),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.person_add_outlined, size: 20, color: FincoreColors.primary),
-                            const SizedBox(width: 4),
-                            Text(
-                              '+',
-                              style: TextStyle(
-                                color: FincoreColors.primary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
+                if (_selectedCliente == null) ...[
+                  Row(
+                    children: [
+                      // Autocomplete/Busca de cliente
+                      Expanded(
+                        child: Autocomplete<Cliente>(
+                          optionsBuilder: (TextEditingValue textEditingValue) {
+                            if (textEditingValue.text.isEmpty) {
+                              return const Iterable<Cliente>.empty();
+                            }
+                            return widget.controller.clientes.where((c) {
+                              return c.nome.toLowerCase().contains(textEditingValue.text.toLowerCase()) ||
+                                  c.telefone.contains(textEditingValue.text);
+                            });
+                          },
+                          displayStringForOption: (Cliente c) => c.nome,
+                          onSelected: _selectClienteFromCombobox,
+                          fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+                            return TextField(
+                              controller: textController,
+                              focusNode: focusNode,
+                              decoration: InputDecoration(
+                                hintText: '🔍 Buscar cliente por nome ou telefone...',
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                prefixIcon: Icon(Icons.person_search_outlined, color: FincoreColors.primary),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: const BorderSide(color: FincoreColors.border),
+                                ),
                               ),
-                            ),
-                          ],
+                            );
+                          },
                         ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 12),
 
-                // Card resumido do cliente selecionado
-                if (_nameCtrl.text.isNotEmpty) ...[
-                  const SizedBox(height: 12),
+                      // Botão + Novo Cliente
+                      ElevatedButton.icon(
+                        onPressed: _abrirModalNovoCliente,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: FincoreColors.primary.withValues(alpha: 0.15),
+                          foregroundColor: FincoreColors.primary,
+                          side: BorderSide(color: FincoreColors.primary),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        icon: const Icon(Icons.person_add_outlined, size: 18),
+                        label: const Text('Novo Cliente', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  // Card do cliente selecionado
                   Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: FincoreColors.background,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: FincoreColors.border),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.badge_outlined, color: FincoreColors.textMuted, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
+                        CircleAvatar(
+                          backgroundColor: FincoreColors.primary.withValues(alpha: 0.2),
                           child: Text(
-                            'Nome: ${_nameCtrl.text}  |  Telefone: ${_phoneCtrl.text.isNotEmpty ? _phoneCtrl.text : "(Não informado)"}',
-                            style: const TextStyle(
-                              color: FincoreColors.textPrimary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
+                            _selectedCliente!.nome.isNotEmpty ? _selectedCliente!.nome[0].toUpperCase() : '?',
+                            style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold),
                           ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _selectedCliente!.nome,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              if (_selectedCliente!.telefone.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  _selectedCliente!.telefone,
+                                  style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _selectedCliente = null;
+                              _nameCtrl.clear();
+                              _phoneCtrl.clear();
+                              _clienteEnderecos = [];
+                              _selectedLocalEntrega = null;
+                              _isNovoEndereco = true;
+                              _limparEndereco();
+                            });
+                          },
+                          icon: const Icon(Icons.close, size: 16, color: FincoreColors.danger),
+                          label: const Text('Alterar', style: TextStyle(color: FincoreColors.danger, fontSize: 12, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
@@ -733,103 +754,162 @@ class _CustomerStepState extends State<CustomerStep> {
           ),
           const SizedBox(height: 20),
 
-          // ── Card 2: AGENDAMENTO & ENTREGA ────────────────────────
+          // ── Card 2: LOGÍSTICA & ATENDIMENTO ───────────────────────
           _buildSectionCard(
-            title: 'AGENDAMENTO & ENTREGA',
+            title: 'CANAL DE ATENDIMENTO',
             icon: Icons.local_shipping_outlined,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Radio options: Entrega vs Retirada vs (Mesa/Balcão se configurado)
+                // Pílulas segmentadas: Entrega vs Retirada
                 Row(
                   children: [
-                    Row(
-                      children: [
-                        Radio<String>(
-                          value: 'Entrega',
-                          groupValue: entrega.tipo,
-                          activeColor: FincoreColors.primary,
-                          onChanged: (v) {
-                            if (v != null) {
-                              widget.controller.updateEntrega(
-                                widget.controller.entrega.copyWith(tipo: 'Entrega'),
-                              );
-                            }
-                          },
-                        ),
-                        const Text(
-                          'Entrega',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 24),
-                    Row(
-                      children: [
-                        Radio<String>(
-                          value: 'Retirada',
-                          groupValue: entrega.tipo,
-                          activeColor: FincoreColors.primary,
-                          onChanged: (v) {
-                            if (v != null) {
-                              widget.controller.updateEntrega(
-                                widget.controller.entrega.copyWith(
-                                  tipo: 'Retirada',
-                                  taxaEntregaCentavos: 0,
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                        const Text(
-                          'Retirada',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (widget.controller.modoComandasAtivo) ...[
-                      const SizedBox(width: 24),
-                      Row(
-                        children: [
-                          Radio<String>(
-                            value: 'Mesa',
-                            groupValue: entrega.tipo,
-                            activeColor: FincoreColors.primary,
-                            onChanged: (v) {
-                              if (v != null) {
-                                widget.controller.updateEntrega(
-                                  widget.controller.entrega.copyWith(
-                                    tipo: 'Mesa',
-                                    taxaEntregaCentavos: 0,
-                                  ),
-                                );
-                              }
-                            },
-                          ),
-                          const Text(
-                            'Mesa / Balcão',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          widget.controller.updateEntrega(
+                            widget.controller.entrega.copyWith(tipo: 'Entrega'),
+                          );
+                          setState(() {});
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            color: isEntrega
+                                ? FincoreColors.primary.withValues(alpha: 0.15)
+                                : FincoreColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isEntrega ? FincoreColors.primary : FincoreColors.border,
+                              width: 1.5,
                             ),
                           ),
-                        ],
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.delivery_dining_outlined,
+                                color: isEntrega ? FincoreColors.primary : FincoreColors.textMuted,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '🚚 ENTREGA (DELIVERY)',
+                                style: TextStyle(
+                                  color: isEntrega ? Colors.white : FincoreColors.textSecondary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          widget.controller.updateEntrega(
+                            widget.controller.entrega.copyWith(
+                              tipo: 'Retirada',
+                              taxaEntregaCentavos: 0,
+                            ),
+                          );
+                          setState(() {});
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            color: !isEntrega && entrega.tipo != 'Mesa'
+                                ? FincoreColors.primary.withValues(alpha: 0.15)
+                                : FincoreColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: !isEntrega && entrega.tipo != 'Mesa' ? FincoreColors.primary : FincoreColors.border,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.storefront_outlined,
+                                color: !isEntrega && entrega.tipo != 'Mesa' ? FincoreColors.primary : FincoreColors.textMuted,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '🏪 RETIRADA NO BALCÃO',
+                                style: TextStyle(
+                                  color: !isEntrega && entrega.tipo != 'Mesa' ? Colors.white : FincoreColors.textSecondary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (widget.controller.modoComandasAtivo) ...[
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            widget.controller.updateEntrega(
+                              widget.controller.entrega.copyWith(
+                                tipo: 'Mesa',
+                                taxaEntregaCentavos: 0,
+                              ),
+                            );
+                            setState(() {});
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            decoration: BoxDecoration(
+                              color: entrega.tipo == 'Mesa'
+                                  ? FincoreColors.primary.withValues(alpha: 0.15)
+                                  : FincoreColors.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: entrega.tipo == 'Mesa' ? FincoreColors.primary : FincoreColors.border,
+                                  width: 1.5),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.table_restaurant_outlined,
+                                  color: entrega.tipo == 'Mesa' ? FincoreColors.primary : FincoreColors.textMuted,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '🍽️ MESA / COMANDA',
+                                  style: TextStyle(
+                                    color: entrega.tipo == 'Mesa' ? Colors.white : FincoreColors.textSecondary,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
-                // Formulário de Atendimento Presencial (Mesa / Balcão - Apenas se habilitado)
+                // Atendimento Presencial: Mesa / Garçom
                 if (entrega.tipo == 'Mesa' && widget.controller.modoComandasAtivo) ...[
                   Row(
                     children: [
@@ -866,120 +946,128 @@ class _CustomerStepState extends State<CustomerStep> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
                 ],
 
-                // Data & Hora de Agendamento (Tanto para Entrega quanto para Retirada)
-                if (isEntrega || entrega.tipo == 'Retirada') ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _dataCtrl,
-                          readOnly: true,
-                          decoration: InputDecoration(
-                            labelText: isEntrega ? 'Data da Entrega (opcional)' : 'Data da Retirada (opcional)',
-                            prefixIcon: const Icon(Icons.calendar_today_outlined, color: FincoreColors.textMuted, size: 18),
-                          ),
-                          onTap: () async {
-                            final now = widget.controller.entrega.dataHora;
-                            final d = await showDatePicker(
-                              context: context,
-                              initialDate: now,
-                              firstDate: DateTime.now().subtract(const Duration(days: 1)),
-                              lastDate: DateTime.now().add(const Duration(days: 365)),
-                            );
-                            if (d != null && mounted) {
-                              _dataCtrl.text = '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
-                              widget.controller.updateEntrega(
-                                widget.controller.entrega.copyWith(
-                                  dataHora: DateTime(d.year, d.month, d.day, now.hour, now.minute),
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextField(
-                          controller: _horaCtrl,
-                          readOnly: true,
-                          decoration: InputDecoration(
-                            labelText: isEntrega ? 'Hora da Entrega (opcional)' : 'Hora da Retirada (opcional)',
-                            prefixIcon: const Icon(Icons.access_time_outlined, color: FincoreColors.textMuted, size: 18),
-                          ),
-                          onTap: () async {
-                            final now = widget.controller.entrega.dataHora;
-                            final t = await showTimePicker(
-                              context: context,
-                              initialTime: TimeOfDay.fromDateTime(now),
-                            );
-                            if (t != null && mounted) {
-                              _horaCtrl.text = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-                              widget.controller.updateEntrega(
-                                widget.controller.entrega.copyWith(
-                                  dataHora: DateTime(now.year, now.month, now.day, t.hour, t.minute),
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                ],
-
-                // Campos exclusivos de Entrega (Endereço, Prioridade e Taxa)
+                // Endereços e Taxa de Entrega (Apenas se for Delivery)
                 if (isEntrega) ...[
-
-                  // Seletor de Endereço Cadastrado do Cliente
+                  // 1. Seletor de Endereço Cadastrado do Cliente
                   if (_clienteEnderecos.isNotEmpty) ...[
-                    DropdownButtonFormField<String?>(
-                      value: _selectedLocalEntrega?.id,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: 'Endereço Cadastrado do Cliente',
-                        prefixIcon: Icon(Icons.place_outlined, color: FincoreColors.primary, size: 20),
+                    const Text(
+                      'SELECIONAR ENDEREÇO DE ENTREGA',
+                      style: TextStyle(
+                        color: FincoreColors.textMuted,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
                       ),
-                      items: [
-                        ..._clienteEnderecos.map((loc) => DropdownMenuItem<String?>(
-                          value: loc.id,
-                          child: Text(
-                            '${loc.nomeIdentificador}: ${loc.logradouro}, ${loc.numero} - ${loc.bairro}',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                          ),
-                        )),
-                        DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text(
-                            '➕ Entregar em um Novo Endereço...',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.primary),
+                    ),
+                    const SizedBox(height: 8),
+                    ..._clienteEnderecos.map((loc) {
+                      final isSelected = _selectedLocalEntrega?.id == loc.id && !_isNovoEndereco;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              _selectedLocalEntrega = loc;
+                              _isNovoEndereco = false;
+                              _salvarEnderecoFuturo = false;
+                              _preencherEnderecoFromModel(loc);
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: isSelected ? FincoreColors.primary.withValues(alpha: 0.08) : FincoreColors.background,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSelected ? FincoreColors.primary : FincoreColors.border,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                                  color: isSelected ? FincoreColors.primary : FincoreColors.textMuted,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        loc.nomeIdentificador.toUpperCase(),
+                                        style: TextStyle(
+                                          color: isSelected ? Colors.white : FincoreColors.textSecondary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${loc.logradouro}, ${loc.numero} - ${loc.bairro}',
+                                        style: TextStyle(
+                                          color: isSelected ? FincoreColors.textSecondary : FincoreColors.textMuted,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
-                      onChanged: (id) {
+                      );
+                    }).toList(),
+
+                    // Opção de Novo Endereço
+                    InkWell(
+                      onTap: () {
                         setState(() {
-                          if (id != null) {
-                            final loc = _clienteEnderecos.firstWhere((e) => e.id == id);
-                            _selectedLocalEntrega = loc;
-                            _isNovoEndereco = false;
-                            _salvarEnderecoFuturo = false;
-                            _preencherEnderecoFromModel(loc);
-                          } else {
-                            _selectedLocalEntrega = null;
-                            _isNovoEndereco = true;
-                            _limparEndereco();
-                          }
+                          _selectedLocalEntrega = null;
+                          _isNovoEndereco = true;
+                          _limparEndereco();
                         });
                       },
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _isNovoEndereco ? FincoreColors.primary.withValues(alpha: 0.08) : FincoreColors.background,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _isNovoEndereco ? FincoreColors.primary : FincoreColors.border,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _isNovoEndereco ? Icons.radio_button_checked : Icons.radio_button_off,
+                              color: _isNovoEndereco ? FincoreColors.primary : FincoreColors.textMuted,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              '➕ ENTREGAR EM UM NOVO ENDEREÇO...',
+                              style: TextStyle(
+                                color: _isNovoEndereco ? Colors.white : FincoreColors.primary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                   ],
 
-                  // Banner informativo quando for endereço cadastrado travado
+                  // Banner informativo quando for endereço cadastrado selecionado
                   if (!_isNovoEndereco && _selectedLocalEntrega != null) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -994,7 +1082,7 @@ class _CustomerStepState extends State<CustomerStep> {
                           const SizedBox(width: 8),
                           const Expanded(
                             child: Text(
-                              'Endereço cadastrado selecionado (Edição protegida). Selecione "➕ Entregar em um Novo Endereço" caso vá entregar num local diferente.',
+                              'Endereço cadastrado selecionado (Edição protegida). Selecione "➕ Entregar em um Novo Endereço" para alterar.',
                               style: TextStyle(fontSize: 12, color: FincoreColors.textPrimary),
                             ),
                           ),
@@ -1004,115 +1092,110 @@ class _CustomerStepState extends State<CustomerStep> {
                     const SizedBox(height: 16),
                   ],
 
-                  // 1. CEP PRIMEIRO + Cidade (com busca automática)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _cepCtrl,
-                          readOnly: !_isNovoEndereco,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: FincoreFormatters.cep,
-                          decoration: InputDecoration(
-                            labelText: _isNovoEndereco ? 'CEP (Busca Automática) *' : 'CEP',
-                            hintText: '00000-000',
-                            prefixIcon: Icon(Icons.search_outlined, color: FincoreColors.primary, size: 18),
-                            suffixIcon: _isSearchingViaCep
-                                ? Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: FincoreColors.primary),
+                  // 2. Formulário manual de Endereço (Apenas se for Novo Endereço)
+                  if (_isNovoEndereco) ...[
+                    // CEP + Cidade
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _cepCtrl,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: FincoreFormatters.cep,
+                            decoration: InputDecoration(
+                              labelText: 'CEP (Busca Automática) *',
+                              hintText: '00000-000',
+                              prefixIcon: Icon(Icons.search_outlined, color: FincoreColors.primary, size: 18),
+                              suffixIcon: _isSearchingViaCep
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: FincoreColors.primary),
+                                      ),
+                                    )
+                                  : IconButton(
+                                      icon: Icon(Icons.arrow_forward, color: FincoreColors.primary, size: 18),
+                                      onPressed: () => _buscarCepViaApi(_cepCtrl.text),
                                     ),
-                                  )
-                                : (_isNovoEndereco
-                                    ? IconButton(
-                                        icon: Icon(Icons.arrow_forward, color: FincoreColors.primary, size: 18),
-                                        onPressed: () => _buscarCepViaApi(_cepCtrl.text),
-                                      )
-                                    : null),
-                          ),
-                          onChanged: (v) {
-                            if (_isNovoEndereco && v.replaceAll(RegExp(r'[^0-9]'), '').length == 8) {
-                              _buscarCepViaApi(v);
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextField(
-                          controller: _cidadeCtrl,
-                          readOnly: !_isNovoEndereco,
-                          decoration: const InputDecoration(
-                            labelText: 'Cidade *',
-                            hintText: 'Ex: São Paulo',
+                            ),
+                            onChanged: (v) {
+                              if (v.replaceAll(RegExp(r'[^0-9]'), '').length == 8) {
+                                _buscarCepViaApi(v);
+                              }
+                            },
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: TextField(
+                            controller: _cidadeCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Cidade *',
+                              hintText: 'Ex: São Paulo',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
 
-                  // 2. Rua / Logradouro + Número
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: TextField(
-                          controller: _logradouroCtrl,
-                          readOnly: !_isNovoEndereco,
-                          decoration: const InputDecoration(
-                            labelText: 'Rua / Logradouro *',
-                            hintText: 'Ex: Alameda Santos',
+                    // Rua + Número
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: TextField(
+                            controller: _logradouroCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Rua / Logradouro *',
+                              hintText: 'Ex: Alameda Santos',
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextField(
-                          controller: _numeroCtrl,
-                          readOnly: !_isNovoEndereco,
-                          decoration: const InputDecoration(
-                            labelText: 'Número *',
-                            hintText: 'Ex: 1500',
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: TextField(
+                            controller: _numeroCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Número *',
+                              hintText: 'Ex: 1500',
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
 
-                  // 3. Bairro + Referência
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _bairroCtrl,
-                          readOnly: !_isNovoEndereco,
-                          decoration: const InputDecoration(
-                            labelText: 'Bairro *',
-                            hintText: 'Ex: Jardins',
+                    // Bairro + Referência
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _bairroCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Bairro *',
+                              hintText: 'Ex: Jardins',
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextField(
-                          controller: _referenciaCtrl,
-                          readOnly: !_isNovoEndereco,
-                          decoration: const InputDecoration(
-                            labelText: 'Referência (opcional)',
-                            hintText: 'Ex: Galpão de Eventos 2',
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: TextField(
+                            controller: _referenciaCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Referência (opcional)',
+                              hintText: 'Ex: Apto 12',
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
-                  // Prioridade Dropdown & Taxa de Entrega
+                  // Prioridade (Sempre visível para entrega)
                   Row(
                     children: [
                       Expanded(
@@ -1120,7 +1203,7 @@ class _CustomerStepState extends State<CustomerStep> {
                           value: entrega.prioridade,
                           isExpanded: true,
                           decoration: const InputDecoration(
-                            labelText: 'Prioridade',
+                            labelText: 'Prioridade da Entrega',
                             prefixIcon: Icon(Icons.error_outline, color: FincoreColors.textMuted, size: 18),
                           ),
                           items: const [
@@ -1139,27 +1222,71 @@ class _CustomerStepState extends State<CustomerStep> {
                         ),
                       ),
                       const SizedBox(width: 16),
+                      // Card de visualização e ajuste da taxa de entrega
                       Expanded(
-                        child: TextField(
-                          controller: _taxaCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          readOnly: widget.controller.empresaConfig?.taxaEntregaPorKm ?? false,
-                          decoration: InputDecoration(
-                            labelText: 'Taxa de Entrega (R\$)',
-                            prefixText: 'R\$ ',
-                            helperText: (widget.controller.empresaConfig?.taxaEntregaPorKm ?? false)
-                                ? 'Calculada automaticamente por KM'
-                                : null,
-                            helperStyle: (widget.controller.empresaConfig?.taxaEntregaPorKm ?? false)
-                                ? TextStyle(color: FincoreColors.primary, fontSize: 10)
-                                : null,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: FincoreColors.background,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: FincoreColors.border),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text(
+                                    'TAXA ENTREGA',
+                                    style: TextStyle(color: FincoreColors.textMuted, fontSize: 9, fontWeight: FontWeight.bold),
+                                  ),
+                                  Text(
+                                    'R\$ ${_taxaCtrl.text}',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                  ),
+                                ],
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _mostrarAjusteTaxa = !_mostrarAjusteTaxa;
+                                  });
+                                },
+                                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 30)),
+                                child: Text(
+                                  _mostrarAjusteTaxa ? 'Concluir' : 'Ajustar',
+                                  style: TextStyle(color: FincoreColors.primary, fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ],
                   ),
-                  if (_tempoDeslocamentoMinutos != null && _distanciaMetros != null) ...[
+                  const SizedBox(height: 12),
+
+                  // Se o operador está ajustando a taxa, exibir o TextField
+                  if (_mostrarAjusteTaxa) ...[
+                    TextField(
+                      controller: _taxaCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      readOnly: widget.controller.empresaConfig?.taxaEntregaPorKm ?? false,
+                      decoration: InputDecoration(
+                        labelText: 'Digite a Taxa de Entrega (R\$)',
+                        prefixText: 'R\$ ',
+                        helperText: (widget.controller.empresaConfig?.taxaEntregaPorKm ?? false)
+                            ? 'Calculada automaticamente por KM'
+                            : null,
+                      ),
+                    ),
                     const SizedBox(height: 12),
+                  ],
+
+                  // Previsão de Rota
+                  if (_tempoDeslocamentoMinutos != null && _distanciaMetros != null) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
@@ -1191,7 +1318,6 @@ class _CustomerStepState extends State<CustomerStep> {
                       ),
                     ),
                   ] else if (_isCalculatingRoute) ...[
-                    const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -1208,9 +1334,9 @@ class _CustomerStepState extends State<CustomerStep> {
                       ],
                     ),
                   ],
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
 
-                  // Checkbox & Opções de Salvar (Apenas se for Novo Endereço)
+                  // Checkbox de Salvar Endereço (Apenas se for Novo Endereço)
                   if (_isNovoEndereco) ...[
                     Row(
                       children: [
@@ -1237,7 +1363,6 @@ class _CustomerStepState extends State<CustomerStep> {
                         ),
                       ],
                     ),
-
                     if (_salvarEnderecoFuturo) ...[
                       const SizedBox(height: 8),
                       Container(
@@ -1308,6 +1433,77 @@ class _CustomerStepState extends State<CustomerStep> {
               ],
             ),
           ),
+          const SizedBox(height: 20),
+
+          // ── Card 3: DATA & HORÁRIO ───────────────────────────────
+          if (isEntrega || entrega.tipo == 'Retirada') ...[
+            _buildSectionCard(
+              title: 'DATA & HORÁRIO DO ATENDIMENTO',
+              icon: Icons.access_time_outlined,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _dataCtrl,
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: isEntrega ? 'Data da Entrega' : 'Data da Retirada',
+                            prefixIcon: const Icon(Icons.calendar_today_outlined, color: FincoreColors.textMuted, size: 18),
+                          ),
+                          onTap: () async {
+                            final now = widget.controller.entrega.dataHora;
+                            final d = await showDatePicker(
+                              context: context,
+                              initialDate: now,
+                              firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                            );
+                            if (d != null && mounted) {
+                              _dataCtrl.text = '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+                              widget.controller.updateEntrega(
+                                widget.controller.entrega.copyWith(
+                                  dataHora: DateTime(d.year, d.month, d.day, now.hour, now.minute),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: TextField(
+                          controller: _horaCtrl,
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: isEntrega ? 'Hora da Entrega' : 'Hora da Retirada',
+                            prefixIcon: const Icon(Icons.access_time_outlined, color: FincoreColors.textMuted, size: 18),
+                          ),
+                          onTap: () async {
+                            final now = widget.controller.entrega.dataHora;
+                            final t = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(now),
+                            );
+                            if (t != null && mounted) {
+                              _horaCtrl.text = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+                              widget.controller.updateEntrega(
+                                widget.controller.entrega.copyWith(
+                                  dataHora: DateTime(now.year, now.month, now.day, t.hour, t.minute),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1397,6 +1593,8 @@ class _CadastroClienteDialogState extends State<_CadastroClienteDialog> {
   final _bairroCtrl = TextEditingController();
   final _cepCtrl = TextEditingController();
 
+  bool _isSearchingCep = false;
+
   @override
   void dispose() {
     _nomeCtrl.dispose();
@@ -1406,6 +1604,35 @@ class _CadastroClienteDialogState extends State<_CadastroClienteDialog> {
     _bairroCtrl.dispose();
     _cepCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _buscarCep(String cep) async {
+    final cleanCep = cep.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanCep.length != 8) return;
+
+    setState(() => _isSearchingCep = true);
+
+    try {
+      final client = HttpClient();
+      final request = await client.getUrl(Uri.parse('https://viacep.com.br/ws/$cleanCep/json/'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final json = jsonDecode(body);
+        if (json['erro'] != true && mounted) {
+          setState(() {
+            _logradouroCtrl.text = json['logradouro'] ?? '';
+            _bairroCtrl.text = json['bairro'] ?? '';
+          });
+        }
+      }
+    } catch (_) {
+      // Ignorar erros de rede na busca rapida
+    } finally {
+      if (mounted) {
+        setState(() => _isSearchingCep = false);
+      }
+    }
   }
 
   void _salvar() async {
@@ -1504,6 +1731,37 @@ class _CadastroClienteDialogState extends State<_CadastroClienteDialog> {
                   hintText: 'Ex: (11) 91234-5678',
                 ),
               ),
+              const SizedBox(height: 16),
+              
+              // Endereço - CEP em primeiro com Busca Automática
+              TextFormField(
+                controller: _cepCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: FincoreFormatters.cep,
+                decoration: InputDecoration(
+                  labelText: 'CEP (Busca Automática)',
+                  hintText: '00000-000',
+                  prefixIcon: Icon(Icons.search_outlined, color: FincoreColors.primary, size: 18),
+                  suffixIcon: _isSearchingCep
+                      ? Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: FincoreColors.primary),
+                          ),
+                        )
+                      : IconButton(
+                          icon: Icon(Icons.arrow_forward, color: FincoreColors.primary, size: 18),
+                          onPressed: () => _buscarCep(_cepCtrl.text),
+                        ),
+                ),
+                onChanged: (v) {
+                  if (v.replaceAll(RegExp(r'[^0-9]'), '').length == 8) {
+                    _buscarCep(v);
+                  }
+                },
+              ),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -1530,28 +1788,12 @@ class _CadastroClienteDialogState extends State<_CadastroClienteDialog> {
                 ],
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _bairroCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Bairro (opcional)',
-                        hintText: 'Jardins',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _cepCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'CEP (opcional)',
-                        hintText: '01419-001',
-                      ),
-                    ),
-                  ),
-                ],
+              TextFormField(
+                controller: _bairroCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Bairro (opcional)',
+                  hintText: 'Jardins',
+                ),
               ),
               const SizedBox(height: 24),
               Row(

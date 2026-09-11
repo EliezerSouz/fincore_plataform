@@ -112,20 +112,19 @@ class AuthMiddleware {
           where: (t) => t.tenantId.equals(tenantUuid) & t.usuarioId.equals(userUuid),
         );
 
-        // Se não encontrou membro, ainda autenticamos o JWT mas sem escopo de tenant
-        // Isso permite que endpoints de cadastro (criarEmpresa) funcionem para novos usuários
-        if (membro != null) {
-          if (!membro.ativo) {
-            session.log('Acesso negado: Vínculo inativo para usuário $sub no tenant $tenantHeader', level: LogLevel.warning);
-            return null;
-          }
-
-          // Configurar escopo baseado na role
-          scopes.add(Scope(membro.role.toLowerCase()));
-          session.context['role'] = membro.role;
-        } else {
-          session.log('Aviso: Usuário $sub sem vínculo no tenant $tenantHeader — JWT válido, sem escopo de tenant', level: LogLevel.info);
+        if (membro == null || !membro.ativo) {
+          // Um tenant informado é uma alegação de autorização, não somente
+          // contexto de navegação. O onboarding usa JWT sem tenant resolvido.
+          session.log(
+            'Acesso negado: usuário $sub sem vínculo ativo no tenant $tenantHeader',
+            level: LogLevel.warning,
+          );
+          return null;
         }
+
+        // Configurar escopo baseado na role
+        scopes.add(Scope(membro.role.toLowerCase()));
+        session.context['role'] = membro.role;
       }
 
       return AuthenticationInfo(userIdInt, scopes);

@@ -16,6 +16,8 @@ class PrintFooter {
     }
 
     lines.add('');
+    lines.add('[CENTER]Desenvolvido por Eliezer Souza - (35) 99250-3114');
+    lines.add('');
     return lines;
   }
 }

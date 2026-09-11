@@ -135,9 +135,11 @@ class EndpointOnboarding extends _i1.EndpointRef {
   @override
   String get name => 'onboarding';
 
-  /// Cria uma nova empresa (tenant) e vincula o usuário autenticado como ADMIN.
+  /// Cria uma nova empresa (tenant) e vincula o usuário autenticado como OWNER.
+  ///
+  /// O tenantId é gerado pelo servidor, nunca pelo cliente.
+  /// Ordem da transação: empresa → usuario → membro_empresa (respeita todas as FKs).
   _i2.Future<bool> criarEmpresa({
-    required String tenantId,
     required String razaoSocial,
     required String nomeFantasia,
     required String documentoFiscal,
@@ -151,7 +153,6 @@ class EndpointOnboarding extends _i1.EndpointRef {
         'onboarding',
         'criarEmpresa',
         {
-          'tenantId': tenantId,
           'razaoSocial': razaoSocial,
           'nomeFantasia': nomeFantasia,
           'documentoFiscal': documentoFiscal,
@@ -163,7 +164,32 @@ class EndpointOnboarding extends _i1.EndpointRef {
         },
       );
 
-  /// Consulta os dados da empresa vinculada ao usuário autenticado
+  /// Retorna todas as empresas nas quais o usuário logado possui vínculo ativo.
+  ///
+  /// Usada pelo Flutter para:
+  /// - Determinar se o usuário deve ir para o Onboarding (lista vazia)
+  /// - Determinar se deve entrar direto (1 empresa)
+  /// - Exibir a tela de seleção (2+ empresas)
+  _i2.Future<List<_i7.Empresa>> minhasEmpresas() =>
+      caller.callServerEndpoint<List<_i7.Empresa>>(
+        'onboarding',
+        'minhasEmpresas',
+        {},
+      );
+
+  /// Troca o contexto ativo para a empresa especificada e retorna os dados de bootstrap.
+  ///
+  /// Valida se o usuário possui vínculo ativo no tenant antes de permitir a troca.
+  /// Atualiza usuarios.activeTenantId para persistir a preferência.
+  _i2.Future<_i4.BootstrapPayload?> trocarEmpresa(String novoTenantId) =>
+      caller.callServerEndpoint<_i4.BootstrapPayload?>(
+        'onboarding',
+        'trocarEmpresa',
+        {'novoTenantId': novoTenantId},
+      );
+
+  /// Consulta os dados da empresa ativa do usuário autenticado.
+  /// Prioridade: X-Tenant-ID header > activeTenantId > primeiro membro.
   _i2.Future<_i7.Empresa?> minhaEmpresa() =>
       caller.callServerEndpoint<_i7.Empresa?>(
         'onboarding',
@@ -171,7 +197,7 @@ class EndpointOnboarding extends _i1.EndpointRef {
         {},
       );
 
-  /// Consulta o status de ativação da empresa vinculada ao usuário
+  /// Consulta o status de ativação da empresa ativa do usuário.
   _i2.Future<String?> status() => caller.callServerEndpoint<String?>(
         'onboarding',
         'status',

@@ -13,6 +13,7 @@ import 'package:fincore_food_flutter/src/shared/data/sync/supabase_sync_service.
 import 'package:fincore_food_flutter/src/configuracoes/views/configuracoes_page.dart';
 import 'package:fincore_food_flutter/src/produtos/views/produtos_page.dart';
 import 'package:fincore_food_flutter/src/clientes/views/clientes_page.dart';
+import 'package:fincore_food_flutter/src/categorias/views/categorias_page.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/pedidos_page.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/pdv_page.dart';
 import 'package:fincore_food_flutter/src/pdv_express/views/pdv_express_screen.dart';
@@ -24,6 +25,8 @@ import 'package:fincore_food_flutter/src/estoque/views/estoque_page.dart';
 import 'package:fincore_food_flutter/src/estoque/views/producao_page.dart';
 import 'package:fincore_food_flutter/src/cozinha/views/kds_screen.dart';
 import 'package:fincore_food_flutter/src/shared/services/permissao_service.dart';
+
+import 'package:fincore_food_flutter/src/shared/presentation/tenant/empresa_switcher_widget.dart';
 
 // ─── Modelo de item da sidebar ─────────────────────────────────────────────
 
@@ -53,6 +56,17 @@ class FincoreShell extends StatefulWidget {
   final VoidCallback? onLogout;
   const FincoreShell({super.key, this.onLogout});
 
+  static _FincoreShellState? _currentState;
+
+  /// Permite que telas filhas ou dialogs/overlays naveguem entre abas/módulos do shell
+  static void selectTab(BuildContext context, String tabId) {
+    var state = context.findAncestorStateOfType<_FincoreShellState>();
+    state ??= _currentState;
+    if (state != null && state.mounted) {
+      state._selectTab(tabId);
+    }
+  }
+
   @override
   State<FincoreShell> createState() => _FincoreShellState();
 }
@@ -61,27 +75,24 @@ class _FincoreShellState extends State<FincoreShell>
     with TickerProviderStateMixin {
   String _selectedTabId = 'dashboard';
   bool _sidebarExpanded = true;
+  final Map<String, bool> _expandedGroups = {
+    'VENDAS': true,
+    'CADASTROS': true,
+    'OPERAÇÃO': true,
+    'FINANCEIRO': true,
+    'SISTEMA': true,
+  };
   late final TenantContext _tenantContext;
-  late String _activeTenantName;
-  late String _userName;
-  late String _userInitials;
-  late String _userRole;
 
   // PDV padrão (delivery = pdv_express, balcao = pdv_balcao)
   String _pdvPadrao = 'pdv_express';
   static const _kPdvPadrao = 'pdv_padrao_tab';
 
-  int _pendingCount = 0;
-  int _failedCount = 0;
-  bool _isOnline = true;
-  String _lastSyncStr = 'Nunca';
-  Timer? _syncStatusTimer;
-
   // Grupos de navegação — organizados por contexto funcional.
   // Visibilidade por role é aplicada em _buildNavItem via PermissaoService.
   static const List<_NavGroup> _allNavGroups = [
     _NavGroup(
-      label: 'OPERAÇÃO',
+      label: null,
       items: [
         _NavItem(
           id: 'dashboard',
@@ -89,6 +100,11 @@ class _FincoreShellState extends State<FincoreShell>
           icon: Icons.dashboard_outlined,
           iconSelected: Icons.dashboard_rounded,
         ),
+      ],
+    ),
+    _NavGroup(
+      label: 'VENDAS',
+      items: [
         _NavItem(
           id: 'pdv',
           label: 'Frente de Caixa',
@@ -121,13 +137,19 @@ class _FincoreShellState extends State<FincoreShell>
       ],
     ),
     _NavGroup(
-      label: 'FINANCEIRO',
+      label: 'OPERAÇÃO',
       items: [
         _NavItem(
-          id: 'financeiro',
-          label: 'Financeiro',
-          icon: Icons.account_balance_wallet_outlined,
-          iconSelected: Icons.account_balance_wallet_rounded,
+          id: 'kds',
+          label: 'Cozinha (KDS)',
+          icon: Icons.kitchen_outlined,
+          iconSelected: Icons.kitchen,
+        ),
+        _NavItem(
+          id: 'producao',
+          label: 'Produção',
+          icon: Icons.factory_outlined,
+          iconSelected: Icons.factory_rounded,
         ),
         _NavItem(
           id: 'estoque',
@@ -135,11 +157,16 @@ class _FincoreShellState extends State<FincoreShell>
           icon: Icons.inventory_2_outlined,
           iconSelected: Icons.inventory_2_rounded,
         ),
+      ],
+    ),
+    _NavGroup(
+      label: 'FINANCEIRO',
+      items: [
         _NavItem(
-          id: 'producao',
-          label: 'Produção',
-          icon: Icons.factory_outlined,
-          iconSelected: Icons.factory_rounded,
+          id: 'financeiro',
+          label: 'Financeiro',
+          icon: Icons.account_balance_wallet_outlined,
+          iconSelected: Icons.account_balance_wallet_rounded,
         ),
       ],
     ),
@@ -173,11 +200,14 @@ class _FincoreShellState extends State<FincoreShell>
               case 'pdv':
                 return PermissaoService.podeAcessarPdv(role);
               case 'pedidos':
+              case 'historico_vendas':
                 return true; // todos os perfis
               case 'kds':
                 return PermissaoService.podeVerKds(role);
               case 'produtos':
+              case 'categorias':
               case 'clientes':
+              case 'locais_entrega':
                 return PermissaoService.podeAcessarCadastros(role);
               case 'financeiro':
                 return PermissaoService.podeAcessarFinanceiro(role);
@@ -200,30 +230,9 @@ class _FincoreShellState extends State<FincoreShell>
   @override
   void initState() {
     super.initState();
+    FincoreShell._currentState = this;
     _tenantContext = DependencyInjection().get<TenantContext>();
-    _activeTenantName = _tenantContext.hasContext
-        ? _tenantContext.empresa.nomeFantasia
-        : 'Matriz';
-    final nome = _tenantContext.hasContext
-        ? _tenantContext.usuario.nome
-        : 'Usuário';
-    _userName = nome;
-    _userInitials = nome
-        .trim()
-        .split(' ')
-        .take(2)
-        .map((w) => w.isEmpty ? '' : w[0].toUpperCase())
-        .join();
-
-    // ⚠️  SEGURANÇA: A role do usuário é lida do campo `role` do model CoreUsuario,
-    // populado pelo servidor via MembroEmpresa.role (ADMIN, OPERADOR, COZINHA, etc.).
-    // Nunca comparar e-mail para determinar privilégios — isso é um vetor de
-    // escalada de privilégio. Ver [SEC-002] do relatório de auditoria.
-    _userRole = _mapRoleToLabel(
-      _tenantContext.hasContext ? _tenantContext.usuario.role : null,
-    );
     _loadPrefs();
-    _startSyncStatusMonitoring();
   }
 
   /// Converte a role técnica do banco (ex: 'ADMIN', 'SUPERADMIN') em um
@@ -234,6 +243,8 @@ class _FincoreShellState extends State<FincoreShell>
         return 'Superadmin';
       case 'ADMIN':
         return 'Administrador';
+      case 'OWNER':
+        return 'Proprietário';
       case 'OPERADOR':
       case 'OPERADOR_CAIXA':
         return 'Operador de Caixa';
@@ -247,59 +258,14 @@ class _FincoreShellState extends State<FincoreShell>
   }
 
 
-  void _startSyncStatusMonitoring() {
-    _updateSyncStatus();
-    // P3-05: Aumentado de 4s para 15s — 15 queries/min → 4 queries/min sem impacto de UX.
-    // O SupabaseSyncService notifica via onConnectivityChanged em tempo real quando necessário.
-    _syncStatusTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
-      if (mounted) {
-        _updateSyncStatus();
-      }
-    });
-  }
 
-  Future<void> _updateSyncStatus() async {
-    try {
-      final di = DependencyInjection();
-      
-      OutboxService outbox;
-      FincoreDatabase db;
-      try {
-        outbox = di.get<OutboxService>();
-        db = di.get<FincoreDatabase>();
-      } catch (_) {
-        return;
-      }
-
-      final pendingList = await outbox.getPendingEntries();
-      final failedList = await (db.select(db.outboxSync)
-            ..where((t) => t.status.equals('failed')))
-          .get();
-
-      bool online = false;
-      try {
-        final syncService = di.get<SupabaseSyncService>();
-        online = await syncService.isOnline();
-      } catch (_) {}
-
-      if (mounted) {
-        setState(() {
-          _pendingCount = pendingList.length;
-          _failedCount = failedList.length;
-          _isOnline = online;
-          if (pendingList.isEmpty && failedList.isEmpty && online) {
-            final now = DateTime.now();
-            _lastSyncStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-          }
-        });
-      }
-    } catch (_) {}
-  }
 
   Future<void> _showSyncFailuresDialog(BuildContext context) async {
     final di = DependencyInjection();
     final db = di.get<FincoreDatabase>();
     final outbox = di.get<OutboxService>();
+    final syncService = di.get<SupabaseSyncService>();
+    final isOnline = syncService.connectivity == CloudConnectivity.online;
 
     List<OutboxEntry> pendingList = await outbox.getPendingEntries();
     List<OutboxEntry> failedList = await (db.select(db.outboxSync)
@@ -314,16 +280,20 @@ class _FincoreShellState extends State<FincoreShell>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (dialogCtx, setDialogState) {
+          bool online = isOnline;
           Future<void> refreshData() async {
             final newPending = await outbox.getPendingEntries();
             final newFailed = await (db.select(db.outboxSync)
                   ..where((t) => t.status.equals('failed')))
                 .get();
-            setDialogState(() {
-              pendingList = newPending;
-              failedList = newFailed;
-            });
-            _updateSyncStatus();
+            final isNowOnline = syncService.connectivity == CloudConnectivity.online;
+            if (dialogCtx.mounted) {
+              setDialogState(() {
+                pendingList = newPending;
+                failedList = newFailed;
+                online = isNowOnline;
+              });
+            }
           }
 
           return Dialog(
@@ -619,94 +589,113 @@ class _FincoreShellState extends State<FincoreShell>
                             );
                           }
 
-                          return ListView.separated(
-                            itemCount: failedList.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 10),
-                            itemBuilder: (context, idx) {
-                              final item = failedList[idx];
-                              return Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: FincoreColors.background,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: FincoreColors.border),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: FincoreColors.danger.withValues(alpha: 0.15),
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            'ENTIDADE: ${item.entity.toUpperCase()} • ${item.action}',
-                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: FincoreColors.danger),
-                                          ),
-                                        ),
-                                        Text(
-                                          'ID: ${item.entityId} • ${item.attemptsCount} tentativa(s)',
-                                          style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted),
-                                        ),
-                                      ],
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Falhas de Transmissão Detectadas',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: FincoreColors.primary,
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                     ),
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      width: double.infinity,
-                                      padding: const EdgeInsets.all(8),
+                                    onPressed: () async {
+                                      await outbox.retryFailedEntries();
+                                      try {
+                                        final syncEngine = di.get<SyncEngine>();
+                                        await syncEngine.processPendingQueue();
+                                      } catch (_) {}
+                                      await refreshData();
+                                    },
+                                    icon: const Icon(Icons.replay_rounded, size: 16, color: Colors.white),
+                                    label: const Text(
+                                      'Reenviar Todas as Falhas',
+                                      style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Expanded(
+                                child: ListView.separated(
+                                  itemCount: failedList.length,
+                                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                                  itemBuilder: (context, idx) {
+                                    final item = failedList[idx];
+                                    return Container(
+                                      padding: const EdgeInsets.all(12),
                                       decoration: BoxDecoration(
-                                        color: Colors.black26,
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: FincoreColors.danger.withValues(alpha: 0.3)),
+                                        color: FincoreColors.background,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: FincoreColors.border),
                                       ),
-                                      child: SelectableText(
-                                        'ERRO EXATO: ${item.errorMessage ?? "Falha de conexão / Timeout / Restrição no servidor"}',
-                                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Color(0xFFFCA5A5)),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: FincoreColors.danger.withValues(alpha: 0.15),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  'ENTIDADE: ${item.entity.toUpperCase()} • ${item.action}',
+                                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: FincoreColors.danger),
+                                                ),
+                                              ),
+                                              Text(
+                                                'ID: ${item.entityId} • ${item.attemptsCount} tentativa(s)',
+                                                style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            'ERRO EXATO: ${item.errorMessage ?? "Falha de conexão / Timeout / Restrição no servidor"}',
+                                            style: const TextStyle(fontSize: 11, color: FincoreColors.textSecondary, fontFamily: 'monospace'),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                'Registrado em: ${item.createdAt.toLocal().toString().substring(0, 19)}',
+                                                style: const TextStyle(fontSize: 10.5, color: FincoreColors.textMuted),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              ElevatedButton.icon(
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: FincoreColors.primary,
+                                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                                ),
+                                                onPressed: () async {
+                                                  await outbox.updateStatus(item.id, SyncStatus.pending);
+                                                  try {
+                                                    final syncEngine = di.get<SyncEngine>();
+                                                    await syncEngine.processPendingQueue();
+                                                  } catch (_) {}
+                                                  await refreshData();
+                                                },
+                                                icon: const Icon(Icons.refresh, size: 14, color: Colors.white),
+                                                label: const Text('Tentar Sincronizar Novamente', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
                                       ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        OutlinedButton.icon(
-                                          style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(color: FincoreColors.danger),
-                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                          ),
-                                          onPressed: () async {
-                                            await (db.delete(db.outboxSync)..where((t) => t.id.equals(item.id))).go();
-                                            await refreshData();
-                                          },
-                                          icon: const Icon(Icons.delete_outline, size: 14, color: FincoreColors.danger),
-                                          label: const Text('Descartar / Resetar', style: TextStyle(fontSize: 11, color: FincoreColors.danger)),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: FincoreColors.primary,
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                          ),
-                                          onPressed: () async {
-                                            await outbox.updateStatus(item.id, SyncStatus.pending);
-                                            try {
-                                              final syncEngine = di.get<SyncEngine>();
-                                              await syncEngine.processPendingQueue();
-                                            } catch (_) {}
-                                            await refreshData();
-                                          },
-                                          icon: const Icon(Icons.refresh, size: 14, color: Colors.white),
-                                          label: const Text('Tentar Sincronizar Novamente', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
+                                    );
+                                  },
                                 ),
-                              );
-                            },
+                              ),
+                            ],
                           );
                         } else {
                           // ABA 2: VISÃO GERAL
@@ -727,17 +716,17 @@ class _FincoreShellState extends State<FincoreShell>
                                       Row(
                                         children: [
                                           Icon(
-                                            _isOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded,
-                                            color: _isOnline ? FincoreColors.success : FincoreColors.danger,
+                                            online ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                                            color: online ? FincoreColors.success : FincoreColors.danger,
                                             size: 18,
                                           ),
                                           const SizedBox(width: 8),
                                           Text(
-                                            'Status da Conexão Nuvem: ${_isOnline ? "CONECTADO (ONLINE)" : "OFFLINE"}',
+                                            'Status da Conexão Nuvem: ${online ? "CONECTADO (ONLINE)" : "OFFLINE"}',
                                             style: TextStyle(
                                               fontSize: 13,
                                               fontWeight: FontWeight.bold,
-                                              color: _isOnline ? FincoreColors.success : FincoreColors.danger,
+                                              color: online ? FincoreColors.success : FincoreColors.danger,
                                             ),
                                           ),
                                         ],
@@ -826,12 +815,13 @@ class _FincoreShellState extends State<FincoreShell>
         },
       ),
     );
-    _updateSyncStatus();
   }
 
   @override
   void dispose() {
-    _syncStatusTimer?.cancel();
+    if (FincoreShell._currentState == this) {
+      FincoreShell._currentState = null;
+    }
     super.dispose();
   }
 
@@ -884,22 +874,8 @@ class _FincoreShellState extends State<FincoreShell>
   Color get _textMuted => _isDark ? FincoreColors.textMuted : const Color(0xFF6B7280);
 
   Widget _buildStatusBar() {
-    Color syncColor = FincoreColors.success;
-    IconData syncIcon = Icons.cloud_done_outlined;
-    String syncLabel = 'Sincronizado';
-
-    if (_failedCount > 0) {
-      syncColor = FincoreColors.danger;
-      syncIcon = Icons.cloud_off_outlined;
-      syncLabel = '$_failedCount falha(s) de sincronização';
-    } else if (_pendingCount > 0) {
-      syncColor = FincoreColors.warning;
-      syncIcon = Icons.sync_rounded;
-      syncLabel = '$_pendingCount alteração(ões) pendente(s)';
-    }
-
     return Container(
-      height: 28,
+      height: 24,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: _sidebarBg,
@@ -907,63 +883,25 @@ class _FincoreShellState extends State<FincoreShell>
           top: BorderSide(color: _sidebarBorder, width: 1),
         ),
       ),
-      child: Row(
+      child: const Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Lado Esquerdo: Status do Sincronismo
-          InkWell(
-            onTap: () => _showSyncFailuresDialog(context),
-            borderRadius: BorderRadius.circular(6),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              child: Row(
-                children: [
-                  Icon(syncIcon, size: 14, color: syncColor),
-                  const SizedBox(width: 6),
-                  Text(
-                    syncLabel,
-                    style: TextStyle(
-                      color: syncColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (_pendingCount == 0 && _failedCount == 0) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      '•  Último sincronismo: $_lastSyncStr',
-                      style: const TextStyle(
-                        color: FincoreColors.textMuted,
-                        fontSize: 10,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+          Text(
+            'FINCORE FOOD  ·  Painel de Controle Operacional',
+            style: TextStyle(
+              color: FincoreColors.textMuted,
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
             ),
           ),
-
-          // Lado Direito: Conexão Supabase
-          Row(
-            children: [
-              Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _isOnline ? FincoreColors.success : FincoreColors.danger,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                _isOnline ? 'Conectado à Nuvem' : 'Modo Offline',
-                style: TextStyle(
-                  color: _isOnline ? _textSecondary : FincoreColors.danger,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
+          Text(
+            'v3.0.0',
+            style: TextStyle(
+              color: FincoreColors.textMuted,
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
@@ -1034,6 +972,16 @@ class _FincoreShellState extends State<FincoreShell>
         children: [
           // Logo
           _buildSidebarHeader(),
+
+          if (_sidebarExpanded) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: EmpresaSwitcherWidget(
+                onEmpresaTrocada: widget.onLogout,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
 
           const SizedBox(height: 8),
 
@@ -1118,23 +1066,54 @@ class _FincoreShellState extends State<FincoreShell>
   }
 
   Widget _buildNavGroup(_NavGroup group) {
+    final label = group.label;
+    if (label == null) {
+      // Itens no topo (Dashboard) que não têm label
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: group.items.map(_buildNavItem).toList(),
+      );
+    }
+
+    final isExpanded = _expandedGroups[label] ?? true;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (group.label != null && _sidebarExpanded) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 16, 0, 6),
-            child: Text(
-              group.label!,
-              style: const TextStyle(
-                color: FincoreColors.textDisabled,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
+        if (_sidebarExpanded) ...[
+          InkWell(
+            onTap: () {
+              setState(() {
+                _expandedGroups[label] = !isExpanded;
+              });
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: FincoreColors.textDisabled,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: FincoreColors.textDisabled,
+                    size: 14,
+                  ),
+                ],
               ),
             ),
           ),
-        ] else if (group.label != null) ...[
+        ] else ...[
           const SizedBox(height: 8),
           Container(
             height: 1,
@@ -1143,7 +1122,10 @@ class _FincoreShellState extends State<FincoreShell>
           ),
           const SizedBox(height: 8),
         ],
-        ...group.items.map(_buildNavItem),
+        // Se a sidebar estiver colapsada, mostramos sempre todos os ícones das abas.
+        // Se a sidebar estiver expandida, respeitamos o estado de expansão do grupo.
+        if (!_sidebarExpanded || isExpanded)
+          ...group.items.map(_buildNavItem),
       ],
     );
   }
@@ -1354,11 +1336,6 @@ class _FincoreShellState extends State<FincoreShell>
 
   Widget _buildTopbar() {
     final (title, subtitle) = _getTabInfo(_selectedTabId);
-    // Breadcrumb: descobre o grupo do item ativo
-    final group = _navGroups.where((g) =>
-        g.items.any((i) => i.id == _selectedTabId ||
-            (_selectedTabId.startsWith('pdv') && i.id == 'pdv'))).firstOrNull;
-    final breadcrumb = group?.label != null ? '${group!.label} › $title' : title;
 
     return Container(
       height: 56,
@@ -1430,7 +1407,9 @@ class _FincoreShellState extends State<FincoreShell>
 
 
           // Badge dinâmico de conectividade (Online/Offline em tempo real)
-          const ConnectivityBadge(),
+          ConnectivityBadge(
+            onTap: () => _showSyncFailuresDialog(context),
+          ),
         ],
       ),
     );
@@ -1454,6 +1433,10 @@ class _FincoreShellState extends State<FincoreShell>
         return const KdsScreen();
       case 'clientes':
         return const ClientesPage();
+      case 'categorias':
+        return const CategoriasPage();
+      case 'locais_entrega':
+        return const ClientesPage(initialTab: 1);
       case 'produtos':
         return const ProdutosPage();
       case 'financeiro':
@@ -1529,8 +1512,11 @@ class _FincoreShellState extends State<FincoreShell>
       'pdv_express' => ('Frente de Caixa', 'Modo Express — Delivery e Retirada'),
       'pdv_balcao' => ('Frente de Caixa', 'Modo Mesa / Balcão'),
       'pedidos' => ('Central de Pedidos', 'Acompanhamento de pedidos em tempo real'),
+      'historico_vendas' => ('Histórico de Vendas', 'Consulta de vendas realizadas'),
       'kds' => ('KDS — Cozinha', 'Fila de preparo em tempo real'),
       'clientes' => ('Clientes', 'Cadastro e histórico de clientes'),
+      'categorias' => ('Categorias', 'Gerenciamento de categorias do cardápio'),
+      'locais_entrega' => ('Locais de Entrega', 'Bairros e taxas de entrega de pedidos'),
       'produtos' => ('Produtos', 'Cardápio e política de preços'),
       'financeiro' => ('Financeiro', 'Caixa, receitas e relatórios'),
       'estoque' => ('Estoque', 'Controle de produtos acabados'),

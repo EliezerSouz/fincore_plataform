@@ -81,13 +81,12 @@ class _SignupPageState extends State<SignupPage> {
       await client.authenticationKeyManager?.put(token);
 
       // 3. Criar empresa no Serverpod Backend
-      final tenantId = const Uuid().v4();
+      // O servidor gera o tenantId internamente — o cliente nunca deve gerar IDs de tenant.
       final nomeFantasiaFinal = _nomeFantasiaController.text.trim().isEmpty 
           ? _razaoSocialController.text.trim()
           : _nomeFantasiaController.text.trim();
 
       final success = await client.onboarding.criarEmpresa(
-        tenantId: tenantId,
         razaoSocial: _razaoSocialController.text.trim(),
         nomeFantasia: nomeFantasiaFinal,
         documentoFiscal: _documentoController.text.trim(),
@@ -515,6 +514,7 @@ class _SignupPageState extends State<SignupPage> {
         const Text('Segmento de Atuação', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
+          isExpanded: true,
           value: _segmento,
           dropdownColor: FincoreColors.surface,
           style: const TextStyle(color: FincoreColors.textPrimary),
@@ -540,6 +540,7 @@ class _SignupPageState extends State<SignupPage> {
         const Text('Plano de Assinatura Desejado', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
+          isExpanded: true,
           value: _plano,
           dropdownColor: FincoreColors.surface,
           style: const TextStyle(color: FincoreColors.textPrimary),

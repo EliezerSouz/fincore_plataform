@@ -125,6 +125,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
     switch (role?.toUpperCase()) {
       case 'SUPERADMIN':
       case 'ADMIN':
+      case 'OWNER':
         return 'Administrador';
       case 'OPERADOR':
       case 'OPERADOR_CAIXA':

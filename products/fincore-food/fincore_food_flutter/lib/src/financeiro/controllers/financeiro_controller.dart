@@ -4,6 +4,7 @@ import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
+import 'package:fincore_core/sync/outbox_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// Resumo consolidado de uma sessão de caixa para exibição no dashboard.
@@ -34,6 +35,7 @@ class ResumoCaixa {
 class FinanceiroController extends ChangeNotifier {
   final FincoreDatabase _db;
   final TenantContext _context;
+  final OutboxService _outbox;
 
   ResumoCaixa _resumo = const ResumoCaixa();
   bool _loading = false;
@@ -41,7 +43,8 @@ class FinanceiroController extends ChangeNotifier {
 
   FinanceiroController()
       : _db = DependencyInjection().get<FincoreDatabase>(),
-        _context = DependencyInjection().get<TenantContext>() {
+        _context = DependencyInjection().get<TenantContext>(),
+        _outbox = DependencyInjection().get<OutboxService>() {
     _carregarResumo();
   }
 
@@ -169,6 +172,23 @@ class FinanceiroController extends ChangeNotifier {
         updatedBy: operadorId,
       ),
     );
+    await _outbox.enqueue(
+      entity: 'sessao_caixa',
+      entityId: id,
+      action: 'CREATE',
+      version: 1,
+      payload: _sessaoPayload(
+        id: id,
+        tenantId: tenantId,
+        operadorId: operadorId,
+        operadorNome: operadorNome,
+        status: 'aberta',
+        dataAbertura: now,
+        valorAberturaCentavos: valorAberturaCentavos,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
 
     await _carregarResumo();
   }
@@ -199,6 +219,29 @@ class FinanceiroController extends ChangeNotifier {
       updatedBy: Value(operadorId),
       syncStatus: const Value(SyncStatus.pending),
     ));
+    await _outbox.enqueue(
+      entity: 'sessao_caixa',
+      entityId: sessao.id,
+      action: 'UPDATE',
+      version: sessao.syncVersion + 1,
+      payload: _sessaoPayload(
+        id: sessao.id,
+        tenantId: tenantId,
+        operadorId: sessao.operadorId,
+        operadorNome: sessao.operadorNome,
+        status: 'fechada',
+        dataAbertura: sessao.dataAbertura,
+        dataFechamento: now,
+        valorAberturaCentavos: sessao.valorAberturaCentavos,
+        valorFechamentoCentavos: valorContadoCentavos,
+        totalVendasCentavos: _resumo.totalVendasCentavos,
+        totalDespesasCentavos: _resumo.totalDespesasCentavos,
+        diferencaCentavos: diferenca,
+        observacoes: observacoes,
+        createdAt: sessao.createdAt,
+        updatedAt: now,
+      ),
+    );
 
     await _carregarResumo();
   }
@@ -216,9 +259,10 @@ class FinanceiroController extends ChangeNotifier {
     final operadorId = _context.usuario.id;
     final now = DateTime.now().toUtc();
 
+    final id = const Uuid().v4();
     await _db.into(_db.lancamentosFinanceirosTable).insert(
       LancamentosFinanceirosTableCompanion.insert(
-        id: const Uuid().v4(),
+        id: id,
         tenantId: tenantId,
         sessaoCaixaId: sessao.id,
         tipo: tipo,
@@ -234,7 +278,65 @@ class FinanceiroController extends ChangeNotifier {
         updatedBy: operadorId,
       ),
     );
+    await _outbox.enqueue(
+      entity: 'lancamento_financeiro',
+      entityId: id,
+      action: 'CREATE',
+      version: 1,
+      payload: {
+        'id': id,
+        'tenantId': tenantId,
+        'sessaoCaixaId': sessao.id,
+        'tipo': tipo,
+        'valorCentavos': valorCentavos,
+        'descricao': descricao,
+        'operadorId': operadorId,
+        'dataHora': now.toIso8601String(),
+        'syncVersion': 1,
+        'createdAt': now.toIso8601String(),
+        'updatedAt': now.toIso8601String(),
+        'createdBy': operadorId,
+        'updatedBy': operadorId,
+      },
+    );
 
     await _carregarResumo();
   }
+
+  Map<String, dynamic> _sessaoPayload({
+    required String id,
+    required String tenantId,
+    required String operadorId,
+    required String operadorNome,
+    required String status,
+    required DateTime dataAbertura,
+    required int valorAberturaCentavos,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    DateTime? dataFechamento,
+    int? valorFechamentoCentavos,
+    int totalVendasCentavos = 0,
+    int totalDespesasCentavos = 0,
+    int? diferencaCentavos,
+    String? observacoes,
+  }) => {
+        'id': id,
+        'tenantId': tenantId,
+        'operadorId': operadorId,
+        'operadorNome': operadorNome,
+        'status': status,
+        'dataAbertura': dataAbertura.toIso8601String(),
+        'dataFechamento': dataFechamento?.toIso8601String(),
+        'valorAberturaCentavos': valorAberturaCentavos,
+        'valorFechamentoCentavos': valorFechamentoCentavos,
+        'totalVendasCentavos': totalVendasCentavos,
+        'totalDespesasCentavos': totalDespesasCentavos,
+        'diferencaCentavos': diferencaCentavos,
+        'observacoes': observacoes,
+        'syncVersion': 1,
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+        'createdBy': operadorId,
+        'updatedBy': operadorId,
+      };
 }

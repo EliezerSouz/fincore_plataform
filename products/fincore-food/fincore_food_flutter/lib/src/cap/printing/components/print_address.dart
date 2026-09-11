@@ -9,6 +9,8 @@ class PrintAddress {
     required String logradouro,
     String numero = '',
     required String bairro,
+    String cidade = '',
+    String uf = '',
     String? referencia,
     String? cep,
   }) {
@@ -16,6 +18,8 @@ class PrintAddress {
       logradouro: logradouro,
       numero: numero,
       bairro: bairro,
+      cidade: cidade,
+      uf: uf,
       cep: cep ?? '',
     );
 

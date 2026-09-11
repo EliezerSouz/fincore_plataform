@@ -19,6 +19,10 @@ class DeadlineInfo {
   final int tempoDeslocamentoMinutos;
   final int margemSegurancaMinutos;
   final DateTime horarioInicioRecomendado;
+  /// Horário limite para o pedido estar PRONTO (entrega - desloc - margem)
+  final DateTime horarioProntoAte;
+  /// Horário limite para SAIR para entrega (entrega - desloc)
+  final DateTime horarioSairAte;
   final String statusLabel;
   final Color statusColor;
   final String tempoRestanteLabel;
@@ -30,6 +34,8 @@ class DeadlineInfo {
     required this.tempoDeslocamentoMinutos,
     required this.margemSegurancaMinutos,
     required this.horarioInicioRecomendado,
+    required this.horarioProntoAte,
+    required this.horarioSairAte,
     required this.statusLabel,
     required this.statusColor,
     required this.tempoRestanteLabel,
@@ -66,6 +72,7 @@ class CentralPedidosController extends ChangeNotifier {
 
   List<OrdemPreparo> _todasOrdens = [];
   List<OrdemPreparo> _filteredOrdens = [];
+  List<PedidoData> _historicoPedidos = [];
   Map<String, int> _precosProdutosMap = {};
   Map<String, int> _tempoPreparoProdutosMap = {};
   Map<String, PedidoData> _pedidosMap = {};
@@ -93,6 +100,8 @@ class CentralPedidosController extends ChangeNotifier {
   String? get error => _error;
   DateTime get selectedDate => _selectedDate;
   String get selectedOrigem => _selectedOrigem;
+  List<OrdemPreparo> get todasOrdens => _todasOrdens;
+  List<PedidoData> get historicoPedidos => _historicoPedidos;
   List<OrdemPreparo> get filteredOrdens => _filteredOrdens;
   Map<String, PedidoData> get pedidosMap => _pedidosMap;
 
@@ -159,11 +168,13 @@ class CentralPedidosController extends ChangeNotifier {
 
   // ── KPIs ────────────────────────────────────────────────────────────
 
-  int get totalPedidos => _filteredOrdens.length;
+  int get totalPedidos =>
+      _filteredOrdens.where((o) => o.status != StatusOrdemPreparo.cancelado).toList().length;
 
   int get totalEntregas {
     int n = 0;
     for (final o in _filteredOrdens) {
+      if (o.status == StatusOrdemPreparo.cancelado) continue;
       final p = DadosOrdemKanban.fromOrdem(o);
       if (p.tipoLogistica.toLowerCase().contains('entrega') ||
           p.tipoLogistica.toLowerCase().contains('delivery')) n++;
@@ -225,7 +236,9 @@ class CentralPedidosController extends ChangeNotifier {
       // Silent reload (já carregado antes)
       try {
         final list = await _ordemRepo.findAll();
+        await _carregarPrecos(); // ← Mantém mapa de preparo atualizado
         await _carregarDadosAuxiliares(list);
+        await carregarListaPedidos();
         _todasOrdens = list;
         _applyFilters();
         notifyListeners();
@@ -240,6 +253,7 @@ class CentralPedidosController extends ChangeNotifier {
       final list = await _ordemRepo.findAll();
       await _carregarPrecos();
       await _carregarDadosAuxiliares(list);
+      await carregarListaPedidos();
       _todasOrdens = list;
       _applyFilters();
     } catch (e) {
@@ -249,6 +263,29 @@ class CentralPedidosController extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> carregarListaPedidos() async {
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final tenantId = _ordemRepo.activeTenantId;
+      final rows = await (db.select(db.pedidosTable)
+            ..where((t) => t.tenantId.equals(tenantId) & t.deletedAt.isNull().equals(true))
+            ..orderBy([(t) => OrderingTerm(expression: t.dataHoraCriacao, mode: OrderingMode.desc)]))
+          .get();
+      _historicoPedidos = rows;
+    } catch (e) {
+      debugPrint('[CentralPedidosController] Erro ao carregar histórico: $e');
+    }
+  }
+
+  int? getNumeroPedido(String pedidoId) {
+    for (final p in _historicoPedidos) {
+      if (p.id == pedidoId) {
+        return p.numeroPedido;
+      }
+    }
+    return null;
   }
 
   Future<void> _carregarDadosAuxiliares(List<OrdemPreparo> ordens) async {
@@ -331,13 +368,18 @@ class CentralPedidosController extends ChangeNotifier {
         final dist = data['distanciaMetros'] as int?;
         final durSeconds = data['tempoDeslocamentoSegundos'] as int?;
         if (dist != null && durSeconds != null) {
+          // Respeita 0 seg = endereço próximo (mesmo CEP, mesma rua, etc.)
           return (
             distanciaMetros: dist,
             tempoDeslocamentoMinutos: (durSeconds / 60).round(),
           );
         }
+        // enderecoJson existe mas sem dados de rota: endereço manual sem cálculo
+        // → sem deslocamento (usuário entrou o endereço manualmente)
+        return (distanciaMetros: 0, tempoDeslocamentoMinutos: 0);
       } catch (_) {}
     }
+    // Sem enderecoJson: entrega sem endereço cadastrado → usa fallback conservador
     return (
       distanciaMetros: 5000,
       tempoDeslocamentoMinutos: 15,
@@ -363,105 +405,187 @@ class CentralPedidosController extends ChangeNotifier {
 
   DeadlineInfo calculateDeadline(OrdemPreparo o) {
     final parsed = DadosOrdemKanban.fromOrdem(o);
-    final isImmediate = parsed.dataAgendada == null;
-    
+
+    // ── Resolução da data de entrega (prioridade decrescente) ────────────
+    // 1. Campo direto no banco (pedidos novos, pós-fix)
+    // 2. Parse textual das observações (tag `agendado:`)
+    // 3. Fallback legado: código antigo gravava dataHoraCriacao = dataEntrega
+    //    → se dataHoraCriacao do pedido for >30 min no futuro vs criadaEm da ordem,
+    //      provavelmente é o horário de entrega armazenado com o bug
+    final pedido = _pedidosMap[o.pedidoId];
+    DateTime? dataAgendada = pedido?.dataHoraEntregaPrevista?.toLocal()
+        ?? parsed.dataAgendada;
+
+    if (dataAgendada == null && pedido != null) {
+      final pedidoCriadaLocal = pedido.dataHoraCriacao.toLocal();
+      final ordemCriadaLocal  = o.criadaEm.toLocal();
+      final diffMin = pedidoCriadaLocal.difference(ordemCriadaLocal).inMinutes;
+      // Se dataHoraCriacao está >30 min no futuro vs criadaEm → bug legado detectado
+      if (diffMin > 30) {
+        dataAgendada = pedidoCriadaLocal;
+        debugPrint('[Deadline] Fallback legado: usando dataHoraCriacao como entrega prevista '
+            '(diff=${diffMin}min) para pedido ${o.pedidoId}');
+      }
+    }
+
+    final isImmediate = dataAgendada == null;
+
     final tempoPrep = getTempoPreparacaoMinutos(o);
-    
+
     int tempoDesloc = 0;
-    
-    final isDelivery = parsed.tipoLogistica.toLowerCase().contains('entrega') || 
+    final isDelivery = parsed.tipoLogistica.toLowerCase().contains('entrega') ||
                        parsed.tipoLogistica.toLowerCase().contains('delivery');
-                       
     if (isDelivery) {
       final route = getRouteInfo(o);
+      // Respeita 0 min quando a rota calculada indica endereço próximo.
+      // O fallback de 15 min só é aplicado internamente no getRouteInfo
+      // quando não há nenhum enderecoJson cadastrado.
       tempoDesloc = route.tempoDeslocamentoMinutos;
     }
-    
+
     final margem = _margemSegurancaMinutos;
-    
-    DateTime targetEntrega;
-    DateTime inicioRecomendado;
-    
+
+    // ── Horários chave para cada etapa ──────────────────────────────────
+    // targetEntrega:    quando o produto precisa chegar/estar disponível
+    // prontoAte:        até quando precisa estar PRONTO (antes de sair)
+    // sairAte:          até quando precisa SAIR (entrega - desloc)
+    // inicioRecomendado: quando deve COMEÇAR o preparo
+    final DateTime targetEntrega;
+    final DateTime inicioRecomendado;
+
     if (isImmediate) {
+      // Pedido imediato: entrega estimada a partir de agora
       targetEntrega = o.criadaEm.add(Duration(minutes: tempoPrep + tempoDesloc + margem));
       inicioRecomendado = o.criadaEm;
     } else {
-      targetEntrega = parsed.dataAgendada!;
+      targetEntrega = dataAgendada;
       inicioRecomendado = targetEntrega.subtract(Duration(minutes: tempoPrep + tempoDesloc + margem));
     }
-    
+
+    // Horário em que deve estar pronto (antes de sair ou ser retirado)
+    final prontoAte = targetEntrega.subtract(Duration(minutes: tempoDesloc + margem));
+    // Horário em que deve sair (só relevante para entregas)
+    final sairAte = targetEntrega.subtract(Duration(minutes: tempoDesloc));
+
     final agora = DateTime.now();
     String statusLabel = '';
     Color statusColor = const Color(0xFF10B981);
     String tempoRestanteLabel = '';
-    
-    if (o.status == StatusOrdemPreparo.pronto || 
-        o.status == StatusOrdemPreparo.entregue || 
+
+    // ── Pedidos Concluídos / Cancelados ─────────────────────────────────
+    if (o.status == StatusOrdemPreparo.entregue ||
         o.status == StatusOrdemPreparo.cancelado) {
-      statusLabel = 'Concluído';
+      statusLabel = o.status == StatusOrdemPreparo.cancelado ? 'Cancelado' : 'Entregue';
       statusColor = const Color(0xFF6B7280);
-      tempoRestanteLabel = 'Preparo finalizado';
-    } else {
-      if (isImmediate) {
-        if (o.status == StatusOrdemPreparo.pendente) {
-          final minutosCriado = agora.difference(o.criadaEm).inMinutes;
-          if (minutosCriado <= 2) {
-            statusLabel = 'Iniciar agora';
-            statusColor = const Color(0xFFEF4444);
-            tempoRestanteLabel = 'Pedido imediato';
-          } else {
-            statusLabel = 'Produção atrasada';
-            statusColor = const Color(0xFFDC2626);
-            tempoRestanteLabel = 'Atrasado há ${_formatAtraso(minutosCriado)}';
-          }
-        } else {
-          statusLabel = 'Dentro do prazo';
+      tempoRestanteLabel = o.status == StatusOrdemPreparo.cancelado
+          ? 'Pedido cancelado'
+          : 'Pedido entregue';
+
+    // ── Pedido Pronto: urgência em relação ao horário de SAÍDA ──────────
+    } else if (o.status == StatusOrdemPreparo.pronto) {
+      if (!isImmediate) {
+        final refTime = isDelivery ? sairAte : targetEntrega;
+        final diferenca = refTime.difference(agora).inMinutes;
+        if (diferenca > 10) {
+          statusLabel = 'Aguardando saída';
           statusColor = const Color(0xFF10B981);
-          tempoRestanteLabel = 'Em preparação';
+          tempoRestanteLabel = isDelivery
+              ? 'Sair em ${_formatAtraso(diferenca)}'
+              : 'Retirada em ${_formatAtraso(diferenca)}';
+        } else if (diferenca > 0) {
+          statusLabel = isDelivery ? 'Sair em breve' : 'Retirada em breve';
+          statusColor = const Color(0xFFF59E0B);
+          tempoRestanteLabel = 'Faltam ${_formatAtraso(diferenca)}';
+        } else if (diferenca >= -5) {
+          statusLabel = isDelivery ? 'Sair agora!' : 'Retirada agora!';
+          statusColor = const Color(0xFFEF4444);
+          tempoRestanteLabel = isDelivery ? 'Saída imediata' : 'Cliente aguardando';
+        } else {
+          statusLabel = 'Entrega atrasada';
+          statusColor = const Color(0xFFDC2626);
+          tempoRestanteLabel = 'Atrasado há ${_formatAtraso(-diferenca)}';
         }
       } else {
-        final isEmPreparo = o.status == StatusOrdemPreparo.emPreparo;
-        final targetTime = isEmPreparo ? targetEntrega : inicioRecomendado;
-        final diferenca = targetTime.difference(agora).inMinutes;
+        statusLabel = 'Pronto';
+        statusColor = const Color(0xFF10B981);
+        tempoRestanteLabel = 'Aguardando retirada/entrega';
+      }
 
-        if (isEmPreparo) {
-          if (diferenca > 0) {
-            statusLabel = 'Em preparação';
-            statusColor = const Color(0xFF10B981);
-            tempoRestanteLabel = 'Faltam ${_formatAtraso(diferenca)}';
-          } else {
-            statusLabel = 'Entrega atrasada';
-            statusColor = const Color(0xFFDC2626);
-            tempoRestanteLabel = 'Atrasado há ${_formatAtraso(-diferenca)}';
-          }
+    // ── Em Preparo: urgência em relação ao horário de FICAR PRONTO ───────
+    } else if (o.status == StatusOrdemPreparo.emPreparo) {
+      if (!isImmediate) {
+        final diferenca = prontoAte.difference(agora).inMinutes;
+        if (diferenca > 10) {
+          statusLabel = 'Em preparação';
+          statusColor = const Color(0xFF10B981);
+          tempoRestanteLabel = 'Pronto em ${_formatAtraso(diferenca)}';
+        } else if (diferenca > 0) {
+          statusLabel = 'Finalizar em breve';
+          statusColor = const Color(0xFFF59E0B);
+          tempoRestanteLabel = 'Faltam ${_formatAtraso(diferenca)}';
+        } else if (diferenca >= -5) {
+          statusLabel = 'Finalizar agora!';
+          statusColor = const Color(0xFFEF4444);
+          tempoRestanteLabel = 'Prazo de preparo atingido';
         } else {
-          if (diferenca > 15) {
-            statusLabel = 'Dentro do prazo';
-            statusColor = const Color(0xFF10B981);
-            tempoRestanteLabel = 'Faltam ${_formatAtraso(diferenca)}';
-          } else if (diferenca > 0 && diferenca <= 15) {
-            statusLabel = 'Iniciar em breve';
-            statusColor = const Color(0xFFF59E0B);
-            tempoRestanteLabel = 'Faltam ${_formatAtraso(diferenca)}';
-          } else if (diferenca <= 0 && diferenca >= -2) {
-            statusLabel = 'Iniciar agora';
-            statusColor = const Color(0xFFEF4444);
-            tempoRestanteLabel = 'Iniciar produção agora';
-          } else {
-            statusLabel = 'Produção atrasada';
-            statusColor = const Color(0xFFDC2626);
-            tempoRestanteLabel = 'Atrasado há ${_formatAtraso(-diferenca)}';
-          }
+          statusLabel = 'Preparo atrasado';
+          statusColor = const Color(0xFFDC2626);
+          tempoRestanteLabel = 'Atrasado há ${_formatAtraso(-diferenca)}';
+        }
+      } else {
+        statusLabel = 'Em preparação';
+        statusColor = const Color(0xFF10B981);
+        tempoRestanteLabel = 'Em preparação';
+      }
+
+    // ── Pendente: urgência em relação ao horário de INÍCIO ───────────────
+    } else {
+      if (isImmediate) {
+        final minutosCriado = agora.difference(o.criadaEm).inMinutes;
+        if (minutosCriado >= 0 && minutosCriado <= 2) {
+          statusLabel = 'Iniciar agora';
+          statusColor = const Color(0xFFEF4444);
+          tempoRestanteLabel = 'Pedido imediato';
+        } else if (minutosCriado > 2) {
+          statusLabel = 'Produção atrasada';
+          statusColor = const Color(0xFFDC2626);
+          tempoRestanteLabel = 'Atrasado há ${_formatAtraso(minutosCriado)}';
+        } else {
+          statusLabel = 'Agendado';
+          statusColor = const Color(0xFFF59E0B);
+          tempoRestanteLabel = 'Entrega programada';
+        }
+      } else {
+        // Urgência relativa ao horário de INÍCIO recomendado
+        final diferenca = inicioRecomendado.difference(agora).inMinutes;
+        if (diferenca > 15) {
+          statusLabel = 'Dentro do prazo';
+          statusColor = const Color(0xFF10B981);
+          tempoRestanteLabel = 'Iniciar em ${_formatAtraso(diferenca)}';
+        } else if (diferenca > 0 && diferenca <= 15) {
+          statusLabel = 'Iniciar em breve';
+          statusColor = const Color(0xFFF59E0B);
+          tempoRestanteLabel = 'Iniciar em ${_formatAtraso(diferenca)}';
+        } else if (diferenca <= 0 && diferenca >= -5) {
+          statusLabel = 'Iniciar agora!';
+          statusColor = const Color(0xFFEF4444);
+          tempoRestanteLabel = 'Hora de iniciar o preparo';
+        } else {
+          statusLabel = 'Produção atrasada';
+          statusColor = const Color(0xFFDC2626);
+          tempoRestanteLabel = 'Atrasado há ${_formatAtraso(-diferenca)}';
         }
       }
     }
-    
+
     return DeadlineInfo(
       horarioEntrega: targetEntrega,
       tempoPreparacaoMinutos: tempoPrep,
       tempoDeslocamentoMinutos: tempoDesloc,
       margemSegurancaMinutos: margem,
       horarioInicioRecomendado: inicioRecomendado,
+      horarioProntoAte: prontoAte,
+      horarioSairAte: sairAte,
       statusLabel: statusLabel,
       statusColor: statusColor,
       tempoRestanteLabel: tempoRestanteLabel,
@@ -470,24 +594,40 @@ class CentralPedidosController extends ChangeNotifier {
   }
 
   void _applyFilters() {
-    _filteredOrdens = _todasOrdens.where((o) {
-      final matchesDate = o.criadaEm.year == _selectedDate.year &&
-          o.criadaEm.month == _selectedDate.month &&
-          o.criadaEm.day == _selectedDate.day;
-
+    final filtradas = _todasOrdens.where((o) {
       final parsed = DadosOrdemKanban.fromOrdem(o);
+      final dataOperacional = parsed.dataAgendada ?? o.criadaEm.toLocal();
+      final matchesDate = dataOperacional.year == _selectedDate.year &&
+          dataOperacional.month == _selectedDate.month &&
+          dataOperacional.day == _selectedDate.day;
+
       final matchesOrigem = _selectedOrigem == 'Todos' ||
           parsed.tipoLogistica.toLowerCase() ==
               _selectedOrigem.toLowerCase();
 
       return matchesDate && matchesOrigem;
     }).toList();
+
+    // Ordenação cronológica baseada no horário de início recomendado para produção
+    filtradas.sort((a, b) {
+      final dlA = calculateDeadline(a);
+      final dlB = calculateDeadline(b);
+      return dlA.horarioInicioRecomendado.compareTo(dlB.horarioInicioRecomendado);
+    });
+
+    _filteredOrdens = filtradas;
   }
 
   // ── Filtros públicos ─────────────────────────────────────────────────
 
   void mudarDia(int offset) {
     _selectedDate = _selectedDate.add(Duration(days: offset));
+    _applyFilters();
+    notifyListeners();
+  }
+
+  void setSelectedDate(DateTime date) {
+    _selectedDate = DateTime(date.year, date.month, date.day);
     _applyFilters();
     notifyListeners();
   }
@@ -519,6 +659,57 @@ class CentralPedidosController extends ChangeNotifier {
     return (novoStatus.index < ordem.status.index) ||
         (ordem.status == StatusOrdemPreparo.cancelado &&
             novoStatus != StatusOrdemPreparo.cancelado);
+  }
+
+  /// Atualiza o status de um pedido diretamente na [pedidosTable], sem
+  /// necessitar de uma [OrdemPreparo] correspondente no Kanban do dia.
+  /// Ideal para pedidos antigos visíveis no histórico.
+  Future<void> atualizarStatusPedidoDireto(
+    String pedidoId,
+    String novoStatus,
+  ) async {
+    final db = DependencyInjection().get<FincoreDatabase>();
+    final now = DateTime.now().toUtc();
+
+    await (db.update(db.pedidosTable)
+          ..where((t) => t.id.equals(pedidoId)))
+        .write(PedidosTableCompanion(
+      status: Value(novoStatus),
+      updatedAt: Value(now),
+      syncStatus: const Value(SyncStatus.pending),
+    ));
+
+    // Atualiza também a OrdemPreparo correspondente, se existir
+    final matchingOrdem = _todasOrdens
+        .cast<OrdemPreparo?>()
+        .firstWhere((o) => o?.pedidoId == pedidoId, orElse: () => null);
+
+    if (matchingOrdem != null) {
+      final statusEnum = switch (novoStatus.toLowerCase()) {
+        'confirmado' || 'pendente' => StatusOrdemPreparo.pendente,
+        'em_preparo' || 'empreparo' => StatusOrdemPreparo.emPreparo,
+        'pronto' => StatusOrdemPreparo.pronto,
+        'entregue' => StatusOrdemPreparo.entregue,
+        'cancelado' => StatusOrdemPreparo.cancelado,
+        _ => StatusOrdemPreparo.values.firstWhere(
+            (s) => s.name.toLowerCase() == novoStatus.toLowerCase(),
+            orElse: () => StatusOrdemPreparo.cancelado,
+          ),
+      };
+      try {
+        await moverStatus(matchingOrdem, statusEnum);
+        return; // moverStatus já chama recalcular + notifyListeners
+      } catch (_) {}
+    }
+
+    // Recalcula reservas e atualiza o histórico
+    try {
+      final estoqueCtrl = DependencyInjection().get<EstoqueController>();
+      await estoqueCtrl.recalcularReservasEEstoques();
+    } catch (e) {
+      debugPrint('[PEDIDOS] Erro ao recalcular reservas: $e');
+    }
+    await carregarOrdens();
   }
 
   Future<void> moverStatus(
@@ -558,11 +749,16 @@ class CentralPedidosController extends ChangeNotifier {
     try {
       final db = DependencyInjection().get<FincoreDatabase>();
       final now = DateTime.now().toUtc();
-      final statusStr = novoStatus == StatusOrdemPreparo.entregue
-          ? 'entregue'
-          : novoStatus == StatusOrdemPreparo.cancelado
-              ? 'cancelado'
-              : novoStatus.name;
+      // Mapeamento explícito obrigatório: o CHECK CONSTRAINT do Postgres
+      // exige snake_case ('em_preparo'), mas Dart enum .name retorna camelCase
+      // ('emPreparo'). Cada novo status DEVE ser adicionado aqui.
+      final statusStr = switch (novoStatus) {
+        StatusOrdemPreparo.pendente  => 'confirmado',
+        StatusOrdemPreparo.emPreparo => 'em_preparo',
+        StatusOrdemPreparo.pronto    => 'pronto',
+        StatusOrdemPreparo.entregue  => 'entregue',
+        StatusOrdemPreparo.cancelado => 'cancelado',
+      };
 
       await (db.update(db.pedidosTable)
             ..where((t) => t.id.equals(ordem.pedidoId)))
@@ -572,6 +768,105 @@ class CentralPedidosController extends ChangeNotifier {
         syncStatus: const Value(SyncStatus.pending),
       ));
 
+      // Registrar no outbox a alteração do status do pedido para sincronização com o Supabase
+      try {
+        final outboxService = DependencyInjection().get<OutboxService>();
+        await outboxService.enqueue(
+          entity: 'Pedido',
+          entityId: ordem.pedidoId,
+          action: 'update',
+          payload: {
+            'id': ordem.pedidoId,
+            'tenantId': ordem.tenantId,
+            'status': statusStr,
+            'updatedAt': now.toIso8601String(),
+          },
+          version: 1,
+        );
+      } catch (e) {
+        debugPrint('[PEDIDOS] Erro ao registrar status do pedido no outbox: $e');
+      }
+
+      // Estorno ou reativação do lançamento financeiro do pedido
+      try {
+        final activeUser = ordem.operadorId ?? '';
+        final outboxService = DependencyInjection().get<OutboxService>();
+        if (novoStatus == StatusOrdemPreparo.cancelado) {
+          // Cancelamento: deleta logicamente os lançamentos ativos vinculados a este pedido
+          final lancamentos = await (db.select(db.lancamentosFinanceirosTable)
+                ..where((t) =>
+                    t.tenantId.equals(ordem.tenantId) &
+                    t.pedidoId.equals(ordem.pedidoId) &
+                    t.deletedAt.isNull()))
+              .get();
+
+          for (final lanc in lancamentos) {
+            await (db.update(db.lancamentosFinanceirosTable)
+                  ..where((t) => t.id.equals(lanc.id)))
+                .write(LancamentosFinanceirosTableCompanion(
+              deletedAt: Value(now),
+              updatedAt: Value(now),
+              updatedBy: Value(activeUser),
+              syncStatus: const Value(SyncStatus.pending),
+            ));
+
+            try {
+              await outboxService.enqueue(
+                entity: 'lancamento_financeiro',
+                entityId: lanc.id,
+                action: 'DELETE',
+                payload: {
+                  'id': lanc.id,
+                  'tenantId': ordem.tenantId,
+                  'deletedAt': now.toIso8601String(),
+                },
+                version: 1,
+              );
+            } catch (err) {
+              debugPrint('[PEDIDOS] Erro ao colocar estorno financeiro no outbox: $err');
+            }
+          }
+        } else if (ordem.status == StatusOrdemPreparo.cancelado && novoStatus != StatusOrdemPreparo.cancelado) {
+          // Reversão do cancelamento: reativa os lançamentos que estavam cancelados para este pedido
+          final lancamentos = await (db.select(db.lancamentosFinanceirosTable)
+                ..where((t) =>
+                    t.tenantId.equals(ordem.tenantId) &
+                    t.pedidoId.equals(ordem.pedidoId) &
+                    t.deletedAt.isNotNull()))
+              .get();
+
+          for (final lanc in lancamentos) {
+            await (db.update(db.lancamentosFinanceirosTable)
+                  ..where((t) => t.id.equals(lanc.id)))
+                .write(LancamentosFinanceirosTableCompanion(
+              deletedAt: const Value(null),
+              updatedAt: Value(now),
+              updatedBy: Value(activeUser),
+              syncStatus: const Value(SyncStatus.pending),
+            ));
+
+            try {
+              await outboxService.enqueue(
+                entity: 'lancamento_financeiro',
+                entityId: lanc.id,
+                action: 'update',
+                payload: {
+                  'id': lanc.id,
+                  'tenantId': ordem.tenantId,
+                  'deletedAt': null,
+                  'updatedAt': now.toIso8601String(),
+                },
+                version: 1,
+              );
+            } catch (err) {
+              debugPrint('[PEDIDOS] Erro ao colocar reativação financeira no outbox: $err');
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[PEDIDOS] Erro ao processar estorno/reativação financeira: $e');
+      }
+
       // Dispara recálculo de reservas e expedição física no EstoqueController
       final estoqueCtrl = DependencyInjection().get<EstoqueController>();
       await estoqueCtrl.recalcularReservasEEstoques();
@@ -579,19 +874,85 @@ class CentralPedidosController extends ChangeNotifier {
       debugPrint('[PEDIDOS] Erro ao sincronizar status com estoque: $e');
     }
 
-    final isRev = isReversao(ordem, novoStatus);
-    final titulo = isRev ? 'Status Revertido' : 'Status alterado';
-    final descricao = isRev
-        ? 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}". Motivo: $motivo'
-        : 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}"';
+    // Resolve o nome do operador primeiro (usado em titulo, descricao e audit)
+    String? operadorNome;
+    try {
+      final tenantCtx = DependencyInjection().get<TenantContext>();
+      if (tenantCtx.hasContext) {
+        operadorNome = tenantCtx.usuario.nome;
+      }
+    } catch (_) {}
 
-    await _ordemRepo.registrarHistorico(ordem.id, titulo, descricao);
+    final isRev = isReversao(ordem, novoStatus);
+    final isCancelamento = novoStatus == StatusOrdemPreparo.cancelado;
+    final titulo = isCancelamento
+        ? 'Pedido Cancelado'
+        : (isRev ? 'Status Revertido' : 'Status Atualizado');
+    final descricao = isCancelamento
+        ? 'Cancelado por "${operadorNome ?? 'Operador'}". Motivo: ${motivo ?? 'N\u00e3o informado'}'
+        : (isRev
+            ? 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}". Motivo: $motivo'
+            : 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}"');
+
+    await _ordemRepo.registrarHistorico(
+      ordem.id,
+      titulo,
+      descricao,
+      operadorNome: operadorNome,
+    );
+
+    // Grava no audit log quando há motivo (cancelamentos e reversões)
+    if (motivo != null && motivo.isNotEmpty) {
+      try {
+        final db = DependencyInjection().get<FincoreDatabase>();
+        final auditNow = DateTime.now().toUtc();
+        final auditId = '${ordem.id}-${auditNow.millisecondsSinceEpoch}';
+        await db.into(db.auditLogsTable).insertOnConflictUpdate(
+          AuditLogsTableCompanion.insert(
+            id: auditId,
+            targetEntity: 'OrdemPreparo',
+            entityId: ordem.id,
+            tenantId: ordem.tenantId,
+            userId: operadorNome ?? 'sistema',
+            action: isCancelamento ? 'cancelamento' : 'reversao',
+            timestamp: auditNow,
+            reason: Value(motivo),
+            userName: Value(operadorNome),
+            entityDisplayName: Value('Pedido ${ordem.pedidoId}'),
+            entityModule: const Value('KDS'),
+          ),
+        );
+      } catch (e) {
+        debugPrint('[PEDIDOS] Erro ao gravar audit log: $e');
+      }
+    }
 
     // Atualiza localmente sem recarregar tudo
     final idx = _todasOrdens.indexWhere((o) => o.id == ordem.id);
     if (idx != -1) {
       _todasOrdens[idx] = updated;
+    } else {
+      // Ordem não estava na lista (ex: vinha de outra data): adiciona
+      _todasOrdens = [..._todasOrdens, updated];
     }
+
+    // Se reverteu para status ativo e a ordem é de outra data, navega para essa data
+    final statusAtivos = {
+      StatusOrdemPreparo.pendente,
+      StatusOrdemPreparo.emPreparo,
+      StatusOrdemPreparo.pronto,
+    };
+    if (statusAtivos.contains(novoStatus)) {
+      final parsed = DadosOrdemKanban.fromOrdem(ordem);
+      final dataOperacional = parsed.dataAgendada ?? ordem.criadaEm.toLocal();
+      final isOutraData = dataOperacional.year != _selectedDate.year ||
+          dataOperacional.month != _selectedDate.month ||
+          dataOperacional.day != _selectedDate.day;
+      if (isOutraData) {
+        _selectedDate = DateTime(dataOperacional.year, dataOperacional.month, dataOperacional.day);
+      }
+    }
+
     _applyFilters();
     notifyListeners();
   }
@@ -613,9 +974,184 @@ class CentralPedidosController extends ChangeNotifier {
   String formattedDate() =>
       DateFormat('dd/MM/yyyy').format(_selectedDate);
 
+  // ── Controle de Produção por Janelas Operacionais ────────────────────────
+  
+  // Mapa em memória de quantidades produzidas: chave="${janela.millisecondsSinceEpoch}_${produtoId}"
+  final Map<String, double> _produzidoJanelas = {};
+
+  double getQuantidadeProduzida(DateTime janela, String produtoId) {
+    final chave = "${janela.millisecondsSinceEpoch}_$produtoId";
+    return _produzidoJanelas[chave] ?? 0;
+  }
+
+  void registrarProduzido(DateTime janela, String produtoId, double quantidade, double totalPlanejado) {
+    final chave = "${janela.millisecondsSinceEpoch}_$produtoId";
+    final atual = _produzidoJanelas[chave] ?? 0;
+    _produzidoJanelas[chave] = (atual + quantidade).clamp(0.0, totalPlanejado);
+    notifyListeners();
+  }
+
+  void marcarProdutoConcluido(DateTime janela, String produtoId, double totalPlanejado) {
+    final chave = "${janela.millisecondsSinceEpoch}_$produtoId";
+    _produzidoJanelas[chave] = totalPlanejado;
+    notifyListeners();
+  }
+
+  void reiniciarProdutoProduzido(DateTime janela, String produtoId) {
+    final chave = "${janela.millisecondsSinceEpoch}_$produtoId";
+    _produzidoJanelas.remove(chave);
+    notifyListeners();
+  }
+
+  DateTime _arredondarJanela(DateTime dt) {
+    final minutos = dt.minute;
+    int janelaMinuto;
+    int janelaHora = dt.hour;
+    if (minutos < 15) {
+      janelaMinuto = 0;
+    } else if (minutos < 45) {
+      janelaMinuto = 30;
+    } else {
+      janelaMinuto = 0;
+      janelaHora = (janelaHora + 1) % 24;
+    }
+    return DateTime(dt.year, dt.month, dt.day, janelaHora, janelaMinuto);
+  }
+
+  List<JanelaProducao> get janelasProducao {
+    // Apenas pedidos que estão pendentes ou em preparo geram demanda operacional de produção física.
+    final ordensAtivas = _filteredOrdens.where((o) => 
+      o.status == StatusOrdemPreparo.pendente || 
+      o.status == StatusOrdemPreparo.emPreparo
+    ).toList();
+
+    if (ordensAtivas.isEmpty) return [];
+
+    // Agrupar ordens por janela de entrega arredondada
+    final agrupado = <DateTime, List<OrdemPreparo>>{};
+    for (final o in ordensAtivas) {
+      final deadline = calculateDeadline(o);
+      final janela = _arredondarJanela(deadline.horarioEntrega.toLocal());
+      agrupado.putIfAbsent(janela, () => []).add(o);
+    }
+
+    // Ordenar as janelas cronologicamente
+    final janelasOrdenadas = agrupado.keys.toList()..sort();
+
+    final resultado = <JanelaProducao>[];
+    // Pegar no máximo as duas primeiras janelas (Agora e Próxima)
+    final limite = janelasOrdenadas.length > 2 ? 2 : janelasOrdenadas.length;
+
+    for (int i = 0; i < limite; i++) {
+      final janelaTime = janelasOrdenadas[i];
+      final ordensDaJanela = agrupado[janelaTime]!;
+
+      // Consolidar produtos
+      final produtosConsolidados = <String, _Consolidado>{};
+      for (final o in ordensDaJanela) {
+        for (final item in o.itens) {
+          produtosConsolidados.update(
+            item.produtoId,
+            (existente) => existente.copyWith(
+              quantidadePlanejada: existente.quantidadePlanejada + item.quantidade,
+            ),
+            ifAbsent: () => _Consolidado(
+              produtoId: item.produtoId,
+              nomeProduto: item.nomeProduto,
+              quantidadePlanejada: item.quantidade,
+              unidade: item.unidade,
+            ),
+          );
+        }
+      }
+
+      final itensJanela = produtosConsolidados.values.map((c) {
+        final prodQty = getQuantidadeProduzida(janelaTime, c.produtoId);
+        return ItemJanelaProducao(
+          produtoId: c.produtoId,
+          nomeProduto: c.nomeProduto,
+          quantidadePlanejada: c.quantidadePlanejada,
+          quantidadeProduzida: prodQty,
+          unidade: c.unidade,
+        );
+      }).toList();
+
+      // Ordenar itens da janela por quantidade planejada decrescente
+      itensJanela.sort((a, b) => b.quantidadePlanejada.compareTo(a.quantidadePlanejada));
+
+      resultado.add(
+        JanelaProducao(
+          horarioEntrega: janelaTime,
+          itens: itensJanela,
+          totalPedidos: ordensDaJanela.length,
+        ),
+      );
+    }
+
+    return resultado;
+  }
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
     super.dispose();
+  }
+}
+
+// ── Classes Auxiliares de Fila Dinâmica de Produção ──────────────────────────
+
+class ItemJanelaProducao {
+  final String produtoId;
+  final String nomeProduto;
+  final double quantidadePlanejada;
+  final double quantidadeProduzida;
+  final String unidade;
+
+  double get quantidadeRestante => (quantidadePlanejada - quantidadeProduzida).clamp(0.0, quantidadePlanejada);
+  bool get concluida => quantidadeRestante <= 0;
+
+  const ItemJanelaProducao({
+    required this.produtoId,
+    required this.nomeProduto,
+    required this.quantidadePlanejada,
+    required this.quantidadeProduzida,
+    required this.unidade,
+  });
+}
+
+class JanelaProducao {
+  final DateTime horarioEntrega;
+  final List<ItemJanelaProducao> itens;
+  final int totalPedidos;
+
+  bool get concluida => itens.every((i) => i.concluida);
+
+  const JanelaProducao({
+    required this.horarioEntrega,
+    required this.itens,
+    required this.totalPedidos,
+  });
+}
+
+class _Consolidado {
+  final String produtoId;
+  final String nomeProduto;
+  final double quantidadePlanejada;
+  final String unidade;
+
+  const _Consolidado({
+    required this.produtoId,
+    required this.nomeProduto,
+    required this.quantidadePlanejada,
+    required this.unidade,
+  });
+
+  _Consolidado copyWith({double? quantidadePlanejada}) {
+    return _Consolidado(
+      produtoId: produtoId,
+      nomeProduto: nomeProduto,
+      quantidadePlanejada: quantidadePlanejada ?? this.quantidadePlanejada,
+      unidade: unidade,
+    );
   }
 }

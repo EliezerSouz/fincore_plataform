@@ -211,7 +211,7 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
                     focusNode: widget.searchFocusNode,
                     style: const TextStyle(color: Colors.white),
                     decoration: const InputDecoration(
-                      hintText: 'Pesquise por nome ou SKU do produto [F1]',
+                      hintText: 'Pesquise por nome ou SKU do produto [F2]',
                       hintStyle: TextStyle(color: FincoreColors.textMuted),
                       prefixIcon: Icon(Icons.search, color: FincoreColors.textMuted),
                       border: InputBorder.none,
@@ -519,6 +519,9 @@ class _QuantidadeDialogState extends State<_QuantidadeDialog> {
     _focusNode = FocusNode();
     _textCtrl.addListener(() {
       setState(() {});
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
     });
   }
 

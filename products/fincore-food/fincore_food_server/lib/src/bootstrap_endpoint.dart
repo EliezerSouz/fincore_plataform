@@ -1,4 +1,4 @@
-﻿import 'package:serverpod/serverpod.dart';
+import 'package:serverpod/serverpod.dart';
 import 'generated/protocol.dart';
 import 'middleware/auth_middleware.dart';
 
@@ -28,9 +28,11 @@ class BootstrapEndpoint extends Endpoint {
     if (usuario == null) {
       final username = email != null ? email.split('@').first : 'usuario';
       final nome = username.replaceAll('.', ' ');
+      // Usuário auth ainda não tem perfil no banco — cria sem activeTenantId.
+      // O activeTenantId será preenchido quando criar ou entrar em uma empresa.
       usuario = Usuario(
         id: userUuid,
-        tenantId: '00000000-0000-4000-a000-000000000001',
+        activeTenantId: null,
         authUserId: usuarioId,
         username: username,
         email: email,
@@ -53,18 +55,43 @@ class BootstrapEndpoint extends Endpoint {
     Empresa? empresa;
     UuidValue? tenantUuid;
 
-    // Tentar carregar a empresa de cada membro até achar a empresa cadastrada
-    for (final m in membrosDoUsuario) {
-      final e = await Empresa.db.findById(session, m.tenantId);
+    // Prioridade 1: X-Tenant-ID do cabeçalho (troca explícita de empresa)
+    final tenantHeader = session.context['tenantId'] as String?;
+    if (tenantHeader != null && tenantHeader.isNotEmpty) {
+      final headerUuid = UuidValue.fromString(tenantHeader);
+      final e = await Empresa.db.findById(session, headerUuid);
       if (e != null) {
         empresa = e;
-        tenantUuid = m.tenantId;
-        session.log('[BOOTSTRAP] Empresa encontrada via MembroEmpresa: id=${e.id}, nome=${e.nomeFantasia}', level: LogLevel.info);
-        break;
+        tenantUuid = headerUuid;
+        session.log('[BOOTSTRAP] Empresa resolvida via X-Tenant-ID: id=${e.id}, nome=${e.nomeFantasia}', level: LogLevel.info);
       }
     }
 
-    // Se não encontrou via membro, busca por email da empresa ou criado por este usuário
+    // Prioridade 2: activeTenantId do usuário (última empresa que ele usou)
+    final activeTid = usuario?.activeTenantId;
+    if (empresa == null && activeTid != null) {
+      final e = await Empresa.db.findById(session, activeTid);
+      if (e != null) {
+        empresa = e;
+        tenantUuid = activeTid;
+        session.log('[BOOTSTRAP] Empresa resolvida via activeTenantId: id=${e.id}, nome=${e.nomeFantasia}', level: LogLevel.info);
+      }
+    }
+
+    // Prioridade 3: primeiro membro ativo encontrado
+    if (empresa == null) {
+      for (final m in membrosDoUsuario) {
+        final e = await Empresa.db.findById(session, m.tenantId);
+        if (e != null) {
+          empresa = e;
+          tenantUuid = m.tenantId;
+          session.log('[BOOTSTRAP] Empresa resolvida via MembroEmpresa: id=${e.id}, nome=${e.nomeFantasia}', level: LogLevel.info);
+          break;
+        }
+      }
+    }
+
+    // Prioridade 4: fallback por email ou createdBy
     if (empresa == null && email != null && email.isNotEmpty) {
       empresa = await Empresa.db.findFirstRow(
         session,
@@ -72,7 +99,7 @@ class BootstrapEndpoint extends Endpoint {
       );
       if (empresa != null) {
         tenantUuid = empresa.id;
-        session.log('[BOOTSTRAP] Empresa encontrada via Email/CreatedBy: id=${empresa.id}, nome=${empresa.nomeFantasia}', level: LogLevel.info);
+        session.log('[BOOTSTRAP] Empresa resolvida via Email/CreatedBy: id=${empresa.id}, nome=${empresa.nomeFantasia}', level: LogLevel.info);
       }
     }
 

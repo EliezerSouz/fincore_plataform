@@ -212,12 +212,55 @@ class SupabaseSyncService {
         }
       }
 
+      // Sanitizar campo 'status' para tabela pedido: o CHECK CONSTRAINT
+      // pedido_status_check exige snake_case ('em_preparo'), mas o Dart enum
+      // .name retorna camelCase ('emPreparo'). Tradução defensiva aqui.
+      if (tableName == 'pedido' && payload.containsKey('status')) {
+        const statusCamelToSnake = {
+          'emPreparo': 'em_preparo',
+          'pendente': 'confirmado',
+        };
+        final rawStatus = payload['status'] as String? ?? '';
+        if (statusCamelToSnake.containsKey(rawStatus)) {
+          payload['status'] = statusCamelToSnake[rawStatus];
+          LogService.instance.debug(
+            LogModule.sync,
+            'Status sanitizado: "$rawStatus" → "${payload['status']}" (pedido_status_check)',
+          );
+        }
+      }
+
       if (entry.action == 'DELETE') {
         await _supabase
             .from(tableName)
             .update({'deletedAt': DateTime.now().toUtc().toIso8601String()})
             .eq('id', entry.entityId)
             .eq('tenantId', _context.tenantId);
+      } else if (entry.action.toLowerCase() == 'update') {
+        final idCol = tableName == 'empresa_configuracao' ? 'tenantId' : 'id';
+        int attempts = 0;
+        while (attempts < 5) {
+          try {
+            await _supabase
+                .from(tableName)
+                .update(payload)
+                .eq(idCol, entry.entityId)
+                .eq('tenantId', _context.tenantId);
+            break;
+          } on PostgrestException catch (e) {
+            attempts++;
+            if ((e.code == 'PGRST204' || e.message.contains("Could not find the '")) && attempts < 5) {
+              final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(e.message);
+              if (match != null) {
+                final missingCol = match.group(1)!;
+                throw StateError(
+                  'Schema remoto incompatível: coluna "$missingCol" ausente em "$tableName".',
+                );
+              }
+            }
+            rethrow;
+          }
+        }
       } else {
         final conflictCol = tableName == 'empresa_configuracao' ? 'tenantId' : 'id';
         int attempts = 0;
@@ -234,12 +277,12 @@ class SupabaseSyncService {
               final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(e.message);
               if (match != null) {
                 final missingCol = match.group(1)!;
-                LogService.instance.warning(
-                  LogModule.sync,
-                  '[SCHEMA FALLBACK] Coluna "$missingCol" ausente na tabela remota "$tableName" do Supabase. Removendo do payload para concluir o envio local.',
+                // Não descarte atributos de negócio para "fazer o sync passar".
+                // O chamador manterá a entrada no Outbox para retry após a
+                // migração remota, preservando a operação inteira.
+                throw StateError(
+                  'Schema remoto incompatível: coluna "$missingCol" ausente em "$tableName".',
                 );
-                payload.remove(missingCol);
-                continue;
               }
             }
             rethrow;
@@ -390,7 +433,9 @@ class SupabaseSyncService {
       final dateColumn = tableName == 'usuarios' ? 'atualizadoEm' : 'updatedAt';
       final rows = await (tableName == 'empresa'
               ? queryBuilder.eq('id', tenantId)
-              : queryBuilder.eq('tenantId', tenantId))
+              : tableName == 'usuarios'
+                  ? queryBuilder.eq('activeTenantId', tenantId)
+                  : queryBuilder.eq('tenantId', tenantId))
           .gte(dateColumn, since.toIso8601String());
 
       if (rows.isEmpty) {
@@ -952,7 +997,7 @@ class SupabaseSyncService {
         await db.into(db.usuariosTable).insertOnConflictUpdate(
               UsuariosTableCompanion.insert(
                 id: row['id'] as String,
-                tenantId: Value(row['tenantId'] as String?),
+                tenantId: Value(row['activeTenantId'] as String? ?? row['tenantId'] as String?),
                 authUserId: Value(row['authUserId'] as String?),
                 username: row['username'] as String? ?? '',
                 email: Value(row['email'] as String?),
@@ -1056,8 +1101,16 @@ class SupabaseSyncService {
             tenantId: row['tenantId'] as String,
             produtoId: row['produtoId'] as String,
             quantidadeAtual: Value(row['quantidadeAtual'] as int? ?? 0),
+            quantidadeReservada: Value(row['quantidadeReservada'] as int? ?? 0),
+            quantidadeSeguranca: Value(row['quantidadeSeguranca'] as int? ?? 0),
             quantidadeMinima: Value(row['quantidadeMinima'] as int? ?? 0),
+            quantidadeCritica: Value(row['quantidadeCritica'] as int? ?? 0),
             quantidadeMaxima: Value(row['quantidadeMaxima'] as int? ?? 9999),
+            quantidadeProducaoLote: Value(row['quantidadeProducaoLote'] as int? ?? 100),
+            diasCoberturaAlvo: Value(row['diasCoberturaAlvo'] as int? ?? 3),
+            capacidadeCampanha: Value(row['capacidadeCampanha'] as int? ?? 0),
+            estrategiaProducao: Value(row['estrategiaProducao'] as String? ?? 'concentrada'),
+            tempoPreparacao: Value(row['tempoPreparacao'] as int? ?? 0),
             unidade: Value(row['unidade'] as String? ?? 'un'),
             syncVersion: Value(row['syncVersion'] as int? ?? 1),
             syncStatus: SyncStatus.synced,
@@ -1084,9 +1137,12 @@ class SupabaseSyncService {
             quantidade: row['quantidade'] as int? ?? 0,
             quantidadeAntes: row['quantidadeAntes'] as int? ?? 0,
             quantidadeDepois: row['quantidadeDepois'] as int? ?? 0,
+            quantidadeReservadaAntes: Value(row['quantidadeReservadaAntes'] as int?),
+            quantidadeReservadaDepois: Value(row['quantidadeReservadaDepois'] as int?),
             motivo: Value(row['motivo'] as String? ?? ''),
             operadorId: Value(row['operadorId'] as String?),
             dataHora: _parseDate(row['dataHora'] as String?) ?? DateTime.now(),
+            dataEntregaPrevista: Value(_parseDate(row['dataEntregaPrevista'] as String?)),
             syncVersion: Value(row['syncVersion'] as int? ?? 1),
             syncStatus: SyncStatus.synced,
             lastSyncedAt: Value(DateTime.now().toUtc()),

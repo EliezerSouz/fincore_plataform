@@ -429,7 +429,6 @@ class _OnboardingEndpoint {
 
   _i3.Future<bool> criarEmpresa(
     _i1.TestSessionBuilder sessionBuilder, {
-    required String tenantId,
     required String razaoSocial,
     required String nomeFantasia,
     required String documentoFiscal,
@@ -451,7 +450,6 @@ class _OnboardingEndpoint {
           endpointPath: 'onboarding',
           methodName: 'criarEmpresa',
           parameters: _i1.testObjectToJson({
-            'tenantId': tenantId,
             'razaoSocial': razaoSocial,
             'nomeFantasia': nomeFantasia,
             'documentoFiscal': documentoFiscal,
@@ -467,6 +465,62 @@ class _OnboardingEndpoint {
           _localUniqueSession,
           _localCallContext.arguments,
         ) as _i3.Future<bool>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<List<_i8.Empresa>> minhasEmpresas(
+      _i1.TestSessionBuilder sessionBuilder) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+        endpoint: 'onboarding',
+        method: 'minhasEmpresas',
+      );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'onboarding',
+          methodName: 'minhasEmpresas',
+          parameters: _i1.testObjectToJson({}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue = await (_localCallContext.method.call(
+          _localUniqueSession,
+          _localCallContext.arguments,
+        ) as _i3.Future<List<_i8.Empresa>>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i5.BootstrapPayload?> trocarEmpresa(
+    _i1.TestSessionBuilder sessionBuilder,
+    String novoTenantId,
+  ) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+        endpoint: 'onboarding',
+        method: 'trocarEmpresa',
+      );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'onboarding',
+          methodName: 'trocarEmpresa',
+          parameters: _i1.testObjectToJson({'novoTenantId': novoTenantId}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue = await (_localCallContext.method.call(
+          _localUniqueSession,
+          _localCallContext.arguments,
+        ) as _i3.Future<_i5.BootstrapPayload?>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

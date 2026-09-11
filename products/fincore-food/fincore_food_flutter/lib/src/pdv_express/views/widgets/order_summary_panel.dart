@@ -22,6 +22,7 @@ class OrderSummaryPanel extends StatelessWidget {
     final subtotalCentavos = controller.cart.fold(0, (sum, i) => sum + i.totalInCents);
     final taxaCentavos = controller.entrega.tipo == 'Entrega' ? controller.entrega.taxaEntregaCentavos : 0;
     final totalCentavos = controller.totalInCents;
+    final passo = controller.passoAtual;
 
     return Container(
       width: 380,
@@ -39,69 +40,84 @@ class OrderSummaryPanel extends StatelessWidget {
           _CustomerSelectorCard(controller: controller),
           const SizedBox(height: 10),
 
-          // ── 2. Lista Limpa de Itens do Carrinho ────────────────────────
-          Expanded(
-            child: controller.cart.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.shopping_cart_outlined,
-                            size: 32, color: FincoreColors.textMuted),
-                        SizedBox(height: 4),
-                        Text(
-                          'Carrinho vazio',
-                          style: TextStyle(
-                            color: FincoreColors.textMuted,
-                            fontSize: 12,
+          // ── 2. Lista Limpa de Itens do Carrinho (Apenas se Etapa > 0) ──
+          if (passo > 0) ...[
+            Expanded(
+              child: controller.cart.isEmpty
+                  ? const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.shopping_cart_outlined,
+                              size: 32, color: FincoreColors.textMuted),
+                          SizedBox(height: 4),
+                          Text(
+                            'Carrinho vazio',
+                            style: TextStyle(
+                              color: FincoreColors.textMuted,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: controller.cart.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) {
+                        final item = controller.cart[index];
+                        return _CartItemRow(
+                          item: item,
+                          onDecrement: () {
+                            controller.updateQuantity(
+                              item.productId,
+                              item.quantity - 1,
+                            );
+                          },
+                          onIncrement: () {
+                            controller.updateQuantity(
+                              item.productId,
+                              item.quantity + 1,
+                            );
+                          },
+                          onDelete: () {
+                            controller.updateQuantity(
+                              item.productId,
+                              0,
+                            );
+                          },
+                          onEditQty: () {
+                            _showEditQuantityDialog(context, item, controller);
+                          },
+                        );
+                      },
                     ),
-                  )
-                : ListView.separated(
-                    itemCount: controller.cart.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (context, index) {
-                      final item = controller.cart[index];
-                      return _CartItemRow(
-                        item: item,
-                        onDecrement: () {
-                          controller.updateQuantity(
-                            item.productId,
-                            item.quantity - 1,
-                          );
-                        },
-                        onIncrement: () {
-                          controller.updateQuantity(
-                            item.productId,
-                            item.quantity + 1,
-                          );
-                        },
-                      );
-                    },
-                  ),
-          ),
+            ),
+            const SizedBox(height: 12),
+            const Divider(color: FincoreColors.border, height: 1),
+            const SizedBox(height: 12),
+          ] else ...[
+            // Na Etapa 1, apenas um spacer para empurrar o CTA para o rodapé
+            const Spacer(),
+          ],
 
-          const SizedBox(height: 12),
-          const Divider(color: FincoreColors.border, height: 1),
-          const SizedBox(height: 12),
+          // ── 3. Resumo de Totais (Apenas se Etapa > 0) ─────────────────
+          if (passo > 0) ...[
+            _TotalsSection(
+              subtotalCentavos: subtotalCentavos,
+              taxaCentavos: taxaCentavos,
+              totalCentavos: totalCentavos,
+            ),
+            const SizedBox(height: 16),
+          ],
 
-          // ── 3. Resumo de Totais (Subtotal, Taxa, TOTAL GIGANTE) ───────
-          _TotalsSection(
-            subtotalCentavos: subtotalCentavos,
-            taxaCentavos: taxaCentavos,
-            totalCentavos: totalCentavos,
-          ),
+          // ── 4. Método de Pagamento (Apenas se Etapa 3/Pagamento) ──────
+          if (passo == 2) ...[
+            _PaymentMethodSelector(controller: controller),
+            const SizedBox(height: 16),
+          ],
 
-          const SizedBox(height: 16),
-
-          // ── 4. Método de Pagamento (Pills: PIX, Dinheiro, Cartão) ───────
-          _PaymentMethodSelector(controller: controller),
-
-          const SizedBox(height: 16),
-
-          // ── 5. Botão CTA Principal "Avançar" ──────────────────────────
+          // ── 5. Botão CTA Principal Dinâmico ──────────────────────────
           SizedBox(
             height: 48,
             child: ElevatedButton(
@@ -116,8 +132,12 @@ class OrderSummaryPanel extends StatelessWidget {
               ),
               onPressed: onNext,
               child: Text(
-                controller.passoAtual == 2 ? 'Finalizar Venda [F12]' : 'Avançar',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                () {
+                  if (passo == 0) return 'Avançar para Produtos [F12] →';
+                  if (passo == 1) return 'Avançar para Pagamento [F12] →';
+                  return 'Finalizar Pedido [F12] ⚡';
+                }(),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
               ),
             ),
           ),
@@ -225,17 +245,18 @@ class _CustomerSelectorCard extends StatelessWidget {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 12),
-
-        const Text(
-          'ITENS NO CARRINHO',
-          style: TextStyle(
-            color: FincoreColors.textMuted,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.0,
+        if (controller.passoAtual > 0) ...[
+          const SizedBox(height: 12),
+          const Text(
+            'ITENS NO CARRINHO',
+            style: TextStyle(
+              color: FincoreColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.0,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -246,11 +267,15 @@ class _CartItemRow extends StatelessWidget {
   final PdvItem item;
   final VoidCallback onDecrement;
   final VoidCallback onIncrement;
+  final VoidCallback onDelete;
+  final VoidCallback onEditQty;
 
   const _CartItemRow({
     required this.item,
     required this.onDecrement,
     required this.onIncrement,
+    required this.onDelete,
+    required this.onEditQty,
   });
 
   @override
@@ -285,20 +310,51 @@ class _CartItemRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  '${item.quantity.toInt()} un × R\$ $unitPriceStr',
-                  style: TextStyle(
-                    color: FincoreColors.primary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Row(
+                  children: [
+                    InkWell(
+                      onTap: onEditQty,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: FincoreColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${item.quantity % 1 == 0 ? item.quantity.toInt() : item.quantity} un',
+                              style: TextStyle(
+                                color: FincoreColors.primary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 3),
+                            Icon(Icons.edit, size: 10, color: FincoreColors.primary),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '× R\$ $unitPriceStr',
+                      style: const TextStyle(
+                        color: FincoreColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           const SizedBox(width: 8),
 
-          // Botões de Quantidade
+          // Botões de Quantidade e Lixeira
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -311,9 +367,27 @@ class _CartItemRow extends StatelessWidget {
                 icon: Icons.add,
                 onTap: onIncrement,
               ),
+              const SizedBox(width: 6),
+              InkWell(
+                onTap: onDelete,
+                borderRadius: BorderRadius.circular(4),
+                child: Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.danger.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: FincoreColors.danger.withValues(alpha: 0.2)),
+                  ),
+                  child: const Icon(
+                    Icons.delete_outline,
+                    color: FincoreColors.danger,
+                    size: 16,
+                  ),
+                ),
+              ),
             ],
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
 
           // Preço Total do Item
           SizedBox(
@@ -526,4 +600,88 @@ class _PaymentMethodSelector extends StatelessWidget {
       ],
     );
   }
+}
+
+void _showEditQuantityDialog(
+  BuildContext context,
+  PdvItem item,
+  PdvExpressController controller,
+) {
+  final textCtrl = TextEditingController(text: item.quantity % 1 == 0 ? item.quantity.toInt().toString() : item.quantity.toString());
+  showDialog(
+    context: context,
+    builder: (ctx) {
+      return AlertDialog(
+        backgroundColor: FincoreColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: FincoreColors.border, width: 1),
+        ),
+        title: const Text(
+          'EDITAR QUANTIDADE',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              item.name.toUpperCase(),
+              style: const TextStyle(
+                color: FincoreColors.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: textCtrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Digite a quantidade',
+                hintStyle: const TextStyle(color: FincoreColors.textMuted),
+                filled: true,
+                fillColor: FincoreColors.background,
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: FincoreColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: FincoreColors.primary),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('CANCELAR', style: TextStyle(color: FincoreColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FincoreColors.primary,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () {
+              final newQty = double.tryParse(textCtrl.text.replaceAll(',', '.'));
+              if (newQty != null) {
+                controller.updateQuantity(item.productId, newQty);
+              }
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('SALVAR', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      );
+    },
+  );
 }

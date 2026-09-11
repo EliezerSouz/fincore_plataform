@@ -19,16 +19,39 @@ class PrintTemplateEngine {
     required PrintData data,
     required PrintConfig config,
   }) {
+    final lines = <String>[];
+    final w = config.larguraPapel == 58 ? 32 : 48;
+
+    if (data.status?.toLowerCase() == 'cancelado') {
+      lines.add('=' * w);
+      lines.add('[BOLD_ON]' + '*** PEDIDO CANCELADO ***'.padLeft((w + 24) ~/ 2).padRight(w) + '[BOLD_OFF]');
+      lines.add('=' * w);
+      lines.add('');
+    }
+
     switch (via) {
       case PrintVia.cliente:
-        return _renderCliente(data, config);
+        lines.addAll(_renderCliente(data, config));
+        break;
       case PrintVia.cozinha:
-        return _renderCozinha(data, config);
+        lines.addAll(_renderCozinha(data, config));
+        break;
       case PrintVia.balcao:
-        return _renderBalcao(data, config);
+        lines.addAll(_renderBalcao(data, config));
+        break;
       case PrintVia.expedicao:
-        return _renderExpedicao(data, config);
+        lines.addAll(_renderExpedicao(data, config));
+        break;
     }
+
+    if (data.status?.toLowerCase() == 'cancelado') {
+      lines.add('');
+      lines.add('=' * w);
+      lines.add('[BOLD_ON]' + '*** PEDIDO CANCELADO ***'.padLeft((w + 24) ~/ 2).padRight(w) + '[BOLD_OFF]');
+      lines.add('=' * w);
+    }
+
+    return lines;
   }
 
   // ─── Via do Cliente ───────────────────────────────────────────────
@@ -38,6 +61,7 @@ class PrintTemplateEngine {
     final w = config.larguraPapel == 58 ? 32 : 48;
     final divSingle = '-' * w;
 
+    final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
     // 1. Cabeçalho
     lines.addAll(
       PrintHeader.render(
@@ -47,80 +71,69 @@ class PrintTemplateEngine {
         endereco: config.enderecoEmpresa,
         tipoLogistica: data.tipoLogistica,
         dataHora: data.dataHora,
-        shortId: data.shortId,
+        idExibicao: idExibicao,
         width: w,
       ),
     );
 
     // 2. Cliente
-    lines.add('[BOLD_ON]CLIENTE[BOLD_OFF]');
-    if ((data.clienteNome ?? '').isNotEmpty) {
-      lines.add(data.clienteNome!);
-    }
+    lines.add('[BOLD_ON]CLIENTE:[BOLD_OFF] ${data.clienteNome ?? "Consumidor"}');
     final formattedPhone = PrintPhone.format(data.clienteTelefone ?? '');
     if (formattedPhone.isNotEmpty) {
-      lines.add(formattedPhone);
+      lines.add('[BOLD_ON]TELEFONE:[BOLD_OFF] $formattedPhone');
     }
 
     // 3. Endereço (somente se Entrega/Delivery)
     if (data.tipoLogistica.toLowerCase().contains('entrega') || 
         data.tipoLogistica.toLowerCase().contains('delivery')) {
-      lines.add('[BOLD_ON]ENDERECO[BOLD_OFF]');
-      lines.addAll(
-        PrintAddress.format(
-          logradouro: data.endereco ?? '',
-          bairro: data.bairro ?? '',
-          referencia: data.referencia,
-        ),
+      final addressLines = PrintAddress.format(
+        logradouro: data.endereco ?? '',
+        bairro: data.bairro ?? '',
+        cidade: data.cidade ?? '',
+        uf: data.uf ?? '',
+        referencia: data.referencia,
       );
+      if (addressLines.isNotEmpty) {
+        final fullAddressText = 'ENDERECO: ' + addressLines.map((l) => l.trim()).join(' - ');
+        final wrappedLines = _wrapText(fullAddressText, w);
+        for (final line in wrappedLines) {
+          lines.add('[BOLD_ON]$line[BOLD_OFF]');
+        }
+      }
     }
     lines.add(divSingle);
 
-    // 4. Resumo do Pedido (Salgados e Sabores)
-    final totalSalgados = data.itens.fold<double>(0, (sum, i) => sum + i.quantidade);
-    final totalSabores = data.itens.length;
-    lines.add('[BOLD_ON]RESUMO DO PEDIDO[BOLD_OFF]');
-    lines.add('${totalSalgados.toStringAsFixed(0)} Unidades');
-    lines.add('$totalSabores Sabores');
-    lines.add(divSingle);
+    // 4. (Removido: resumo de unidades/sabores — mantém cupom enxuto)
 
     // 5. Itens (Com preenchimento de pontos e em negrito para destaque)
+    lines.add('[BOLD_ON]ITENS:[BOLD_OFF]');
     for (final i in data.itens) {
       final qtyStr = i.quantidade % 1 == 0 
           ? i.quantidade.toStringAsFixed(0) 
           : i.quantidade.toStringAsFixed(1);
-      final left = '${qtyStr}x ${i.nome}';
+      final left = '  ${qtyStr}x ${i.nome}';
       final right = PrintMoney.format(i.totalCentavos);
       final dotsCount = w - left.length - right.length;
-      final dots = dotsCount > 0 ? '.' * dotsCount : ' ';
-      lines.add('[BOLD_ON]$left$dots$right[BOLD_OFF]');
+      final dots = dotsCount > 0 ? ' ' * dotsCount : ' ';
+      lines.add('$left$dots$right');
       
       if ((i.observacao ?? '').isNotEmpty) {
         lines.add('   OBS: ${i.observacao}');
       }
     }
-
-    // 6. Observações Gerais (Somente se não vazio e diferente do endereço)
-    final obs = (data.observacao ?? '').trim();
-    final end = (data.endereco ?? '').trim();
-    if (obs.isNotEmpty && obs != end) {
-      lines.add(divSingle);
-      lines.add('[BOLD_ON]OBSERVACOES[BOLD_OFF]');
-      lines.add(obs);
-    }
     lines.add(divSingle);
 
-    // 7. Totais (Com preenchimento de pontos e destaque para o TOTAL)
+    // 7. Totais + Forma de Pagamento (agrupados — igual ao layout da tela)
     final subtotal = data.totalCentavos - (data.taxaEntregaCentavos ?? 0) + (data.descontoCentavos ?? 0);
     
-    final leftSub = 'Subtotal';
+    final leftSub = 'SUBTOTAL';
     final rightSub = PrintMoney.format(subtotal);
     final dotsSubCount = w - leftSub.length - rightSub.length;
     final dotsSub = dotsSubCount > 0 ? '.' * dotsSubCount : ' ';
     lines.add('$leftSub$dotsSub$rightSub');
 
     if (data.taxaEntregaCentavos != null && data.taxaEntregaCentavos! > 0) {
-      final leftTaxa = 'Taxa Entrega';
+      final leftTaxa = 'TAXA ENTREGA';
       final rightTaxa = PrintMoney.format(data.taxaEntregaCentavos!);
       final dotsTaxaCount = w - leftTaxa.length - rightTaxa.length;
       final dotsTaxa = dotsTaxaCount > 0 ? '.' * dotsTaxaCount : ' ';
@@ -128,7 +141,7 @@ class PrintTemplateEngine {
     }
 
     if (data.descontoCentavos != null && data.descontoCentavos! > 0) {
-      final leftDesc = 'Desconto';
+      final leftDesc = 'DESCONTO';
       final rightDesc = '- ${PrintMoney.format(data.descontoCentavos!)}';
       final dotsDescCount = w - leftDesc.length - rightDesc.length;
       final dotsDesc = dotsDescCount > 0 ? '.' * dotsDescCount : ' ';
@@ -142,10 +155,35 @@ class PrintTemplateEngine {
     lines.add('[BOLD_ON]$leftTotal$dotsTotal$rightTotal[BOLD_OFF]');
     lines.add(divSingle);
 
-    // 8. Forma de Pagamento
-    lines.add('[BOLD_ON]Pagamento[BOLD_OFF]');
-    lines.add(data.formaPagamento.toUpperCase());
-    lines.add(divSingle);
+    // 8. Forma de Pagamento (junto ao bloco de totais)
+    String formaPg = data.formaPagamento.toUpperCase();
+    if (formaPg.contains('CONTINGENTE')) {
+      formaPg = formaPg.replaceAll('CONTINGENTE', '').trim();
+    }
+    final leftPag = 'PAGTO';
+    final dotsCountPag = w - leftPag.length - 1 - formaPg.length;
+    final dotsPag = dotsCountPag > 0 ? ' ' * dotsCountPag : ' ';
+    lines.add('[BOLD_ON]$leftPag$dotsPag$formaPg[BOLD_OFF]');
+
+    if (formaPg.contains('DINHEIRO') && data.trocoParaCentavos != null && data.trocoParaCentavos! > 0) {
+      final trocoCentavos = data.trocoParaCentavos! - data.totalCentavos;
+      if (trocoCentavos > 0) {
+        lines.add('Troco para: ${PrintMoney.format(data.trocoParaCentavos!)}');
+        lines.add('[BOLD_ON]Troco: ${PrintMoney.format(trocoCentavos)}[BOLD_OFF]');
+      }
+    }
+
+    // Divisor duplo após o pagamento
+    lines.add('=' * w);
+
+    // 6. Observações Gerais — no final, após o divisor duplo (como no layout da tela)
+    final obs = (data.observacao ?? '').trim();
+    final end = (data.endereco ?? '').trim();
+    if (obs.isNotEmpty && obs != end) {
+      lines.add('[BOLD_ON]OBSERVACOES:[BOLD_OFF]');
+      lines.add(obs);
+      lines.add(divSingle);
+    }
 
     // 9. Instruções PIX Automáticas
     if (data.formaPagamento.toLowerCase().contains('pix') && 
@@ -188,8 +226,9 @@ class PrintTemplateEngine {
     lines.add(divDouble);
 
     // Info do pedido
-    lines.add('[BOLD_ON]PEDIDO: #${data.shortId}[BOLD_OFF]');
-    lines.add('HORA: ${PrintDate.formatTimeOnly(data.dataHora)}');
+    final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
+    lines.add('[BOLD_ON]PEDIDO: #$idExibicao[BOLD_OFF]');
+    lines.add('[BOLD_ON]AGENDADO PARA: ${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     lines.add('TIPO: ${data.tipoLogistica}');
     if ((data.clienteNome ?? '').isNotEmpty) {
       lines.add('CLIENTE: ${data.clienteNome!}');
@@ -231,8 +270,9 @@ class PrintTemplateEngine {
     lines.add('[CENTER][BOLD_ON]*** BALCAO ***[BOLD_OFF]');
     lines.add(divDouble);
 
-    lines.add('PEDIDO: #${data.shortId}');
-    lines.add('HORA: ${PrintDate.formatTimeOnly(data.dataHora)}');
+    final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
+    lines.add('PEDIDO: #$idExibicao');
+    lines.add('[BOLD_ON]AGENDADO: ${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     if ((data.clienteNome ?? '').isNotEmpty) {
       lines.add('CLIENTE: ${data.clienteNome!}');
     }
@@ -264,8 +304,9 @@ class PrintTemplateEngine {
     lines.add('[CENTER][BOLD_ON]*** EXPEDICAO / ENTREGA ***[BOLD_OFF]');
     lines.add(divDouble);
 
-    lines.add('PEDIDO: #${data.shortId}');
-    lines.add('DATA: ${PrintDate.format(data.dataHora)}');
+    final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
+    lines.add('PEDIDO: #$idExibicao');
+    lines.add('[BOLD_ON]AGENDADO PARA: ${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     if ((data.clienteNome ?? '').isNotEmpty) {
       lines.add('CLIENTE: ${data.clienteNome!}');
     }
@@ -277,14 +318,20 @@ class PrintTemplateEngine {
 
     // Endereço destacado
     if ((data.endereco ?? '').isNotEmpty) {
-      lines.add('[BOLD_ON]ENDERECO:[BOLD_OFF]');
-      lines.addAll(
-        PrintAddress.format(
-          logradouro: data.endereco ?? '',
-          bairro: data.bairro ?? '',
-          referencia: data.referencia,
-        ),
+      final addressLines = PrintAddress.format(
+        logradouro: data.endereco ?? '',
+        bairro: data.bairro ?? '',
+        cidade: data.cidade ?? '',
+        uf: data.uf ?? '',
+        referencia: data.referencia,
       );
+      if (addressLines.isNotEmpty) {
+        final fullAddressText = 'ENDERECO: ' + addressLines.map((l) => l.trim()).join(' - ');
+        final wrappedLines = _wrapText(fullAddressText, w);
+        for (final line in wrappedLines) {
+          lines.add('[BOLD_ON]$line[BOLD_OFF]');
+        }
+      }
       lines.add(divSingle);
     }
 
@@ -311,6 +358,29 @@ class PrintTemplateEngine {
     }
 
     lines.add('');
+    return lines;
+  }
+
+  List<String> _wrapText(String text, int width) {
+    if (text.length <= width) return [text];
+    final words = text.split(' ');
+    final lines = <String>[];
+    var currentLine = '';
+    
+    for (final word in words) {
+      if (word.isEmpty) continue;
+      if (currentLine.isEmpty) {
+        currentLine = word;
+      } else if (currentLine.length + 1 + word.length <= width) {
+        currentLine += ' $word';
+      } else {
+        lines.add(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine.isNotEmpty) {
+      lines.add(currentLine);
+    }
     return lines;
   }
 }

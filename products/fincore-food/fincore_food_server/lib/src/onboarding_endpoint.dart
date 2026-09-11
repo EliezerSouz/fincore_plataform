@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:serverpod/serverpod.dart';
+
 import 'generated/protocol.dart';
 import 'middleware/auth_middleware.dart';
 import 'utils/timezone_helper.dart';
@@ -8,10 +9,12 @@ class OnboardingEndpoint extends Endpoint {
   @override
   bool get requireLogin => true;
 
-  /// Cria uma nova empresa (tenant) e vincula o usuário autenticado como ADMIN.
+  /// Cria uma nova empresa (tenant) e vincula o usuário autenticado como OWNER.
+  ///
+  /// O tenantId é gerado pelo servidor, nunca pelo cliente.
+  /// Ordem da transação: empresa → usuario → membro_empresa (respeita todas as FKs).
   Future<bool> criarEmpresa(
     Session session, {
-    required String tenantId,
     required String razaoSocial,
     required String nomeFantasia,
     required String documentoFiscal,
@@ -26,10 +29,10 @@ class OnboardingEndpoint extends Endpoint {
     final now = TimezoneHelper.localNow;
 
     try {
-      // Validações de Unicidade
       final docTrim = documentoFiscal.trim();
       final emailTrim = emailEmpresa.trim().toLowerCase();
 
+      // Validações de Unicidade
       final existingDoc = await Empresa.db.findFirstRow(
         session,
         where: (t) => t.documentoFiscal.equals(docTrim),
@@ -47,32 +50,14 @@ class OnboardingEndpoint extends Endpoint {
       }
 
       await session.db.transaction((transaction) async {
+        // O servidor gera o UUID do tenant — o cliente nunca deve fazer isso.
+        final tenantId = const Uuid().v4();
         final tenantUuid = UuidValue.fromString(tenantId);
         final userUuid = UuidValue.fromString(usuarioId);
 
-        // 1. Inserir na tabela usuario (global) - DEVE ser o primeiro devido às FKs nas outras tabelas
-        final existingUser = await Usuario.db.findById(session, userUuid);
-        if (existingUser == null) {
-          final user = Usuario(
-            id: userUuid,
-            tenantId: tenantId,
-            authUserId: usuarioId,
-            username: usuarioEmail.split('@').first,
-            email: usuarioEmail,
-            nome: usuarioNome,
-            ativo: true,
-            criadoEm: now,
-            atualizadoEm: now,
-          );
-          await Usuario.db.insertRow(session, user);
-        } else {
-          existingUser.nome = usuarioNome;
-          existingUser.email = usuarioEmail;
-          existingUser.atualizadoEm = now;
-          await Usuario.db.updateRow(session, existingUser);
-        }
-
-        // 2. Inserir na tabela empresa
+        // PASSO 1: Inserir a empresa primeiro.
+        // usuarios.activeTenantId é apenas preferência — não tem FK rígida.
+        // Mas para clareza e consistência, empresa sempre existe antes do vínculo.
         final tipoPessoa = docTrim.replaceAll(RegExp(r'\D'), '').length <= 11 ? 'FISICA' : 'JURIDICA';
         final empresa = Empresa(
           id: tenantUuid,
@@ -99,9 +84,34 @@ class OnboardingEndpoint extends Endpoint {
         );
         await Empresa.db.insertRow(session, empresa);
 
-        // 2.2. Criar log imutável de auditoria (EventoEmpresa)
+        // PASSO 2: Inserir ou atualizar o usuário com o activeTenantId da nova empresa
+        final existingUser = await Usuario.db.findById(session, userUuid);
+        if (existingUser == null) {
+          final user = Usuario(
+            id: userUuid,
+            activeTenantId: tenantUuid, // Preferência de contexto ativo (UuidValue)
+            authUserId: usuarioId,
+            username: usuarioEmail.split('@').first,
+            email: usuarioEmail,
+            nome: usuarioNome,
+            ativo: true,
+            criadoEm: now,
+            atualizadoEm: now,
+          );
+          await Usuario.db.insertRow(session, user);
+        } else {
+          // Usuário já existe (pode ter criado outra empresa antes).
+          // Atualiza o nome e define o activeTenantId para a nova empresa.
+          existingUser.nome = usuarioNome;
+          existingUser.email = usuarioEmail;
+          existingUser.activeTenantId = tenantUuid;
+          existingUser.atualizadoEm = now;
+          await Usuario.db.updateRow(session, existingUser);
+        }
+
+        // PASSO 2.2: Log imutável de auditoria da criação da empresa
         final evento = EventoEmpresa(
-          id: UuidValue.fromString(Uuid().v4()),
+          id: UuidValue.fromString(const Uuid().v4()),
           tenantId: tenantUuid,
           tipo: 'CRIADA',
           payload: jsonEncode({
@@ -115,9 +125,9 @@ class OnboardingEndpoint extends Endpoint {
         );
         await EventoEmpresa.db.insertRow(session, evento);
 
-        // 2.5. Criar configurações padrão (1:1 Obrigatório - CAP.CONFIGURATION)
+        // PASSO 2.3: Configurações padrão da empresa (1:1 obrigatório)
         final config = EmpresaConfiguracao(
-          id: UuidValue.fromString(Uuid().v4()),
+          id: UuidValue.fromString(const Uuid().v4()),
           tenantId: tenantId,
           taxaServico: 0.10,
           usarWhatsApp: true,
@@ -127,8 +137,6 @@ class OnboardingEndpoint extends Endpoint {
           createdBy: userUuid,
           updatedBy: userUuid,
           syncVersion: 1,
-          
-          // Impressão e Hardware Defaults
           autoPrintCaixa: true,
           autoPrintCozinha: true,
           autoPrintBalcao: false,
@@ -140,22 +148,18 @@ class OnboardingEndpoint extends Endpoint {
           larguraPapel: 80,
           cortarPapel: true,
           abrirGaveta: false,
-          
-          // QR Code e Layout Defaults
           imprimirQRCode: true,
           imprimirCopiaCola: true,
           imprimirLogo: false,
           imprimirRodape: true,
           mensagemRodape: 'Obrigado pela preferência!',
-          
-          // PIX Defaults
           pixTipo: 'CPF',
         );
         await EmpresaConfiguracao.db.insertRow(session, config);
 
-        // 2.6. Criar Cliente Padrão: "Consumidor Final"
+        // PASSO 2.4: Cliente padrão "Consumidor Final" (vendas avulsas de balcão)
         final clientePadrao = Cliente(
-          id: UuidValue.fromString(Uuid().v4()),
+          id: UuidValue.fromString(const Uuid().v4()),
           tenantId: tenantId,
           nome: 'Consumidor Final',
           telefone: '00000000000',
@@ -171,12 +175,13 @@ class OnboardingEndpoint extends Endpoint {
         );
         await Cliente.db.insertRow(session, clientePadrao);
 
-        // 3. Inserir na tabela membro_empresa
+        // PASSO 3: Vincular usuário à empresa como OWNER (não ADMIN)
+        // OWNER = proprietário que criou a empresa, não pode ser removido
         final membro = MembroEmpresa(
-          id: UuidValue.fromString(Uuid().v4()),
+          id: UuidValue.fromString(const Uuid().v4()),
           tenantId: tenantUuid,
           usuarioId: userUuid,
-          role: 'ADMIN',
+          role: 'OWNER',
           ativo: true,
           convidadoEm: now,
           aceitoEm: now,
@@ -188,10 +193,13 @@ class OnboardingEndpoint extends Endpoint {
         );
         await MembroEmpresa.db.insertRow(session, membro);
 
-        session.log('SIMULAÇÃO EMAIL: Enviando email de boas-vindas para $usuarioEmail (Empresa: $razaoSocial)', level: LogLevel.info);
+        session.log(
+          '[ONBOARDING] Empresa "$nomeFantasia" criada. Tenant: $tenantId. Usuário: $usuarioEmail vinculado como OWNER.',
+          level: LogLevel.info,
+        );
       });
       return true;
-    } on OnboardingException catch (e) {
+    } on OnboardingException {
       rethrow;
     } catch (e) {
       session.log('Erro ao criar empresa no banco central: $e', level: LogLevel.error);
@@ -199,15 +207,170 @@ class OnboardingEndpoint extends Endpoint {
     }
   }
 
-  /// Consulta os dados da empresa vinculada ao usuário autenticado
+  /// Retorna todas as empresas nas quais o usuário logado possui vínculo ativo.
+  ///
+  /// Usada pelo Flutter para:
+  /// - Determinar se o usuário deve ir para o Onboarding (lista vazia)
+  /// - Determinar se deve entrar direto (1 empresa)
+  /// - Exibir a tela de seleção (2+ empresas)
+  Future<List<Empresa>> minhasEmpresas(Session session) async {
+    final usuarioId = session.context['usuarioId'] as String?;
+    if (usuarioId == null) return [];
+
+    try {
+      final userUuid = UuidValue.fromString(usuarioId);
+
+      // Busca todos os vínculos ativos do usuário
+      final membros = await MembroEmpresa.db.find(
+        session,
+        where: (t) => t.usuarioId.equals(userUuid) & t.ativo.equals(true),
+      );
+
+      if (membros.isEmpty) return [];
+
+      // Carrega os dados de cada empresa em paralelo
+      final empresas = <Empresa>[];
+      for (final m in membros) {
+        final empresa = await Empresa.db.findById(session, m.tenantId);
+        if (empresa != null) {
+          empresas.add(empresa);
+        }
+      }
+
+      session.log(
+        '[ONBOARDING] minhasEmpresas: ${empresas.length} empresa(s) encontrada(s) para usuário $usuarioId',
+        level: LogLevel.info,
+      );
+
+      return empresas;
+    } catch (e) {
+      session.log('Erro ao listar empresas do usuário: $e', level: LogLevel.error);
+      return [];
+    }
+  }
+
+  /// Troca o contexto ativo para a empresa especificada e retorna os dados de bootstrap.
+  ///
+  /// Valida se o usuário possui vínculo ativo no tenant antes de permitir a troca.
+  /// Atualiza usuarios.activeTenantId para persistir a preferência.
+  Future<BootstrapPayload?> trocarEmpresa(Session session, String novoTenantId) async {
+    final usuarioId = session.context['usuarioId'] as String?;
+    if (usuarioId == null) return null;
+
+    try {
+      final userUuid = UuidValue.fromString(usuarioId);
+      final tenantUuid = UuidValue.fromString(novoTenantId);
+
+      // Validação de segurança: o usuário deve ter vínculo ativo no tenant
+      final membro = await MembroEmpresa.db.findFirstRow(
+        session,
+        where: (t) => t.usuarioId.equals(userUuid) & t.tenantId.equals(tenantUuid) & t.ativo.equals(true),
+      );
+
+      if (membro == null) {
+        session.log(
+          '[ONBOARDING] trocarEmpresa negado: usuário $usuarioId sem vínculo ativo no tenant $novoTenantId',
+          level: LogLevel.warning,
+        );
+        return null;
+      }
+
+      // Atualizar a preferência de contexto ativo do usuário
+      final usuario = await Usuario.db.findById(session, userUuid);
+      if (usuario != null) {
+        usuario.activeTenantId = tenantUuid;
+        usuario.atualizadoEm = DateTime.now();
+        await Usuario.db.updateRow(session, usuario);
+      }
+
+      // Retornar o bootstrap completo da nova empresa
+      final empresa = await Empresa.db.findById(session, tenantUuid);
+      if (empresa == null) return null;
+
+      final membros = await MembroEmpresa.db.find(
+        session,
+        where: (t) => t.tenantId.equals(tenantUuid),
+      );
+
+      var configuracao = await EmpresaConfiguracao.db.findFirstRow(
+        session,
+        where: (t) => t.tenantId.equals(novoTenantId),
+      );
+
+      // Fallback de configuração (segurança — não deveria acontecer)
+      configuracao ??= EmpresaConfiguracao(
+        tenantId: novoTenantId,
+        taxaServico: 0.10,
+        usarWhatsApp: true,
+        tema: 'escuro',
+        syncVersion: 1,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        createdBy: userUuid,
+        updatedBy: userUuid,
+        autoPrintCaixa: true,
+        autoPrintCozinha: true,
+        autoPrintBalcao: false,
+        autoPrintExpedicao: false,
+        viasCliente: 1,
+        viasCozinha: 1,
+        viasBalcao: 0,
+        viasExpedicao: 0,
+        larguraPapel: 80,
+        cortarPapel: true,
+        abrirGaveta: false,
+        imprimirQRCode: true,
+        imprimirCopiaCola: true,
+        imprimirLogo: false,
+        imprimirRodape: true,
+        mensagemRodape: 'Obrigado pela preferência!',
+        pixTipo: 'CPF',
+      );
+
+      session.log(
+        '[ONBOARDING] trocarEmpresa: usuário $usuarioId trocou para tenant $novoTenantId (${empresa.nomeFantasia})',
+        level: LogLevel.info,
+      );
+
+      return BootstrapPayload(
+        schemaVersion: 1,
+        generatedAt: DateTime.now(),
+        empresa: empresa,
+        configuracao: configuracao,
+        usuario: usuario ?? await Usuario.db.findById(session, userUuid) ?? Usuario(
+          id: userUuid,
+          authUserId: usuarioId,
+          username: usuarioId,
+          nome: 'Usuário',
+          ativo: true,
+          criadoEm: DateTime.now(),
+          atualizadoEm: DateTime.now(),
+        ),
+        membros: membros,
+      );
+    } catch (e) {
+      session.log('Erro ao trocar empresa: $e', level: LogLevel.error);
+      return null;
+    }
+  }
+
+  /// Consulta os dados da empresa ativa do usuário autenticado.
+  /// Prioridade: X-Tenant-ID header > activeTenantId > primeiro membro.
   Future<Empresa?> minhaEmpresa(Session session) async {
     final usuarioId = session.context['usuarioId'] as String?;
     if (usuarioId == null) return null;
     try {
       final userUuid = UuidValue.fromString(usuarioId);
+      final tenantIdCtx = session.context['tenantId'] as String?;
+
+      if (tenantIdCtx != null && tenantIdCtx.isNotEmpty) {
+        return await Empresa.db.findById(session, UuidValue.fromString(tenantIdCtx));
+      }
+
+      // Fallback: primeiro membro ativo
       final membro = await MembroEmpresa.db.findFirstRow(
         session,
-        where: (t) => t.usuarioId.equals(userUuid),
+        where: (t) => t.usuarioId.equals(userUuid) & t.ativo.equals(true),
       );
       if (membro == null) return null;
 
@@ -218,23 +381,10 @@ class OnboardingEndpoint extends Endpoint {
     }
   }
 
-  /// Consulta o status de ativação da empresa vinculada ao usuário
+  /// Consulta o status de ativação da empresa ativa do usuário.
   Future<String?> status(Session session) async {
-    final usuarioId = session.context['usuarioId'] as String;
-    try {
-      final userUuid = UuidValue.fromString(usuarioId);
-      final membro = await MembroEmpresa.db.findFirstRow(
-        session,
-        where: (t) => t.usuarioId.equals(userUuid),
-      );
-      if (membro == null) return null;
-
-      final empresa = await Empresa.db.findById(session, membro.tenantId);
-      return empresa?.status;
-    } catch (e) {
-      session.log('Erro ao buscar status: $e', level: LogLevel.error);
-      return null;
-    }
+    final empresa = await minhaEmpresa(session);
+    return empresa?.status;
   }
 
   /// Calcula o progresso do setup do workspace (categorias, produtos, etc.)
@@ -242,12 +392,10 @@ class OnboardingEndpoint extends Endpoint {
     try {
       final tenantUuid = UuidValue.fromString(tenantId);
 
-      // 1. Checar Empresa
       final empresa = await Empresa.db.findById(session, tenantUuid);
       final bool empresaCriada = empresa != null;
       final bool contaAtiva = empresaCriada && empresa.status == 'ativo';
 
-      // 2. Checar Primeiro Login (membros ativos)
       final membros = await MembroEmpresa.db.find(
         session,
         where: (t) => t.tenantId.equals(tenantUuid) & t.ativo.equals(true),
@@ -255,29 +403,25 @@ class OnboardingEndpoint extends Endpoint {
       );
       final bool loginRealizado = membros.isNotEmpty;
 
-      // 3. Checar Categorias
       final categoriasCount = await Categoria.db.count(
         session,
         where: (t) => t.tenantId.equals(tenantId),
       );
       final bool categoriasCadastradas = categoriasCount > 0;
 
-      // 4. Checar Produtos
       final produtosCount = await Produto.db.count(
         session,
         where: (t) => t.tenantId.equals(tenantId),
       );
       final bool produtosCadastrados = produtosCount > 0;
 
-      // 5. Checar Clientes
       final clientesCount = await Cliente.db.count(
         session,
         where: (t) => t.tenantId.equals(tenantId),
       );
       final bool clientesCadastrados = clientesCount > 0;
 
-      // 6. Checar Vendas (ordens preparadas)
-      final bool vendaRealizada = false;
+      const bool vendaRealizada = false;
 
       final checklist = {
         'empresa_criada': empresaCriada,

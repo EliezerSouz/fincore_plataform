@@ -8,6 +8,8 @@ import '../controllers/pdv_express_controller.dart';
 import '../models/pdv_item.dart';
 import '../../cap/printing/print_capability.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
+import 'package:fincore_core/database/fincore_database.dart';
+
 
 
 /// Tela de pré-visualização e impressão do cupom do pedido.
@@ -54,16 +56,63 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
   String? _nomeEmpresa;
   String? _lastMessage;
   bool _lastSuccess = true;
+  DateTime _dataHoraPedido = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _loadConfig();
+    _loadConfig().then((_) {
+      _mostrarDialogoConfirmacaoImpressao();
+    });
+  }
+
+  void _mostrarDialogoConfirmacaoImpressao() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Confirmar Impressão'),
+          content: const Text('Deseja imprimir as vias deste pedido agora?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                if (mounted) Navigator.of(context).pop();
+              },
+              child: const Text('Não'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _imprimirCupomCompleto().then((_) {
+                  if (mounted) Navigator.of(context).pop();
+                });
+              },
+              child: const Text('Sim, Imprimir'),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   Future<void> _loadConfig() async {
     final cfg = await FincoreThermalPrinterService.loadPrinters();
     final impConfig = await FincoreImpressaoConfig.carregar();
+
+    final db = DependencyInjection().get<FincoreDatabase>();
+    DateTime dataHoraCarregada = DateTime.now();
+    try {
+      final pedidoRow = await (db.select(db.pedidosTable)
+            ..where((t) => t.id.equals(widget.pedidoId)))
+          .getSingleOrNull();
+      if (pedidoRow != null) {
+        dataHoraCarregada = pedidoRow.dataHoraEntregaPrevista ?? pedidoRow.dataHoraCriacao;
+      }
+    } catch (_) {}
+
     setState(() {
       _printerCaixaPath = cfg['caixa'] as String? ?? '';
       _printerCozinhaPath = cfg['cozinha'] as String? ?? '';
@@ -79,10 +128,11 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
       _pixTipo = impConfig.pixTipo;
       _pixBanco = impConfig.pixBanco.isNotEmpty ? impConfig.pixBanco : null;
       _nomeEmpresa = impConfig.nomeEmpresa.isNotEmpty ? impConfig.nomeEmpresa : null;
+      _dataHoraPedido = dataHoraCarregada;
     });
   }
 
-  Future<void> _imprimir() async {
+  Future<void> _imprimirCupomCompleto() async {
     if (_isPrinting) return;
     setState(() {
       _isPrinting = true;
@@ -104,35 +154,60 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
       );
     }).toList();
 
+    final db = DependencyInjection().get<FincoreDatabase>();
+    int? numeroPedido;
+    try {
+      final pedidoRow = await (db.select(db.pedidosTable)
+            ..where((t) => t.id.equals(widget.pedidoId)))
+          .getSingleOrNull();
+      if (pedidoRow != null) {
+        numeroPedido = pedidoRow.numeroPedido;
+      }
+    } catch (_) {}
+
     final printData = PrintData(
       pedidoId: widget.pedidoId,
+      numeroPedido: numeroPedido,
       clienteNome: widget.cliente.nome,
       clienteTelefone: widget.cliente.telefone,
       tipoLogistica: widget.entrega.tipo,
-      endereco: widget.entrega.tipo == 'Entrega' ? enderecoStr : null,
+      endereco: widget.entrega.tipo == 'Entrega' ? '${widget.entrega.logradouro}, ${widget.entrega.numero}' : null,
+      bairro: widget.entrega.tipo == 'Entrega' ? widget.entrega.bairro : null,
+      referencia: widget.entrega.tipo == 'Entrega' ? widget.entrega.referencia : null,
+      cidade: widget.entrega.tipo == 'Entrega' ? widget.entrega.cidade : null,
       formaPagamento: widget.formaPagamento,
       totalCentavos: widget.totalCentavos,
+      taxaEntregaCentavos: widget.entrega.taxaEntregaCentavos,
+      trocoParaCentavos: widget.entrega.trocoParaCentavos,
       itens: printItens,
-      dataHora: DateTime.now(),
+      dataHora: _dataHoraPedido,
+      observacao: widget.entrega.observacoes,
+      status: 'confirmado',
     );
 
-    final result = await useCase.reimprimir(
-      via: PrintVia.cliente,
+    debugPrint('[ComprovantePedidoPage] PrintData gerado para envio: '
+        'pedidoId: ${printData.pedidoId}, '
+        'totalCentavos: ${printData.totalCentavos}, '
+        'trocoParaCentavos: ${printData.trocoParaCentavos}, '
+        'observacao: ${printData.observacao}, '
+        'formaPagamento: ${printData.formaPagamento}');
+
+    final printResult = await useCase.imprimirPedido(
       data: printData,
       usuario: 'pdv_express',
     );
 
     setState(() {
       _isPrinting = false;
-      _lastMessage = result.message;
-      _lastSuccess = result.success;
+      _lastMessage = printResult.summary;
+      _lastSuccess = printResult.success;
     });
   }
 
   String get _shortId =>
       widget.pedidoId.length > 8 ? widget.pedidoId.substring(0, 8).toUpperCase() : widget.pedidoId;
 
-  String get _dataHora => DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+  String get _dataHora => DateFormat('dd/MM/yyyy HH:mm').format(_dataHoraPedido.toLocal());
 
   @override
   Widget build(BuildContext context) {
@@ -171,7 +246,7 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: ElevatedButton.icon(
-                onPressed: _imprimir,
+                onPressed: _imprimirCupomCompleto,
                 icon: const Icon(Icons.print, size: 16),
                 label: const Text('Imprimir'),
                 style: ElevatedButton.styleFrom(
@@ -247,6 +322,19 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                               // Total
                               _CupomLinhaChaveValor('TOTAL', totalFmt, bold: true),
                               _CupomLinhaChaveValor('PAGTO', widget.formaPagamento),
+                              if (widget.formaPagamento.toLowerCase().contains('dinheiro') &&
+                                  widget.entrega.trocoParaCentavos != null &&
+                                  widget.entrega.trocoParaCentavos! > 0) ...[
+                                _CupomLinhaChaveValor(
+                                  'RECEBIDO',
+                                  'R\$ ${(widget.entrega.trocoParaCentavos! / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+                                ),
+                                _CupomLinhaChaveValor(
+                                  'TROCO',
+                                  'R\$ ${((widget.entrega.trocoParaCentavos! - widget.totalCentavos) / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+                                  bold: true,
+                                ),
+                              ],
                               _CupomDivisor(double: true),
 
                               // QR Code / PIX
@@ -260,6 +348,13 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                                   _CupomTexto('Banco: $_pixBanco', center: true, size: 10),
                                 const SizedBox(height: 4),
                                 _CupomTexto('Envie o comprovante apos o pagamento', center: true, muted: true, size: 9),
+                                _CupomDivisor(),
+                              ],
+
+                              if (widget.entrega.observacoes.trim().isNotEmpty) ...[
+                                _CupomTexto('OBSERVAÇÕES:', bold: true),
+                                const SizedBox(height: 2),
+                                _CupomTexto(widget.entrega.observacoes),
                                 _CupomDivisor(),
                               ],
 
@@ -387,7 +482,7 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: _isPrinting ? null : _imprimir,
+                      onPressed: _isPrinting ? null : _imprimirCupomCompleto,
                       icon: _isPrinting
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                           : const Icon(Icons.print, size: 16),

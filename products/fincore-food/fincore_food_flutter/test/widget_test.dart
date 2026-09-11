@@ -7,11 +7,12 @@ import 'package:fincore_food_flutter/src/shared/database_initializer.dart';
 
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/sync/sync_engine.dart';
+import 'package:fincore_core/fincore_core.dart';
 
 void main() {
   testWidgets('fincore_food_flutter FincoreShell loading and routing test', (WidgetTester tester) async {
-    // 1. Configurar tamanho da tela para modo Desktop Expandido (1200x800)
-    tester.view.physicalSize = const Size(1200, 800);
+    // 1. Configurar tamanho da tela para modo Desktop Expandido (1600x900)
+    tester.view.physicalSize = const Size(1600, 900);
     tester.view.devicePixelRatio = 1.0;
     
     // Resetar tamanho no final do teste
@@ -25,6 +26,22 @@ void main() {
 
     // Inicializar o banco de dados em memória e injeção para o escopo do teste
     await DatabaseInitializer.init(Client('http://localhost:8080/'));
+
+    // Configura contexto administrativo para expor opções de menu nos testes de widget
+    final context = DependencyInjection().get<TenantContext>();
+    final empresaRepo = DependencyInjection().get<EmpresaRepository>();
+    final empresas = await empresaRepo.findAll();
+    final emp = empresas.first;
+    final adminUser = CoreUsuario(
+      id: '00000000-0000-0000-0000-000000000001',
+      tenantId: emp.id,
+      nome: 'Administrador de Teste',
+      email: 'admin@fincore.com',
+      role: 'ADMINISTRADOR',
+      criadoEm: DateTime.now(),
+      atualizadoEm: DateTime.now(),
+    );
+    context.setContext(empresa: emp, usuario: adminUser);
 
     // 2. Carregar o app
     await tester.pumpWidget(const MaterialApp(home: FincoreShell()));

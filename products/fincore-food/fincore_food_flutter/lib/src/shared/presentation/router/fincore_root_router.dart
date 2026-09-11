@@ -14,6 +14,7 @@ import '../onboarding/onboarding_wizard_page.dart';
 import '../onboarding/pending_approval_page.dart';
 import '../shell/fincore_shell.dart';
 import '../admin/empresas_pendentes_page.dart';
+import '../tenant/empresa_selector_page.dart';
 
 class FincoreRootRouter extends StatefulWidget {
   const FincoreRootRouter({super.key});
@@ -28,6 +29,9 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
   User? _currentUser;
   AuthUserInfo? _authUserInfo;
   String? _onboardingStatus;
+  /// Lista de empresas disponíveis para seleção — preenchida quando o usuário
+  /// tem N>1 empresas vinculadas e ainda não escolheu o contexto ativo.
+  List<Empresa>? _empresasDisponiveis;
   Timer? _syncTimer;
   StreamSubscription<AuthState>? _authSubscription;
   bool _isServerOffline = false;
@@ -280,11 +284,25 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
       
       String? onboardingStatus;
       bool bootstrapSuccess = false;
+      List<Empresa>? multiEmpresas;
+
       if (userInfo != null) {
-        onboardingStatus = await client.onboarding.status();
-        
-        final sessionSvc = SessionInitializationService(client);
-        bootstrapSuccess = await sessionSvc.initializeSession(userInfo);
+        // Verificar quantas empresas o usuário tem antes do bootstrap completo
+        final listEmpresas = await client.onboarding.minhasEmpresas();
+
+        if (listEmpresas.isEmpty) {
+          // Nenhuma empresa: ir para onboarding
+          onboardingStatus = null;
+        } else if (listEmpresas.length == 1) {
+          // Exatamente 1 empresa: bootstrap direto
+          onboardingStatus = await client.onboarding.status();
+          final sessionSvc = SessionInitializationService(client);
+          bootstrapSuccess = await sessionSvc.initializeSession(userInfo);
+        } else {
+          // Múltiplas empresas: seleção pelo usuário
+          multiEmpresas = listEmpresas;
+          bootstrapSuccess = false; // Aguarda seleção
+        }
       } else {
         await Supabase.instance.client.auth.signOut();
       }
@@ -293,6 +311,7 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
         setState(() {
           _authUserInfo = userInfo;
           _onboardingStatus = onboardingStatus;
+          _empresasDisponiveis = multiEmpresas;
           _isLoading = false;
         });
       }
@@ -753,6 +772,14 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
     }
 
     if (_authUserInfo == null || _authUserInfo!.tenantId == null) {
+      // Verificar se há múltiplas empresas para selecionar
+      final empresas = _empresasDisponiveis;
+      if (empresas != null && empresas.length > 1) {
+        return EmpresaSelectorPage(
+          empresas: empresas,
+          onEmpresaSelecionada: refreshState,
+        );
+      }
       return OnboardingWizardPage(onCreated: refreshState);
     }
 

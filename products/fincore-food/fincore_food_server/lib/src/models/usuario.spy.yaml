@@ -2,7 +2,9 @@ class: Usuario
 table: usuarios
 fields:
   id: UuidValue, defaultModel=random
-  tenantId: String
+  # activeTenantId: preferência do último contexto ativo — NÃO é FK de acesso.
+  # O acesso real a uma empresa é controlado exclusivamente por membro_empresa.
+  activeTenantId: UuidValue?
   authUserId: String?
   username: String
   email: String?
@@ -13,6 +15,7 @@ fields:
   atualizadoEm: DateTime
 
 indexes:
-  usr_tenant_username_idx:
-    fields: tenantId, username
+  usr_username_unique_idx:
+    fields: username
     unique: true
+

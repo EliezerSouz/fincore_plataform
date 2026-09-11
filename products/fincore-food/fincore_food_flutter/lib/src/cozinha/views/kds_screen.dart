@@ -31,9 +31,15 @@ class _KdsScreenState extends State<KdsScreen> {
     _operadorId = DependencyInjection().get<TenantContext>().usuario.id;
     _controller.carregarOrdens();
 
-    // Atualiza timers das ordens em preparo a cada segundo
+    // Atualiza timers e recarrega ordens silenciosamente a cada 2 segundos
+    int count = 0;
     _timerTick = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted && _controller.ordensEmPreparo.isNotEmpty) {
+      if (!mounted) return;
+      count++;
+      if (count % 2 == 0) {
+        _controller.carregarOrdens(silent: true);
+      }
+      if (_controller.ordensEmPreparo.isNotEmpty) {
         setState(() {});
       }
     });
@@ -234,6 +240,18 @@ class _KdsScreenState extends State<KdsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Faixa de Prioridade no topo do Card para alto contraste
+          if (ordem.prioridade == PrioridadeOrdem.urgente || ordem.prioridade == PrioridadeOrdem.vip)
+            Container(
+              height: 6,
+              decoration: BoxDecoration(
+                color: ordem.prioridade == PrioridadeOrdem.urgente ? FincoreColors.danger : FincoreColors.warning,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(10),
+                  topRight: Radius.circular(10),
+                ),
+              ),
+            ),
           // Top do Card (Nº Pedido, Prioridade e Timer)
           Padding(
             padding: const EdgeInsets.all(16),
@@ -305,7 +323,7 @@ class _KdsScreenState extends State<KdsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: ordem.itens.map((item) {
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
                     children: [
                       Container(

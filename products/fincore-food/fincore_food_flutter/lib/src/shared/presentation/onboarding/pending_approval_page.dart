@@ -65,7 +65,12 @@ class _PendingApprovalPageState extends State<PendingApprovalPage>
   }
 
   Future<void> _loadRealDetails() async {
-    final user = Supabase.instance.client.auth.currentUser;
+    User? user;
+    try {
+      user = Supabase.instance.client.auth.currentUser;
+    } catch (_) {
+      // Supabase não inicializado (ex: ambiente de testes)
+    }
     final currentEmail = user?.email ?? '';
 
     // 1. Carregar instantaneamente de SharedPreferences para acesso sem espera

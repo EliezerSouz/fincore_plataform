@@ -121,7 +121,7 @@ class BootstrapMapper {
   static CoreUsuario toCoreUsuario(Usuario serverUsuario) {
     return CoreUsuario(
       id: serverUsuario.id.toString(),
-      tenantId: serverUsuario.tenantId,
+      tenantId: serverUsuario.activeTenantId?.toString(),
       authUserId: serverUsuario.authUserId,
       username: serverUsuario.username,
       email: serverUsuario.email,

@@ -15,6 +15,7 @@ import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_sec
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/audit_timeline_panel.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/validators/fincore_validators.dart';
 import 'package:fincore_food_flutter/src/shared/services/commercial_pricing_engine.dart';
+import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
 import 'package:uuid/uuid.dart';
 
 /// Tela de Cadastro e Gestão de Categorias — Split View 40/60 Limpo
@@ -52,6 +53,13 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
   final _tempoMedioCtrl = TextEditingController(text: '30');
   final _estoqueMinCtrl = TextEditingController(text: '100');
   final _estoqueMaxCtrl = TextEditingController(text: '1000');
+  final _estoqueSegurancaCtrl = TextEditingController(text: '0');
+  final _estoqueCriticoCtrl = TextEditingController(text: '50');
+  final _loteProducaoCtrl = TextEditingController(text: '100');
+  final _diasCoberturaCtrl = TextEditingController(text: '3');
+  final _capacidadeCampanhaCtrl = TextEditingController(text: '0');
+  final _tempoPreparacaoCtrl = TextEditingController(text: '0');
+  String _estrategiaProducaoPadrao = 'concentrada';
   final _ncmPadraoCtrl = TextEditingController(text: '1902.20.00');
   final _cestPadraoCtrl = TextEditingController(text: '17.049.00');
   final _precoPadraoCtrl = TextEditingController(text: '1.50');
@@ -119,6 +127,12 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
     _tempoMedioCtrl.dispose();
     _estoqueMinCtrl.dispose();
     _estoqueMaxCtrl.dispose();
+    _estoqueSegurancaCtrl.dispose();
+    _estoqueCriticoCtrl.dispose();
+    _loteProducaoCtrl.dispose();
+    _diasCoberturaCtrl.dispose();
+    _capacidadeCampanhaCtrl.dispose();
+    _tempoPreparacaoCtrl.dispose();
     _ncmPadraoCtrl.dispose();
     _cestPadraoCtrl.dispose();
     _precoPadraoCtrl.dispose();
@@ -189,6 +203,13 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
             _controlaEstoquePadrao = jsonMap['controla_estoque'] ?? true;
             _estoqueMinCtrl.text = (jsonMap['estoque_minimo'] ?? 100).toString();
             _estoqueMaxCtrl.text = (jsonMap['estoque_maximo'] ?? 1000).toString();
+            _estoqueSegurancaCtrl.text = (jsonMap['estoque_seguranca'] ?? 0).toString();
+            _estoqueCriticoCtrl.text = (jsonMap['estoque_critico'] ?? 50).toString();
+            _loteProducaoCtrl.text = (jsonMap['lote_producao'] ?? 100).toString();
+            _diasCoberturaCtrl.text = (jsonMap['dias_cobertura_alvo'] ?? 3).toString();
+            _capacidadeCampanhaCtrl.text = (jsonMap['capacidade_campanha'] ?? 0).toString();
+            _tempoPreparacaoCtrl.text = (jsonMap['tempo_preparacao'] ?? 0).toString();
+            _estrategiaProducaoPadrao = jsonMap['estrategia_producao'] ?? 'concentrada';
             _ncmPadraoCtrl.text = jsonMap['ncm'] ?? '1902.20.00';
             _cestPadraoCtrl.text = jsonMap['cest'] ?? '17.049.00';
             // Carrega o preço base da categoria
@@ -242,6 +263,13 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
         'tipo_estoque': _tipoEstoquePadrao.name,
         'estoque_minimo': int.tryParse(_estoqueMinCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 100,
         'estoque_maximo': int.tryParse(_estoqueMaxCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 1000,
+        'estoque_seguranca': int.tryParse(_estoqueSegurancaCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 0,
+        'estoque_critico': int.tryParse(_estoqueCriticoCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 50,
+        'lote_producao': int.tryParse(_loteProducaoCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 100,
+        'dias_cobertura_alvo': int.tryParse(_diasCoberturaCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 3,
+        'capacidade_campanha': int.tryParse(_capacidadeCampanhaCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 0,
+        'tempo_preparacao': int.tryParse(_tempoPreparacaoCtrl.text.replaceAll(RegExp(r'\D'), '')) ?? 0,
+        'estrategia_producao': _estrategiaProducaoPadrao,
         'estrategia_comercial': _estrategiaComercialPadrao.name,
         'preco_base': double.tryParse(_precoPadraoCtrl.text.replaceAll(',', '.')) ?? 1.50,
         'ncm': _ncmPadraoCtrl.text.trim(),
@@ -318,6 +346,15 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
           );
           await _catAssocRepo.save(newAssoc);
         }
+      }
+
+      // Propaga alterações de parâmetros para todos os produtos ativos desta categoria
+      final prodsNaCategoria = (await _produtoRepo.findAll())
+          .where((p) => p.categoriaId == id && p.controlaEstoque)
+          .toList();
+      final estoqueCtrl = DependencyInjection().get<EstoqueController>();
+      for (final prod in prodsNaCategoria) {
+        await estoqueCtrl.aplicarParametrosProduto(prod.id);
       }
 
       await _carregarCategorias();
@@ -468,9 +505,9 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
                 },
                 child: Row(
                   children: const [
-                    Icon(Icons.info_outline, size: 14, color: FincoreColors.textSecondary),
-                    SizedBox(width: 4),
-                    Text('Painel', style: TextStyle(fontSize: 11.5, color: FincoreColors.textSecondary)),
+                    Icon(Icons.info_outline, size: 13, color: FincoreColors.textSecondary),
+                    SizedBox(width: 2),
+                    Text('Painel', style: TextStyle(fontSize: 10.5, color: FincoreColors.textSecondary)),
                   ],
                 ),
               ),
@@ -480,9 +517,9 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
                 },
                 child: Row(
                   children: const [
-                    Icon(Icons.edit_outlined, size: 14, color: FincoreColors.textSecondary),
-                    SizedBox(width: 4),
-                    Text('Editar', style: TextStyle(fontSize: 11.5, color: FincoreColors.textSecondary)),
+                    Icon(Icons.edit_outlined, size: 13, color: FincoreColors.textSecondary),
+                    SizedBox(width: 2),
+                    Text('Editar', style: TextStyle(fontSize: 10.5, color: FincoreColors.textSecondary)),
                   ],
                 ),
               ),
@@ -500,9 +537,9 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
                 },
                 child: Row(
                   children: [
-                    Icon(Icons.add_circle_outline, size: 14, color: FincoreColors.primary),
-                    const SizedBox(width: 4),
-                    Text('Novo Produto', style: TextStyle(fontSize: 11.5, color: FincoreColors.primary)),
+                    Icon(Icons.add_circle_outline, size: 13, color: FincoreColors.primary),
+                    const SizedBox(width: 2),
+                    Text('Novo Prod', style: TextStyle(fontSize: 10.5, color: FincoreColors.primary)),
                   ],
                 ),
               ),
@@ -813,8 +850,13 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
             _buildInspectorSectionTitle('Estoque (Padrão)'),
             _buildInspectorDetailRow('Controla Estoque', _controlaEstoquePadrao ? 'Sim' : 'Não'),
             if (_controlaEstoquePadrao) ...[
+              _buildInspectorDetailRow('Estoque Segurança', _estoqueSegurancaCtrl.text),
+              _buildInspectorDetailRow('Estoque Crítico', _estoqueCriticoCtrl.text),
               _buildInspectorDetailRow('Estoque Mínimo', _estoqueMinCtrl.text),
               _buildInspectorDetailRow('Estoque Máximo', _estoqueMaxCtrl.text),
+              _buildInspectorDetailRow('Lote de Produção', _loteProducaoCtrl.text),
+              _buildInspectorDetailRow('Dias Cobertura Alvo', '${_diasCoberturaCtrl.text} dias'),
+              _buildInspectorDetailRow('Capac. Campanha', _capacidadeCampanhaCtrl.text),
             ],
 
             const SizedBox(height: 16),
@@ -1017,6 +1059,30 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                const FincoreFieldLabel(label: 'ESTOQUE SEGURANÇA PADRÃO'),
+                                FincoreTextField(controller: _estoqueSegurancaCtrl, hintText: '0'),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const FincoreFieldLabel(label: 'NÍVEL CRÍTICO PADRÃO'),
+                                FincoreTextField(controller: _estoqueCriticoCtrl, hintText: '50'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 const FincoreFieldLabel(label: 'ESTOQUE MÍNIMO PADRÃO'),
                                 FincoreTextField(controller: _estoqueMinCtrl, hintText: '100'),
                               ],
@@ -1088,6 +1154,68 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const FincoreFieldLabel(label: 'TAMANHO LOTE PADRÃO (UN)'),
+                                FincoreTextField(controller: _loteProducaoCtrl, hintText: '100', keyboardType: TextInputType.number),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const FincoreFieldLabel(label: 'DIAS COBERTURA ALVO'),
+                                FincoreTextField(controller: _diasCoberturaCtrl, hintText: '3', keyboardType: TextInputType.number),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const FincoreFieldLabel(label: 'CAPACIDADE CAMPANHA PADRÃO'),
+                                FincoreTextField(controller: _capacidadeCampanhaCtrl, hintText: '0', keyboardType: TextInputType.number),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const FincoreFieldLabel(label: 'TEMPO PREPARAÇÃO (MIN)'),
+                                FincoreTextField(controller: _tempoPreparacaoCtrl, hintText: '0 min', keyboardType: TextInputType.number),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const FincoreFieldLabel(label: 'ESTRATÉGIA DE PRODUÇÃO PADRÃO'),
+                      DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        value: _estrategiaProducaoPadrao,
+                        dropdownColor: FincoreColors.surface,
+                        decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                        items: const [
+                          DropdownMenuItem(value: 'concentrada', child: Text('Concentrada (uma campanha por vez)', style: TextStyle(fontSize: 13))),
+                          DropdownMenuItem(value: 'mista', child: Text('Mista (múltiplos produtos)', style: TextStyle(fontSize: 13))),
+                          DropdownMenuItem(value: 'flexivel', child: Text('Flexível (planejamento dinâmico)', style: TextStyle(fontSize: 13))),
+                        ],
+                        onChanged: (v) => setState(() => _estrategiaProducaoPadrao = v!),
                       ),
                       const SizedBox(height: 16),
                       Row(

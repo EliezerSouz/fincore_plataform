@@ -16,6 +16,7 @@ class PedidoDraft {
   final List<ItemPedidoDraft> itens;
   final DateTime dataHoraCriacao;
   final String operadorId;
+  final String? observacoes;
 
   PedidoDraft({
     String? id,
@@ -33,6 +34,7 @@ class PedidoDraft {
     required this.itens,
     DateTime? dataHoraCriacao,
     required this.operadorId,
+    this.observacoes,
   })  : id = id ?? const Uuid().v4(),
         dataHoraCriacao = dataHoraCriacao ?? DateTime.now();
 
@@ -52,6 +54,7 @@ class PedidoDraft {
     List<ItemPedidoDraft>? itens,
     DateTime? dataHoraCriacao,
     String? operadorId,
+    String? Function()? observacoes,
   }) {
     return PedidoDraft(
       id: id ?? this.id,
@@ -69,6 +72,7 @@ class PedidoDraft {
       itens: itens ?? this.itens,
       dataHoraCriacao: dataHoraCriacao ?? this.dataHoraCriacao,
       operadorId: operadorId ?? this.operadorId,
+      observacoes: observacoes != null ? observacoes() : this.observacoes,
     );
   }
 }

@@ -85,9 +85,9 @@ void main() {
       di = DependencyInjection();
       di.clear();
 
-      empresaRepository = EmpresaRepository(db: db, context: context);
-      usuarioRepository = UsuarioRepository(db: db, context: context);
       outboxService = OutboxService(db: db, context: context);
+      empresaRepository = EmpresaRepository(db: db, context: context, outbox: outboxService);
+      usuarioRepository = UsuarioRepository(db: db, context: context);
       auditService = AuditService(context: context);
       syncEngine = SyncEngine(
         outboxService: outboxService,
@@ -118,6 +118,8 @@ void main() {
       // 2. Persistir Empresa e Usuário no banco SQLite via repositórios com tenancy-isolation
       await empresaRepository.save(mockEmpresa);
       await usuarioRepository.save(mockUsuario);
+      // Process pending queue from the save so step 4 only processes the UPDATE
+      await syncEngine.processPendingQueue();
 
       final retrievedEmpresa = await empresaRepository.findById('tenant-e2e-001');
       expect(retrievedEmpresa, isNotNull);

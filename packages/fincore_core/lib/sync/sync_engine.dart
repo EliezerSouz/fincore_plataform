@@ -244,7 +244,7 @@ class SyncEngine {
 
             LogService.instance.warning(
               LogModule.sync,
-              '[FALHA TRANSITÓRIA] Entidade: [${entry.entity}] | ID: $shortId | Tentativa $attempts/5 - ${entry.errorMessage}',
+              '[FALHA TRANSITÓRIA] Entidade: [${entry.entity}] | ID: $shortId | Tentativa $attempts/5 - $pushErrorStr',
               tenantId: context.hasContext ? context.tenantId : null,
               traceId: traceId,
               context: logContext,
@@ -397,6 +397,52 @@ class SyncEngine {
             lastSyncedAt: Value(now),
           ));
           break;
+        case 'HistoricoOrdemPreparo':
+        case 'historicos_ordem_preparo':
+        case 'historico_ordem_preparo':
+          await (db.update(db.historicosOrdemPreparoTable)
+                ..where((t) => t.id.equals(entityId)))
+              .write(HistoricosOrdemPreparoTableCompanion(
+            syncStatus: Value(syncedStatus),
+            lastSyncedAt: Value(now),
+          ));
+          break;
+
+        case 'Pedido':
+        case 'pedidos':
+          await (db.update(db.pedidosTable)..where((t) => t.id.equals(entityId)))
+              .write(PedidosTableCompanion(syncStatus: Value(syncedStatus), lastSyncedAt: Value(now)));
+          break;
+        case 'ItensPedido':
+        case 'itens_pedido':
+          await (db.update(db.itensPedidoTable)..where((t) => t.id.equals(entityId)))
+              .write(ItensPedidoTableCompanion(syncStatus: Value(syncedStatus), lastSyncedAt: Value(now)));
+          break;
+        case 'estoque_produto':
+        case 'EstoqueProduto':
+          await (db.update(db.estoqueProdutosTable)..where((t) => t.id.equals(entityId)))
+              .write(EstoqueProdutosTableCompanion(syncStatus: Value(syncedStatus), lastSyncedAt: Value(now)));
+          break;
+        case 'movimentacao_estoque':
+        case 'MovimentacaoEstoque':
+          await (db.update(db.movimentacoesEstoqueTable)..where((t) => t.id.equals(entityId)))
+              .write(MovimentacoesEstoqueTableCompanion(syncStatus: Value(syncedStatus), lastSyncedAt: Value(now)));
+          break;
+        case 'sessao_caixa':
+        case 'SessaoCaixa':
+          await (db.update(db.sessoesCaixaTable)..where((t) => t.id.equals(entityId)))
+              .write(SessoesCaixaTableCompanion(syncStatus: Value(syncedStatus), lastSyncedAt: Value(now)));
+          break;
+        case 'lancamento_financeiro':
+        case 'LancamentoFinanceiro':
+          await (db.update(db.lancamentosFinanceirosTable)..where((t) => t.id.equals(entityId)))
+              .write(LancamentosFinanceirosTableCompanion(syncStatus: Value(syncedStatus), lastSyncedAt: Value(now)));
+          break;
+        case 'planejamento_producao':
+        case 'PlanoProducao':
+          await (db.update(db.planejamentoProducaoTable)..where((t) => t.id.equals(entityId)))
+              .write(PlanejamentoProducaoTableCompanion(syncStatus: Value(syncedStatus), lastSyncedAt: Value(now)));
+          break;
         case 'empresa_configuracao':
           await (db.update(db.empresaConfiguracaoTable)
                 ..where((t) => t.id.equals(entityId)))
@@ -444,6 +490,9 @@ class SyncEngine {
       case 'produto':
       case 'produtos':
         return 7;
+      case 'planejamento_producao':
+      case 'PlanoProducao':
+        return 30; // FILHO de Produto — sincronizado depois
       case 'LocalEntrega':
       case 'local_entrega':
       case 'locais_entrega':

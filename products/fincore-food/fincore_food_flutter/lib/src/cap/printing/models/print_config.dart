@@ -83,6 +83,33 @@ class PrintConfig {
 
   /// Cria PrintConfig a partir do CoreEmpresaConfiguracao.
   factory PrintConfig.fromEntity(dynamic config) {
+    String pCidade = 'Sorocaba';
+    try {
+      pCidade = config.pixCidade ?? 'Sorocaba';
+    } catch (_) {
+      // pixCidade foi removida do banco de dados na migração de 14/08/2026.
+    }
+
+    String? nomeEmpresaCupom;
+    try {
+      nomeEmpresaCupom = config.nomeEmpresaCupom;
+    } catch (_) {}
+
+    String? telefoneEmpresa;
+    try {
+      telefoneEmpresa = config.telefoneEmpresa;
+    } catch (_) {}
+
+    String? cnpjEmpresa;
+    try {
+      cnpjEmpresa = config.cnpjEmpresa;
+    } catch (_) {}
+
+    String? enderecoEmpresa;
+    try {
+      enderecoEmpresa = config.enderecoEmpresa;
+    } catch (_) {}
+
     return PrintConfig(
       printers: {
         PrintVia.cliente: config.printerCaixa,
@@ -114,11 +141,11 @@ class PrintConfig {
       pixFavorecido: config.pixFavorecido,
       pixBanco: config.pixBanco,
       pixTipo: config.pixTipo,
-      pixCidade: config.pixCidade,
-      nomeEmpresaCupom: config.nomeEmpresaCupom,
-      telefoneEmpresa: config.telefoneEmpresa,
-      cnpjEmpresa: config.cnpjEmpresa,
-      enderecoEmpresa: config.enderecoEmpresa,
+      pixCidade: pCidade,
+      nomeEmpresaCupom: nomeEmpresaCupom,
+      telefoneEmpresa: telefoneEmpresa,
+      cnpjEmpresa: cnpjEmpresa,
+      enderecoEmpresa: enderecoEmpresa,
       logoUrl: config.logoUrl,
     );
   }

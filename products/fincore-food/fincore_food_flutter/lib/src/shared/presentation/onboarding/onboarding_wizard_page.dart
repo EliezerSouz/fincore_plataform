@@ -52,14 +52,12 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
   Future<void> _submitOnboarding() async {
     setState(() => _isLoading = true);
     try {
-      final tenantId = const Uuid().v4();
       String usuarioNome = 'Administrador';
       try {
         usuarioNome = Supabase.instance.client.auth.currentUser?.userMetadata?['name'] ?? 'Administrador';
       } catch (_) {}
 
       final success = await client.onboarding.criarEmpresa(
-        tenantId: tenantId,
         razaoSocial: _razaoSocialController.text.trim(),
         nomeFantasia: _nomeFantasiaController.text.trim().isEmpty 
             ? _razaoSocialController.text.trim()

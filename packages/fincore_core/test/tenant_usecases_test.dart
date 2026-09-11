@@ -58,9 +58,9 @@ void main() {
       expect(membro.ativo, isTrue);
 
       // Verificar se Evento foi criado
-      final evento = await (db.select(db.eventosEmpresaTable)..where((t) => t.tenantId.equals('tenant-123'))).getSingleOrNull();
+      final evento = await (db.select(db.auditLogsTable)..where((t) => t.tenantId.equals('tenant-123'))).getSingleOrNull();
       expect(evento, isNotNull);
-      expect(evento!.tipo, equals('CRIADA'));
+      expect(evento!.action, equals('CRIADA'));
     });
 
     test('AtivarEmpresaUseCase [CU-J0-006] deve mudar status para ativo e logar evento', () async {
@@ -86,9 +86,9 @@ void main() {
       expect(empresa!.status, equals('ativo'));
 
       // 4. Verificar evento ativada
-      final eventos = await (db.select(db.eventosEmpresaTable)..where((t) => t.tenantId.equals('tenant-123') & t.tipo.equals('ATIVADA'))).get();
+      final eventos = await (db.select(db.auditLogsTable)..where((t) => t.tenantId.equals('tenant-123') & t.action.equals('ATIVADA'))).get();
       expect(eventos.length, equals(1));
-      expect(eventos.first.geradoPor, equals('superadmin-user'));
+      expect(eventos.first.userId, equals('superadmin-user'));
     });
 
     test('CalcularProgressoSetupUseCase [CU-J0-007] deve calcular corretamente o progresso do Setup', () async {

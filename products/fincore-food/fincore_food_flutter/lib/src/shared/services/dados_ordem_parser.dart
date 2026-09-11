@@ -13,6 +13,8 @@ class DadosOrdemKanban {
   final double totalUnidades;
   final DateTime? dataAgendada;
   final String observacoesLimpa;
+  final String? endereco;
+  final String? bairro;
 
   const DadosOrdemKanban({
     required this.cliente,
@@ -23,6 +25,8 @@ class DadosOrdemKanban {
     required this.totalUnidades,
     this.dataAgendada,
     required this.observacoesLimpa,
+    this.endereco,
+    this.bairro,
   });
 
   factory DadosOrdemKanban.fromOrdem(OrdemPreparo o) {
@@ -36,6 +40,8 @@ class DadosOrdemKanban {
     double totalUnidades = 0;
     DateTime? dataAgendada;
     List<String> obsRestantes = [];
+    String? endereco;
+    String? bairro;
 
     // Remove as tags estruturadas para facilitar o processamento uniforme
     final textoParaProcessar = obs
@@ -64,11 +70,20 @@ class DadosOrdemKanban {
         } else if (key == 'pagamento') {
           pagamento = val;
           continue;
+        } else if (key == 'endereco' || key == 'endereço') {
+          endereco = val;
+          continue;
+        } else if (key == 'bairro') {
+          bairro = val;
+          continue;
         } else if (key == 'total') {
           totalCentavos = int.tryParse(val) ?? 0;
           continue;
         } else if (key == 'unidades') {
           totalUnidades = double.tryParse(val) ?? 0;
+          continue;
+        } else if (key == 'observacao' || key == 'observação' || key == 'obs') {
+          obsRestantes.add(val);
           continue;
         } else if (key == 'agendado' && val.isNotEmpty) {
           try {
@@ -142,6 +157,8 @@ class DadosOrdemKanban {
       totalUnidades: totalUnidades,
       dataAgendada: dataAgendada,
       observacoesLimpa: obsRestantes.join(', ').trim(),
+      endereco: endereco,
+      bairro: bairro,
     );
   }
 }

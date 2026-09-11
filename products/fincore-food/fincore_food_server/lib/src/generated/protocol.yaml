@@ -12,6 +12,8 @@ mapRoute:
   - calculateRoute:
 onboarding:
   - criarEmpresa:
+  - minhasEmpresas:
+  - trocarEmpresa:
   - minhaEmpresa:
   - status:
   - progressoSetup:

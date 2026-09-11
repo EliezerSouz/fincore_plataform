@@ -326,7 +326,8 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     final String horaStr;
     if (agendada != null) {
       final local = agendada.toLocal();
-      dataStr = DateFormat('dd/MM/yyyy').format(local);
+      final weekdays = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
+      dataStr = '${weekdays[local.weekday - 1]}, ${DateFormat('dd/MM/yyyy').format(local)}';
       horaStr = DateFormat('HH:mm').format(local);
     } else {
       dataStr = 'Imediato';
@@ -730,7 +731,7 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   // ── Ações contextuais ─────────────────────────────────────────────
 
   Widget _buildActions() {
-    final isCozinha = widget.userRole == 'COZINHA';
+    final isCozinha = widget.userRole?.toUpperCase() == 'COZINHA';
     final proxStatus = _proximoStatus;
     final podeReverter = !isCozinha && PermissaoService.podeRevertarStatus(widget.userRole) &&
         _statusAnterior != null;

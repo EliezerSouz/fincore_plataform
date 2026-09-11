@@ -13,16 +13,28 @@ void main() async {
     settings: const ConnectionSettings(sslMode: SslMode.require),
   );
 
-  print('\n=== ROUTE CACHE ===');
-  final cacheRows = await connection.execute('SELECT origin, destination, distance_meters, duration_seconds FROM route_cache');
-  for (final row in cacheRows) {
-    print('  Origem: ${row[0]} | Destino: ${row[1]} | Distância: ${row[2]}m | Duração: ${row[3]}s');
+  print('\n=== EMPRESAS ===');
+  final empRows = await connection.execute('SELECT id, "razaoSocial", status, email FROM empresa');
+  for (final row in empRows) {
+    print('  ID: ${row[0]} | Razao: ${row[1]} | Status: ${row[2]} | Email: ${row[3]}');
+  }
+
+  print('\n=== COLUMNS DEFAULT ===');
+  final colRows = await connection.execute("SELECT column_name, column_default FROM information_schema.columns WHERE table_name = 'empresa' AND column_name = 'status'");
+  for (final row in colRows) {
+    print('  Column: ${row[0]} | Default: ${row[1]}');
+  }
+
+  print('\n=== TRIGGERS ===');
+  final trigRows = await connection.execute("SELECT trigger_name, event_manipulation, event_object_table, action_statement FROM information_schema.triggers");
+  for (final row in trigRows) {
+    print('  Trigger: ${row[0]} | Event: ${row[1]} | Table: ${row[2]} | Action: ${row[3]}');
   }
 
   print('\n=== USUÁRIOS ===');
-  final userRows = await connection.execute('SELECT id, email, nome FROM usuarios');
+  final userRows = await connection.execute('SELECT * FROM usuarios LIMIT 5');
   for (final row in userRows) {
-    print('  ID: ${row[0]} | Email: ${row[1]} | Nome: ${row[2]}');
+    print('  Row: ${row.toColumnMap()}');
   }
 
   print('\n=== MEMBROS DE EMPRESA ===');

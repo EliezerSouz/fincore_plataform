@@ -186,7 +186,6 @@ class _CardList extends StatelessWidget {
   }
 }
 
-/// Modo compacto para a coluna de "Entregues" — linhas ao invés de cards.
 class _CompactList extends StatelessWidget {
   final List<OrdemPreparo> ordens;
   final Widget Function(OrdemPreparo, int) cardBuilder;
