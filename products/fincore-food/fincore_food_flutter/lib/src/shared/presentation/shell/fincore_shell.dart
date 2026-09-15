@@ -1404,7 +1404,7 @@ class _FincoreShellState extends State<FincoreShell>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.storefront_rounded,
                     size: 14,
                     color: FincoreColors.primary,
