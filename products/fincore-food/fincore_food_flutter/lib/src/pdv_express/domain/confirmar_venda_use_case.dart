@@ -446,9 +446,9 @@ class ConfirmarVendaUseCase {
           'status': 'confirmado',
           'canalOrigem': 'pdv_express',
           'operadorId': activeUser,
-          'dataHoraCriacao': input.pedido.dataHoraCriacao.toIso8601String(),
+          'dataHoraCriacao': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
           if (input.dataEntregaPrevista != null)
-            'dataHoraEntregaPrevista': input.dataEntregaPrevista!.toIso8601String(),
+            'dataHoraEntregaPrevista': input.dataEntregaPrevista!.toUtc().toIso8601String(),
           'numeroPedido': proxNumero,
           'enderecoJson': input.enderecoJson,
           'syncVersion': 1,
@@ -771,7 +771,7 @@ class ConfirmarVendaUseCase {
         'operadorId': operadorId,
         'dataHora': now.toIso8601String(),
         if (dataEntregaPrevista != null)
-          'dataEntregaPrevista': dataEntregaPrevista.toIso8601String(),
+          'dataEntregaPrevista': dataEntregaPrevista.toUtc().toIso8601String(),
         'syncVersion': 1,
         'createdAt': now.toIso8601String(),
         'updatedAt': now.toIso8601String(),

@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/repository/ordem_preparo_repository.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Item do ranking de produtos
 class RankingProdutoItem {
@@ -50,6 +52,82 @@ class EventoTimeline {
     required this.tipo,
     required this.status,
     required this.orderId,
+  });
+}
+
+/// Slot do mapa de calor de horários (0-23h) com contagem de pedidos
+class HeatMapSlot {
+  final int hora; // 0-23
+  final int contagem;
+  final int contagemOntem;
+
+  const HeatMapSlot({
+    required this.hora,
+    required this.contagem,
+    required this.contagemOntem,
+  });
+
+  double get intensidade {
+    if (contagem == 0) return 0.0;
+    return contagem.toDouble();
+  }
+}
+
+/// Produto com risco de ruptura de estoque
+class RupturaEstoqueItem {
+  final String produtoId;
+  final String nomeProduto;
+  /// Quantidade disponível (físico - reservado)
+  final double quantidadeDisponivel;
+  /// Consumo médio por hora (baseado nos últimos 7 dias)
+  final double consumoMedioPorHora;
+  /// Estimativa de horas até zerar (null = seguro ou sem dados)
+  final double? horasAteZerar;
+  final String nivel; // 'critico' | 'atencao' | 'ok'
+
+  const RupturaEstoqueItem({
+    required this.produtoId,
+    required this.nomeProduto,
+    required this.quantidadeDisponivel,
+    required this.consumoMedioPorHora,
+    this.horasAteZerar,
+    required this.nivel,
+  });
+}
+
+/// Pedido de entrega agrupado por bairro (logística)
+class LogisticaBairroItem {
+  final String bairro;
+  final int totalPedidos;
+  final int pendentes;
+  final int emRota;
+  final int entregues;
+
+  const LogisticaBairroItem({
+    required this.bairro,
+    required this.totalPedidos,
+    required this.pendentes,
+    required this.emRota,
+    required this.entregues,
+  });
+}
+
+/// Velocidade média da cozinha
+class VelocidadeCozinhaData {
+  /// Tempo médio de preparo hoje (em minutos) — do confirmado ao pronto
+  final double tempoMedioHoje;
+  /// Tempo médio histórico (últimos 7 dias)
+  final double tempoMedioHistorico;
+  /// Total de pedidos prontos hoje
+  final int totalProntosHoje;
+  /// Eficiência (0.0 - 1.0) — quanto mais rápido que o histórico, maior
+  final double eficiencia;
+
+  const VelocidadeCozinhaData({
+    required this.tempoMedioHoje,
+    required this.tempoMedioHistorico,
+    required this.totalProntosHoje,
+    required this.eficiencia,
   });
 }
 
@@ -110,6 +188,12 @@ class DashboardMetrics {
   final int planejamentosCriadosHoje;
   final int producoesParciaisHoje;
 
+  // Ontem (para variação %)
+  final int totalPedidosOntem;
+  final int faturamentoCentavosOntem;
+  final int pedidosCanceladosOntem;
+  final int totalEntregasOntem;
+
   // Estatísticas comparativas
   final int faturamentoCentavosSemana;
   final int faturamentoCentavosMes;
@@ -129,6 +213,21 @@ class DashboardMetrics {
   final List<EntregaAgendadaGrupo> proximasEntregas;
   final List<EventoTimeline> timelineHoje;
   final List<ProjecaoDia> projecaoDias;
+
+  // Novos dados — Mapa de Calor de Horários
+  final List<HeatMapSlot> heatMapHorarios;
+
+  // Novos dados — Ruptura Iminente de Estoque
+  final List<RupturaEstoqueItem> rupturaEstoque;
+
+  // Novos dados — Logística por Bairro
+  final List<LogisticaBairroItem> logisticaPorBairro;
+
+  // Novos dados — Velocidade da Cozinha
+  final VelocidadeCozinhaData? velocidadeCozinha;
+
+  // Meta diária de faturamento (0 = sem meta definida)
+  final int metaDiariaCentavos;
 
   const DashboardMetrics({
     required this.totalPedidosHoje,
@@ -157,7 +256,41 @@ class DashboardMetrics {
     required this.producoesConcluidasHoje,
     required this.planejamentosCriadosHoje,
     required this.producoesParciaisHoje,
+    // novos
+    this.totalPedidosOntem = 0,
+    this.faturamentoCentavosOntem = 0,
+    this.pedidosCanceladosOntem = 0,
+    this.totalEntregasOntem = 0,
+    this.heatMapHorarios = const [],
+    this.rupturaEstoque = const [],
+    this.logisticaPorBairro = const [],
+    this.velocidadeCozinha,
+    this.metaDiariaCentavos = 0,
   });
+
+  /// Variação % de faturamento hoje vs. ontem
+  double get variacaoFaturamentoPct {
+    if (faturamentoCentavosOntem == 0) return faturamentoCentavosHoje > 0 ? 100.0 : 0.0;
+    return ((faturamentoCentavosHoje - faturamentoCentavosOntem) / faturamentoCentavosOntem) * 100.0;
+  }
+
+  /// Variação % de pedidos hoje vs. ontem
+  double get variacaoPedidosPct {
+    if (totalPedidosOntem == 0) return totalPedidosHoje > 0 ? 100.0 : 0.0;
+    return ((totalPedidosHoje - totalPedidosOntem) / totalPedidosOntem) * 100.0;
+  }
+
+  /// Variação % de entregas hoje vs. ontem
+  double get variacaoEntregasPct {
+    if (totalEntregasOntem == 0) return totalEntregasHoje > 0 ? 100.0 : 0.0;
+    return ((totalEntregasHoje - totalEntregasOntem) / totalEntregasOntem) * 100.0;
+  }
+
+  /// Progresso da meta diária (0.0 - 1.0+)
+  double get progressoMeta {
+    if (metaDiariaCentavos == 0) return 0.0;
+    return (faturamentoCentavosHoje / metaDiariaCentavos).clamp(0.0, 1.5);
+  }
 
   factory DashboardMetrics.zero() {
     return const DashboardMetrics(
@@ -210,6 +343,8 @@ class DashboardRepository {
     if (activeTenant.isEmpty) {
       return DashboardMetrics.zero();
     }
+
+    final prefs = await SharedPreferences.getInstance();
 
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day);
@@ -375,7 +510,7 @@ class DashboardRepository {
     };
 
     // Parser inline para extrair "agendado: dd/MM/yyyy HH:mm" das observações
-    DateTime? _parseAgendadoFromObs(String? obs) {
+    DateTime? parseAgendadoFromObs(String? obs) {
       if (obs == null || obs.isEmpty) return null;
       final regex = RegExp(r'agendado\s*:\s*(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})', caseSensitive: false);
       final match = regex.firstMatch(obs);
@@ -393,15 +528,12 @@ class DashboardRepository {
       // Pedidos cancelados, entregues ou em rascunho não aparecem nas próximas entregas
       if (p.status == 'cancelado' || p.status == 'entregue' || p.status == 'rascunho') continue;
 
-      DateTime? dataEntrega = p.dataHoraEntregaPrevista;
-
-      // Fallback 1: tenta parsear dataAgendada das observações da ordem de preparo
-      if (dataEntrega == null) {
-        final obsText = ordemByPedidoId[p.id];
-        if (obsText != null) {
-          dataEntrega = _parseAgendadoFromObs(obsText);
-        }
+      DateTime? dataEntrega;
+      final obsText = ordemByPedidoId[p.id];
+      if (obsText != null) {
+        dataEntrega = parseAgendadoFromObs(obsText);
       }
+      dataEntrega ??= p.dataHoraEntregaPrevista?.toLocal();
 
       // Fallback 2 (bug legado): código antigo gravava dataHoraCriacao = dataEntrega.
       // Se dataHoraCriacao do pedido for >30 min no futuro em relação a now → é o horário de entrega
@@ -443,39 +575,64 @@ class DashboardRepository {
     }
 
     // ── 7. Linha de Tempo Operacional de Hoje ──
+    // Regra:
+    // • Todo pedido criado hoje entra na timeline com a hora de CRIAÇÃO (momento real da venda)
+    // • Se o pedido for agendado (tem dataHoraEntregaPrevista) E ainda está ativo,
+    //   adiciona também os eventos de "Preparação" e "Entrega" com os horários corretos
+    // • Pedidos já entregues/cancelados NÃO geram eventos futuros de preparação/entrega
     final List<EventoTimeline> timelineHoje = [];
+    final statusAtivosTimeline = {'confirmado', 'em_preparo', 'pronto'};
+    final statusFinalizadosTimeline = {'entregue', 'cancelado', 'concluido', 'concluído'};
+
     final hojePedidos = pedidos30Dias.where((p) =>
-        p.dataHoraCriacao.isAfter(startOfDay) &&
-        p.dataHoraCriacao.isBefore(endOfDay)
+        p.dataHoraCriacao.toLocal().isAfter(startOfDay) &&
+        p.dataHoraCriacao.toLocal().isBefore(endOfDay) &&
+        p.status != 'rascunho'
     ).toList();
 
     for (final p in hojePedidos) {
-      final time = p.dataHoraEntregaPrevista ?? p.dataHoraCriacao;
-      final formatTime = DateFormat('HH:mm').format(time.toLocal());
       final String cliente = p.clienteNomeAvulso ?? 'Balcão';
       final String tipo = p.tipoLogistica;
       final String statusLabel = p.status;
 
-      if (p.dataHoraEntregaPrevista != null) {
-        final prepTime = p.dataHoraEntregaPrevista!.subtract(const Duration(minutes: 40));
-        if (prepTime.isAfter(startOfDay)) {
-          timelineHoje.add(EventoTimeline(
-            hora: DateFormat('HH:mm').format(prepTime.toLocal()),
-            cliente: 'Preparo Pedido #${p.numeroPedido ?? p.id.substring(0, 4)}',
-            tipo: 'Preparação',
-            status: 'Pendente',
-            orderId: p.id,
-          ));
-        }
-      }
-
+      // Evento principal: hora em que o pedido foi registrado
       timelineHoje.add(EventoTimeline(
-        hora: formatTime,
+        hora: DateFormat('HH:mm').format(p.dataHoraCriacao.toLocal()),
         cliente: cliente,
         tipo: tipo,
         status: statusLabel,
         orderId: p.id,
       ));
+
+      // Eventos de preparação e entrega: apenas para pedidos agendados AINDA ATIVOS
+      final isAtivo = statusAtivosTimeline.contains(p.status.toLowerCase());
+      final isFinalizado = statusFinalizadosTimeline.contains(p.status.toLowerCase());
+      final entregaPrevista = p.dataHoraEntregaPrevista?.toLocal();
+
+      if (entregaPrevista != null && !isFinalizado) {
+        // Evento de Preparação: 40 min antes da entrega prevista
+        final prepTime = entregaPrevista.subtract(const Duration(minutes: 40));
+        if (prepTime.isAfter(startOfDay) && prepTime.isBefore(endOfDay.add(const Duration(days: 1)))) {
+          timelineHoje.add(EventoTimeline(
+            hora: DateFormat('HH:mm').format(prepTime),
+            cliente: 'Preparo: $cliente #${p.numeroPedido ?? p.id.substring(0, 4)}',
+            tipo: 'Preparação',
+            status: isAtivo ? 'Pendente' : statusLabel,
+            orderId: p.id,
+          ));
+        }
+
+        // Evento de Entrega/Retirada agendada
+        if (entregaPrevista.isAfter(startOfDay) && entregaPrevista.isBefore(endOfDay.add(const Duration(days: 1)))) {
+          timelineHoje.add(EventoTimeline(
+            hora: DateFormat('HH:mm').format(entregaPrevista),
+            cliente: '$cliente (Agendado)',
+            tipo: tipo == 'Retirada' ? 'Retirada' : 'Entrega',
+            status: statusLabel,
+            orderId: p.id,
+          ));
+        }
+      }
     }
 
     final todayProductions = await (db.select(db.planejamentoProducaoTable)
@@ -646,6 +803,192 @@ class DashboardRepository {
         .get();
     final int countParciais = parciaisHoje.length;
 
+    // ── Ontem: dados para variação % ──
+    final ontemStart = startOfDay.subtract(const Duration(days: 1));
+    final ontemEnd = startOfDay;
+    final pedidosOntem = pedidos30Dias.where((p) =>
+        p.dataHoraCriacao.toLocal().isAfter(ontemStart) &&
+        p.dataHoraCriacao.toLocal().isBefore(ontemEnd) &&
+        p.status != 'cancelado' &&
+        p.status != 'rascunho').toList();
+    final totalPedidosOntem = pedidosOntem.length;
+    final faturamentoCentavosOntem = pedidosOntem.fold(0, (sum, p) => sum + p.valorTotalCentavos);
+    final pedidosCanceladosOntem = pedidos30Dias.where((p) =>
+        p.dataHoraCriacao.toLocal().isAfter(ontemStart) &&
+        p.dataHoraCriacao.toLocal().isBefore(ontemEnd) &&
+        p.status == 'cancelado').length;
+    final totalEntregasOntem = pedidosOntem.where((p) => p.tipoLogistica == 'Entrega').length;
+
+    // ── Mapa de Calor de Horários (últimos 7 dias + hoje) ──
+    final List<HeatMapSlot> heatMap = [];
+    final pedidosUltimosSete = pedidos30Dias.where((p) =>
+        p.dataHoraCriacao.toLocal().isAfter(startOfDay.subtract(const Duration(days: 7))) &&
+        p.status != 'cancelado' &&
+        p.status != 'rascunho').toList();
+    final pedidosOntemLista = pedidos30Dias.where((p) =>
+        p.dataHoraCriacao.toLocal().isAfter(ontemStart) &&
+        p.dataHoraCriacao.toLocal().isBefore(ontemEnd) &&
+        p.status != 'cancelado').toList();
+
+    for (int h = 0; h < 24; h++) {
+      final contagemHoje = hojePedidos.where((p) => p.dataHoraCriacao.toLocal().hour == h).length;
+      final contagemOntem = pedidosOntemLista.where((p) => p.dataHoraCriacao.toLocal().hour == h).length;
+      heatMap.add(HeatMapSlot(hora: h, contagem: contagemHoje, contagemOntem: contagemOntem));
+    }
+
+    // ── Ruptura Iminente de Estoque ──
+    final List<RupturaEstoqueItem> rupturaEstoque = [];
+    final estoqueRows = await (db.select(db.estoqueProdutosTable)
+          ..where((t) => t.tenantId.equals(activeTenant) & t.deletedAt.isNull()))
+        .get();
+
+    for (final est in estoqueRows) {
+      final double fisico = est.quantidadeAtual.toDouble();
+      final double reservado = est.quantidadeReservada.toDouble();
+      final double disponivel = (fisico - reservado).clamp(0.0, 999999.0);
+
+      // Calcula consumo médio dos últimos 7 dias pelo total de itens vendidos
+      final itensVendidos7Dias = await (db.select(db.itensPedidoTable)
+            ..where((t) =>
+                t.tenantId.equals(activeTenant) &
+                t.produtoId.equals(est.produtoId) &
+                t.deletedAt.isNull() &
+                t.createdAt.isBiggerOrEqualValue(startOfDay.subtract(const Duration(days: 7)))))
+          .get();
+
+      final pedidosValidos7 = itensVendidos7Dias.where((it) {
+        return pedidosUltimosSete.any((p) => p.id == it.pedidoId && p.status != 'cancelado');
+      }).toList();
+
+      if (pedidosValidos7.isEmpty) continue;
+
+      final totalConsumido7Dias = pedidosValidos7.fold(0.0, (sum, it) => sum + it.quantidade);
+      final consumoPorHora = totalConsumido7Dias / (7 * 24);
+
+      if (consumoPorHora <= 0) continue;
+
+      final horasAteZerar = disponivel / consumoPorHora;
+
+      final String nivel;
+      if (horasAteZerar < 12) {
+        nivel = 'critico';
+      } else if (horasAteZerar < 48) {
+        nivel = 'atencao';
+      } else {
+        continue; // Ignora itens com cobertura > 48h — não são risco
+      }
+
+      final prodRow = await (db.select(db.produtosTable)
+            ..where((t) => t.id.equals(est.produtoId)))
+          .getSingleOrNull();
+
+      rupturaEstoque.add(RupturaEstoqueItem(
+        produtoId: est.produtoId,
+        nomeProduto: prodRow?.nome ?? 'Produto',
+        quantidadeDisponivel: disponivel,
+        consumoMedioPorHora: consumoPorHora,
+        horasAteZerar: horasAteZerar,
+        nivel: nivel,
+      ));
+    }
+    // Ordena por urgência (menor tempo primeiro)
+    rupturaEstoque.sort((a, b) => (a.horasAteZerar ?? 999).compareTo(b.horasAteZerar ?? 999));
+
+    // ── Logística por Bairro ──
+    final List<LogisticaBairroItem> logisticaPorBairro = [];
+    final pedidosEntregaHoje = hojePedidos.where((p) => p.tipoLogistica == 'Entrega').toList();
+    if (pedidosEntregaHoje.isNotEmpty) {
+      final Map<String, Map<String, int>> bairroMap = {};
+      for (final p in pedidosEntregaHoje) {
+        String bairro = 'Sem bairro';
+        if (p.enderecoJson != null && p.enderecoJson!.isNotEmpty) {
+          try {
+            final endJson = jsonDecode(p.enderecoJson!) as Map<String, dynamic>;
+            bairro = (endJson['bairro'] as String? ??
+                endJson['neighborhood'] as String? ??
+                endJson['district'] as String? ??
+                'Sem bairro');
+            if (bairro.isEmpty) bairro = 'Sem bairro';
+          } catch (_) {}
+        }
+        bairroMap[bairro] ??= {'total': 0, 'pendentes': 0, 'emRota': 0, 'entregues': 0};
+        bairroMap[bairro]!['total'] = (bairroMap[bairro]!['total'] ?? 0) + 1;
+        if (p.status == 'confirmado' || p.status == 'em_preparo' || p.status == 'pronto') {
+          bairroMap[bairro]!['pendentes'] = (bairroMap[bairro]!['pendentes'] ?? 0) + 1;
+        } else if (p.status == 'em_rota') {
+          bairroMap[bairro]!['emRota'] = (bairroMap[bairro]!['emRota'] ?? 0) + 1;
+        } else if (p.status == 'entregue') {
+          bairroMap[bairro]!['entregues'] = (bairroMap[bairro]!['entregues'] ?? 0) + 1;
+        }
+      }
+      final entries = bairroMap.entries.toList()
+        ..sort((a, b) => (b.value['total'] ?? 0).compareTo(a.value['total'] ?? 0));
+      for (final e in entries.take(8)) {
+        logisticaPorBairro.add(LogisticaBairroItem(
+          bairro: e.key,
+          totalPedidos: e.value['total'] ?? 0,
+          pendentes: e.value['pendentes'] ?? 0,
+          emRota: e.value['emRota'] ?? 0,
+          entregues: e.value['entregues'] ?? 0,
+        ));
+      }
+    }
+
+    // ── Velocidade da Cozinha ──
+    VelocidadeCozinhaData? velocidadeCozinha;
+    try {
+      final ordensHojeCompletas = await (db.select(db.ordensPreparoTable)
+            ..where((t) =>
+                t.tenantId.equals(activeTenant) &
+                t.deletedAt.isNull() &
+                t.criadaEm.isBiggerOrEqualValue(startOfDay) &
+                t.concluidaEm.isNotNull()))
+          .get();
+
+      final ordensHistoricas = await (db.select(db.ordensPreparoTable)
+            ..where((t) =>
+                t.tenantId.equals(activeTenant) &
+                t.deletedAt.isNull() &
+                t.criadaEm.isBiggerOrEqualValue(startOfDay.subtract(const Duration(days: 7))) &
+                t.criadaEm.isSmallerThanValue(startOfDay) &
+                t.concluidaEm.isNotNull()))
+          .get();
+
+      double calcMedia(List<dynamic> ordens) {
+        if (ordens.isEmpty) return 0.0;
+        double total = 0.0;
+        int count = 0;
+        for (final o in ordens) {
+          if (o.concluidaEm != null) {
+            final minutos = o.concluidaEm!.difference(o.criadaEm).inMinutes.toDouble();
+            if (minutos > 0 && minutos < 300) {
+              total += minutos;
+              count++;
+            }
+          }
+        }
+        return count > 0 ? total / count : 0.0;
+      }
+
+      final tempoHoje = calcMedia(ordensHojeCompletas);
+      final tempoHistorico = calcMedia(ordensHistoricas);
+
+      if (tempoHistorico > 0 || tempoHoje > 0) {
+        double eficiencia = 0.5;
+        if (tempoHistorico > 0 && tempoHoje > 0) {
+          eficiencia = (tempoHistorico / tempoHoje).clamp(0.0, 2.0) / 2.0;
+        } else if (tempoHoje > 0) {
+          eficiencia = 0.5;
+        }
+        velocidadeCozinha = VelocidadeCozinhaData(
+          tempoMedioHoje: tempoHoje,
+          tempoMedioHistorico: tempoHistorico,
+          totalProntosHoje: ordensHojeCompletas.length,
+          eficiencia: eficiencia.clamp(0.0, 1.0),
+        );
+      }
+    } catch (_) {}
+
     return DashboardMetrics(
       totalPedidosHoje: totalPedidosHoje,
       faturamentoCentavosHoje: faturamentoHoje,
@@ -673,7 +1016,18 @@ class DashboardRepository {
       producoesConcluidasHoje: countConcluidas,
       planejamentosCriadosHoje: countCriados,
       producoesParciaisHoje: countParciais,
+      // novos
+      totalPedidosOntem: totalPedidosOntem,
+      faturamentoCentavosOntem: faturamentoCentavosOntem,
+      pedidosCanceladosOntem: pedidosCanceladosOntem,
+      totalEntregasOntem: totalEntregasOntem,
+      heatMapHorarios: heatMap,
+      rupturaEstoque: rupturaEstoque,
+      logisticaPorBairro: logisticaPorBairro,
+      velocidadeCozinha: velocidadeCozinha,
+      metaDiariaCentavos: (prefs.getDouble('meta_diaria_faturamento') ?? 0.0) > 0
+          ? ((prefs.getDouble('meta_diaria_faturamento') ?? 0.0) * 100).round()
+          : 0,
     );
   }
 }
-

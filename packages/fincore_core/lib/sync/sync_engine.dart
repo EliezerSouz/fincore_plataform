@@ -118,6 +118,7 @@ class SyncEngine {
         : null;
 
     try {
+      await outboxService.retryFailedEntries();
       final entries = await outboxService.getPendingEntries();
       initialCount = entries.length;
 
@@ -490,9 +491,17 @@ class SyncEngine {
       case 'produto':
       case 'produtos':
         return 7;
+      case 'usuarios':
+      case 'usuario':
+      case 'Usuario':
+        return 8; // PAI de MembroEmpresa — enviado antes!
       case 'planejamento_producao':
       case 'PlanoProducao':
         return 30; // FILHO de Produto — sincronizado depois
+      case 'membros_empresa':
+      case 'membro_empresa':
+      case 'MembroEmpresa':
+        return 25; // FILHO de Usuario e Empresa — enviado depois do Usuario!
       case 'LocalEntrega':
       case 'local_entrega':
       case 'locais_entrega':

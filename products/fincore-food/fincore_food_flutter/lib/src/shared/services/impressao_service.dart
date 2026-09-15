@@ -198,7 +198,7 @@ class FincorePdfGerador {
     final boldStyle = pw.TextStyle(fontSize: is58 ? 9 : 11, fontWeight: pw.FontWeight.bold);
     final largeStyle = pw.TextStyle(fontSize: is58 ? 10 : 12, fontWeight: pw.FontWeight.bold);
 
-    final formatData = DateFormat('dd/MM/yyyy - HH:mm').format(dados.dataHora);
+    final formatData = DateFormat('dd/MM/yyyy - HH:mm').format(dados.dataHora.toLocal());
     final totalSalgados = dados.itens.fold<double>(0, (sum, i) => sum + i.quantidade);
     final totalSabores = dados.itens.length;
 

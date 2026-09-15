@@ -316,12 +316,13 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   // ── Corpo do drawer ──────────────────────────────────────────────────
 
   Widget _buildBody() {
+    final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
     final totalCentavos = widget.controller.totalOrdemCentavos(widget.ordem);
     final mostraFinanceiro =
         PermissaoService.podeVerFinanceiro(widget.userRole);
     final isCozinha = widget.userRole?.toUpperCase() == 'COZINHA';
 
-    final agendada = widget.parsed.dataAgendada;
+    final agendada = widget.parsed.dataAgendada ?? pedido?.dataHoraEntregaPrevista?.toLocal();
     final String dataStr;
     final String horaStr;
     if (agendada != null) {

@@ -216,7 +216,7 @@ class _PedidosPageState extends State<PedidosPage> {
       taxaEntregaCentavos: taxaEntregaCentavos,
       trocoParaCentavos: trocoParaCentavos,
       itens: printItens,
-      dataHora: (pedidoRow != null) ? (pedidoRow.dataHoraEntregaPrevista ?? pedidoRow.dataHoraCriacao) : o.criadaEm,
+      dataHora: (pedidoRow != null) ? (pedidoRow.dataHoraEntregaPrevista?.toLocal() ?? pedidoRow.dataHoraCriacao.toLocal()) : o.criadaEm.toLocal(),
       observacao: parsed.observacoesLimpa,
       status: o.status.name,
       cidade: cidade,
@@ -501,6 +501,7 @@ class _PedidosPageState extends State<PedidosPage> {
       BuildContext context, String deStatus, String paraStatus) async {
     final controller = TextEditingController();
     String? motivoSelecionado;
+    final isReversaoEntregue = deStatus.toLowerCase().contains('entregue');
 
     const motivosRapidos = [
       'Cliente solicitou alteração',
@@ -519,13 +520,16 @@ class _PedidosPageState extends State<PedidosPage> {
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16)),
           title: Row(
-            children: const [
-              Icon(Icons.undo_outlined,
-                  color: Color(0xFFF59E0B), size: 20),
-              SizedBox(width: 10),
+            children: [
+              Icon(
+                isReversaoEntregue ? Icons.warning_amber_rounded : Icons.undo_outlined,
+                color: isReversaoEntregue ? FincoreColors.danger : const Color(0xFFF59E0B),
+                size: 22,
+              ),
+              const SizedBox(width: 10),
               Text(
-                'Motivo da Reversão',
-                style: TextStyle(
+                isReversaoEntregue ? '⚠️ Reverter Pedido Entregue' : 'Motivo da Reversão',
+                style: const TextStyle(
                     color: FincoreColors.textPrimary,
                     fontSize: 16,
                     fontWeight: FontWeight.bold),
@@ -533,11 +537,40 @@ class _PedidosPageState extends State<PedidosPage> {
             ],
           ),
           content: SizedBox(
-            width: 460,
+            width: 480,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (isReversaoEntregue) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.danger.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: FincoreColors.danger.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Icon(Icons.inventory_2_outlined, color: FincoreColors.danger, size: 20),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'ESTORNO AUTOMÁTICO DE ESTOQUE:\nEste pedido já foi ENTREGUE. Ao reverter, a baixa física de estoque será ESTORNADA e os itens retornarão para a reserva operacional de preparação.',
+                            style: TextStyle(
+                              color: FincoreColors.danger,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 Text(
                   'Revertendo de "$deStatus" para "$paraStatus":',
                   style: const TextStyle(
@@ -1501,8 +1534,8 @@ class _EntregueCompactRow extends StatelessWidget {
 
     // Horário de conclusão (concluidaEm) ou fallback para criadaEm
     final horaFinalizada = ordem.concluidaEm != null
-        ? DateFormat('HH:mm').format(ordem.concluidaEm!)
-        : DateFormat('HH:mm').format(ordem.criadaEm);
+        ? DateFormat('HH:mm').format(ordem.concluidaEm!.toLocal())
+        : DateFormat('HH:mm').format(ordem.criadaEm.toLocal());
 
     final isDelivery = parsed.tipoLogistica.toLowerCase().contains('entrega') ||
         parsed.tipoLogistica.toLowerCase().contains('delivery');

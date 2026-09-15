@@ -36,3 +36,12 @@ config/passwords.yaml
 config/development.yaml
 config/staging.yaml
 config/production.yaml
+
+# Build output, local databases, backups & runtime logs
+LOG/
+data/
+DATA/
+backups/
+fincore_food/
+*.dpapi
+

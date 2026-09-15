@@ -741,7 +741,7 @@ class _ProducaoPageState extends State<ProducaoPage>
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Entrega: ${DateFormat('dd/MM — HH:mm').format(r.dataEntrega)}',
+                                'Entrega: ${DateFormat('dd/MM — HH:mm').format(r.dataEntrega.toLocal())}',
                                 style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 11),
                               ),
                               Text(
@@ -1421,7 +1421,7 @@ class _MovimentacaoRow extends StatelessWidget {
                       fontSize: 13,
                       fontWeight: FontWeight.bold)),
               Text(
-                DateFormat('dd/MM HH:mm').format(mov.dataHora),
+                DateFormat('dd/MM HH:mm').format(mov.dataHora.toLocal()),
                 style: const TextStyle(
                     color: FincoreColors.textMuted, fontSize: 10),
               ),
@@ -2236,7 +2236,7 @@ extension _PlanejamentoPainel on _ProducaoPageState {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Entrega: ${DateFormat('dd/MM — HH:mm').format(r.dataEntrega)}',
+                                'Entrega: ${DateFormat('dd/MM — HH:mm').format(r.dataEntrega.toLocal())}',
                                 style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 11),
                               ),
                               Text(

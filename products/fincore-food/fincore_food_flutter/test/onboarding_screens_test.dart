@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/auth/login_page.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/auth/signup_page.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/onboarding/onboarding_wizard_page.dart';
@@ -10,7 +9,7 @@ import 'package:fincore_food_flutter/src/shared/database_initializer.dart';
 void main() {
   setUpAll(() async {
     // Inicializar dependências locais Drift SQLite e DI
-    await DatabaseInitializer.init(Client('http://localhost:8080/'));
+    await DatabaseInitializer.init();
   });
 
   setUp(() {

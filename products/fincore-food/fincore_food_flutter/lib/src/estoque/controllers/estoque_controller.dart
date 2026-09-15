@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:drift/drift.dart';
@@ -6,7 +7,10 @@ import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/repository/audit_log_repository.dart';
+import 'package:fincore_core/sync/outbox_service.dart';
+import 'package:fincore_core/sync/sync_engine.dart';
 import 'package:uuid/uuid.dart';
+import '../../shared/data/sync/supabase_sync_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Modelo de View — EstoqueItem (usado na UI)
@@ -187,11 +191,22 @@ class EstoqueController extends ChangeNotifier {
   List<ReservaAgendada> _reservasAgendadas = [];
   bool _loading = false;
   String? _error;
+  StreamSubscription? _syncSub;
 
   EstoqueController()
       : _db = DependencyInjection().get<FincoreDatabase>(),
         _context = DependencyInjection().get<TenantContext>() {
     _carregar();
+    try {
+      final syncService = DependencyInjection().get<SupabaseSyncService>();
+      _syncSub = syncService.onDataSynced.listen((_) => _carregar(isFromSync: true));
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _syncSub?.cancel();
+    super.dispose();
   }
 
   List<EstoqueItem> get itens => _itens;
@@ -222,7 +237,7 @@ class EstoqueController extends ChangeNotifier {
   /// Número de produtos que precisam produção urgente (para badge no shell)
   int get qtdAlertasUrgentes => itensCriticos.length + itensBaixos.length;
 
-  Future<void> _carregar() async {
+  Future<void> _carregar({bool isFromSync = false}) async {
     if (!_context.hasContext) return;
     _loading = true;
     notifyListeners();
@@ -231,7 +246,7 @@ class EstoqueController extends ChangeNotifier {
       final tenantId = _context.tenantId;
 
       // 0. Auto-healing: Recalcula reservas de pedidos agendados e converte baixas indevidas
-      await recalcularReservasEEstoques();
+      await recalcularReservasEEstoques(isFromSync: isFromSync);
 
       // 1. Todos os registros de estoque ativos
       final estoques = await (
@@ -955,6 +970,7 @@ class EstoqueController extends ChangeNotifier {
     // já tratado pelos dois flags acima
 
     // 3. Atualiza os saldos no estoque
+    final nextVersion = (estoque?.syncVersion ?? 0) + 1;
     await (
       _db.update(_db.estoqueProdutosTable)
         ..where((t) => t.id.equals(estoqueId))
@@ -963,7 +979,7 @@ class EstoqueController extends ChangeNotifier {
       quantidadeReservada: Value(qReservadaDepois),
       updatedAt: Value(now),
       updatedBy: Value(operadorId),
-      syncVersion: const Value(1),
+      syncVersion: Value(nextVersion),
       syncStatus: const Value(SyncStatus.pending),
     ));
 
@@ -1023,6 +1039,8 @@ class EstoqueController extends ChangeNotifier {
     final qAntes = estoque?.quantidadeAtual ?? 0;
     final qReservada = estoque?.quantidadeReservada ?? 0;
 
+    final nextVersion = (estoque?.syncVersion ?? 0) + 1;
+
     if (estoque == null) {
       await _db.into(_db.estoqueProdutosTable).insertOnConflictUpdate(
         EstoqueProdutosTableCompanion.insert(
@@ -1036,7 +1054,7 @@ class EstoqueController extends ChangeNotifier {
           quantidadeProducaoLote: const Value(100),
           diasCoberturaAlvo: const Value(3),
           unidade: const Value('un'),
-          syncVersion: const Value(1),
+          syncVersion: Value(nextVersion),
           syncStatus: SyncStatus.pending,
           createdAt: now,
           updatedAt: now,
@@ -1052,6 +1070,7 @@ class EstoqueController extends ChangeNotifier {
         quantidadeAtual: Value(novaQuantidade),
         updatedAt: Value(now),
         updatedBy: Value(operadorId),
+        syncVersion: Value(nextVersion),
         syncStatus: const Value(SyncStatus.pending),
       ));
     }
@@ -1105,7 +1124,7 @@ class EstoqueController extends ChangeNotifier {
   }
 
   /// Recalcula o saldo de reservas e estorna baixas indevidas de pedidos agendados pendentes.
-  Future<void> recalcularReservasEEstoques() async {
+  Future<void> recalcularReservasEEstoques({bool isFromSync = false}) async {
     if (!_context.hasContext) return;
     final tenantId = _context.tenantId;
     final now = DateTime.now().toUtc();
@@ -1243,7 +1262,7 @@ class EstoqueController extends ChangeNotifier {
                 quantidadeDepois: qFisicoDepois,
                 quantidadeReservadaAntes: Value(qResAntes),
                 quantidadeReservadaDepois: Value((qResAntes - qty).clamp(0, 999999)),
-                motivo: Value('Expedição / Pedido entregue #${p.id.substring(0, 4)}'),
+                motivo: Value('Expedição / Pedido entregue ${p.numeroPedido != null ? "#${p.numeroPedido.toString().padLeft(4, '0')}" : "#${p.id.substring(0, 4).toUpperCase()}"}'),
                 operadorId: Value(operadorId),
                 dataHora: now,
                 syncVersion: const Value(1),
@@ -1294,19 +1313,82 @@ class EstoqueController extends ChangeNotifier {
         }
       }
 
-      final novoFisico = est.quantidadeAtual + estornoFisico;
+      // Estorna baixas físicas (expedições) de pedidos que foram revertidos e não estão mais no status Entregue
+      final movsExpInvalida = await (_db.select(_db.movimentacoesEstoqueTable)
+            ..where((t) =>
+                t.tenantId.equals(tenantId) &
+                t.produtoId.equals(est.produtoId) &
+                t.tipo.equals('expedicao') &
+                t.deletedAt.isNull().equals(true)))
+          .get();
 
-      await (_db.update(_db.estoqueProdutosTable)
-            ..where((t) => t.id.equals(est.id)))
-          .write(EstoqueProdutosTableCompanion(
-        quantidadeAtual: Value(novoFisico),
-        quantidadeReservada: Value(reservadoCorreto),
-        updatedAt: Value(now),
-        syncStatus: const Value(SyncStatus.pending),
-      ));
+      for (final mov in movsExpInvalida) {
+        if (mov.pedidoId != null) {
+          final isAindaEntregue = pedidosEntregues.any((p) => p.id == mov.pedidoId);
+          if (!isAindaEntregue) {
+            await (_db.update(_db.movimentacoesEstoqueTable)
+                  ..where((t) => t.id.equals(mov.id)))
+                .write(MovimentacoesEstoqueTableCompanion(
+              deletedAt: Value(now),
+              updatedAt: Value(now),
+              syncStatus: const Value(SyncStatus.pending),
+            ));
+          }
+        }
+      }
 
-      // Sincroniza o estoque recalculado
-      await _syncEstoqueOnly(est.id);
+      // Recalcular saldo físico real do produto a partir do histórico completo de movimentações (partindo do inventário)
+      final movsProd = await (_db.select(_db.movimentacoesEstoqueTable)
+            ..where((t) =>
+                t.tenantId.equals(tenantId) &
+                t.produtoId.equals(est.produtoId) &
+                t.deletedAt.isNull().equals(true))
+            ..orderBy([(t) => OrderingTerm(expression: t.dataHora, mode: OrderingMode.asc)]))
+          .get();
+
+      int novoFisico = est.quantidadeAtual;
+      if (movsProd.isNotEmpty) {
+        int runningFisico = 0;
+        for (final m in movsProd) {
+          final tipo = m.tipo ?? '';
+          final isInventario = tipo.contains('inventario');
+          final isReserva = tipo.contains('reserva');
+          final isEntrada = !isReserva && !isInventario && (tipo.contains('entrada') || tipo.contains('positivo') || tipo.contains('producao'));
+          final isSaida = !isReserva && !isInventario && (tipo.contains('saida') || tipo.contains('expedicao') || tipo.contains('negativo'));
+
+          if (isInventario) {
+            runningFisico = m.quantidadeDepois > 0 ? m.quantidadeDepois : m.quantidade;
+          } else if (isEntrada) {
+            runningFisico += m.quantidade;
+          } else if (isSaida) {
+            runningFisico -= m.quantidade;
+          }
+        }
+        novoFisico = runningFisico + estornoFisico;
+      } else {
+        novoFisico = (est.quantidadeAtual + estornoFisico).clamp(0, 999999);
+      }
+
+      final reservadoMudou = est.quantidadeReservada != reservadoCorreto;
+      final fisicoMudou = !isFromSync && (est.quantidadeAtual != novoFisico);
+
+      if (reservadoMudou || fisicoMudou) {
+        final nextVersion = est.syncVersion + (isFromSync ? 0 : 1);
+        await (_db.update(_db.estoqueProdutosTable)
+              ..where((t) => t.id.equals(est.id)))
+            .write(EstoqueProdutosTableCompanion(
+          quantidadeAtual: fisicoMudou ? Value(novoFisico) : Value(est.quantidadeAtual),
+          quantidadeReservada: Value(reservadoCorreto),
+          updatedAt: Value(now),
+          syncVersion: Value(nextVersion),
+          syncStatus: Value(isFromSync ? SyncStatus.synced : SyncStatus.pending),
+        ));
+
+        // Sincroniza o estoque recalculado no Outbox APENAS se a ação foi originada localmente e alterou o saldo físico
+        if (!isFromSync && fisicoMudou) {
+          await _syncEstoqueOnly(est.id);
+        }
+      }
     }
   }
 
@@ -1315,7 +1397,6 @@ class EstoqueController extends ChangeNotifier {
   // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _syncEstoqueOnly(String estoqueId) async {
-    final now = DateTime.now().toUtc();
     final tenantId = _context.tenantId;
 
     final est = await (_db.select(_db.estoqueProdutosTable)
@@ -1323,13 +1404,13 @@ class EstoqueController extends ChangeNotifier {
         .getSingleOrNull();
 
     if (est != null) {
-      await _db.into(_db.outboxSync).insertOnConflictUpdate(
-        OutboxSyncCompanion.insert(
-          tenantId: tenantId,
+      try {
+        final outboxService = DependencyInjection().get<OutboxService>();
+        await outboxService.enqueue(
           entity: 'estoque_produto',
           entityId: estoqueId,
-          action: 'upsert',
-          payload: jsonEncode({
+          action: 'UPSERT',
+          payload: {
             'id': estoqueId,
             'tenantId': tenantId,
             'produtoId': est.produtoId,
@@ -1350,18 +1431,17 @@ class EstoqueController extends ChangeNotifier {
             'updatedAt': est.updatedAt.toIso8601String(),
             'createdBy': est.createdBy,
             'updatedBy': est.updatedBy,
-          }),
-          status: 'pending',
+          },
           version: est.syncVersion,
-          createdAt: now,
-          attemptsCount: const Value(0),
-        ),
-      );
+        );
+
+        final syncEngine = DependencyInjection().get<SyncEngine>();
+        syncEngine.processPendingQueue();
+      } catch (_) {}
     }
   }
 
   Future<void> _syncEstoqueOutbox(String estoqueId, String movId) async {
-    final now = DateTime.now().toUtc();
     final tenantId = _context.tenantId;
 
     // 1. Sincroniza estoque
@@ -1373,13 +1453,13 @@ class EstoqueController extends ChangeNotifier {
         .getSingleOrNull();
 
     if (mov != null) {
-      await _db.into(_db.outboxSync).insertOnConflictUpdate(
-        OutboxSyncCompanion.insert(
-          tenantId: tenantId,
+      try {
+        final outboxService = DependencyInjection().get<OutboxService>();
+        await outboxService.enqueue(
           entity: 'movimentacao_estoque',
           entityId: movId,
-          action: 'insert',
-          payload: jsonEncode({
+          action: 'INSERT',
+          payload: {
             'id': movId,
             'tenantId': tenantId,
             'produtoId': mov.produtoId,
@@ -1399,13 +1479,13 @@ class EstoqueController extends ChangeNotifier {
             'updatedAt': mov.updatedAt.toIso8601String(),
             'createdBy': mov.createdBy,
             'updatedBy': mov.updatedBy,
-          }),
-          status: 'pending',
+          },
           version: mov.syncVersion,
-          createdAt: now,
-          attemptsCount: const Value(0),
-        ),
-      );
+        );
+
+        final syncEngine = DependencyInjection().get<SyncEngine>();
+        syncEngine.processPendingQueue();
+      } catch (_) {}
     }
   }
 }

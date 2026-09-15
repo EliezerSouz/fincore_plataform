@@ -2,11 +2,11 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
 import 'package:intl/intl.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/usecase/tenant/calcular_progresso_setup_usecase.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/auth/models/auth_user_info.dart';
 
 class WorkspaceSetupPage extends StatefulWidget {
   final AuthUserInfo authUserInfo;

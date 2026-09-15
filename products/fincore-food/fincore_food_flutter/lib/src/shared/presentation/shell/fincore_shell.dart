@@ -1031,14 +1031,38 @@ class _FincoreShellState extends State<FincoreShell>
                       letterSpacing: 1.5,
                     ),
                   ),
-                  Text(
-                    'FOOD',
-                    style: TextStyle(
-                      color: FincoreColors.primary.withValues(alpha: 0.9),
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2.0,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        'FOOD',
+                        style: TextStyle(
+                          color: FincoreColors.primary.withValues(alpha: 0.9),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2.0,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: FincoreColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: FincoreColors.primary.withValues(alpha: 0.3),
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Text(
+                          'v1.1.0',
+                          style: TextStyle(
+                            color: FincoreColors.primary,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

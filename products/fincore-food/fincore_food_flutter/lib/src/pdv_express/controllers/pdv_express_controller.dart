@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
@@ -9,7 +10,6 @@ import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/common/master_data_models.dart';
 import 'package:fincore_core/common/kds_models.dart';
-import 'package:fincore_food_client/fincore_food_client.dart' as client;
 import 'package:fincore_core/fincore_core.dart';
 import 'package:intl/intl.dart';
 import 'package:fincore_core/repository/produto_repository.dart';
@@ -24,30 +24,6 @@ import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_pricing/pricing_engine.dart';
 import '../models/pricing_result.dart';
 import '../../cap/printing/print_capability.dart';
-
-import 'dart:io';
-import 'dart:async';
-import 'dart:convert';
-import 'package:uuid/uuid.dart';
-import 'package:flutter/foundation.dart';
-import 'package:drift/drift.dart';
-import 'package:fincore_core/di/dependency_injection.dart';
-import 'package:fincore_core/database/fincore_database.dart';
-import 'package:fincore_core/common/domain_primitives.dart';
-import 'package:fincore_core/context/tenant_context.dart';
-import 'package:fincore_core/common/master_data_models.dart';
-import 'package:fincore_core/common/kds_models.dart';
-import 'package:fincore_food_client/fincore_food_client.dart' as client;
-import 'package:fincore_core/fincore_core.dart';
-import 'package:intl/intl.dart';
-import 'package:fincore_core/repository/produto_repository.dart';
-import 'package:fincore_core/repository/categoria_repository.dart';
-import 'package:fincore_core/repository/cliente_repository.dart';
-import 'package:fincore_core/repository/local_entrega_repository.dart';
-import 'package:fincore_core/repository/forma_pagamento_repository.dart';
-import 'package:fincore_core/repository/taxa_entrega_repository.dart';
-import 'package:fincore_core/repository/empresa_configuracao_repository.dart';
-import 'package:fincore_core/repository/audit_log_repository.dart';
 import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_pricing/pricing_engine.dart';
 import '../models/pricing_result.dart';
@@ -139,7 +115,7 @@ class DadosEntrega {
     DateTime? dataHora,
     this.distanciaMetros,
     this.tempoDeslocamentoSegundos,
-  }) : dataHora = dataHora ?? DateTime.now().add(const Duration(hours: 2));
+  }) : dataHora = dataHora ?? DateTime.now();
 
   DadosEntrega copyWith({
     String? tipo,
@@ -451,7 +427,7 @@ class PdvExpressController extends ChangeNotifier {
                         : (o.prioridade == PrioridadeOrdem.programado
                             ? 'Entrega Programada'
                             : 'Normal')),
-                dataHora: pedidoRow.dataHoraCriacao.toLocal(),
+                dataHora: (pedidoRow.dataHoraEntregaPrevista ?? pedidoRow.dataHoraCriacao).toLocal(),
               );
             } catch (_) {
               _entrega = _entrega.copyWith(
@@ -463,7 +439,7 @@ class PdvExpressController extends ChangeNotifier {
                         : (o.prioridade == PrioridadeOrdem.programado
                             ? 'Entrega Programada'
                             : 'Normal')),
-                dataHora: pedidoRow.dataHoraCriacao.toLocal(),
+                dataHora: (pedidoRow.dataHoraEntregaPrevista ?? pedidoRow.dataHoraCriacao).toLocal(),
               );
             }
           } else {
@@ -476,7 +452,7 @@ class PdvExpressController extends ChangeNotifier {
                       : (o.prioridade == PrioridadeOrdem.programado
                           ? 'Entrega Programada'
                           : 'Normal')),
-              dataHora: pedidoRow.dataHoraCriacao.toLocal(),
+              dataHora: (pedidoRow.dataHoraEntregaPrevista ?? pedidoRow.dataHoraCriacao).toLocal(),
             );
           }
 
@@ -527,20 +503,20 @@ class PdvExpressController extends ChangeNotifier {
                 referencia: end['referencia'] as String? ?? '',
                 taxaEntregaCentavos: end['taxaEntregaCentavos'] as int? ?? 0,
                 prioridade: 'Normal',
-                dataHora: DateTime.now().add(const Duration(hours: 2)),
+                dataHora: (pedidoRow.dataHoraEntregaPrevista ?? DateTime.now()).toLocal(),
               );
             } catch (_) {
               _entrega = _entrega.copyWith(
                 tipo: pedidoRow.tipoLogistica,
                 prioridade: 'Normal',
-                dataHora: DateTime.now().add(const Duration(hours: 2)),
+                dataHora: (pedidoRow.dataHoraEntregaPrevista ?? DateTime.now()).toLocal(),
               );
             }
           } else {
             _entrega = _entrega.copyWith(
               tipo: pedidoRow.tipoLogistica,
               prioridade: 'Normal',
-              dataHora: DateTime.now().add(const Duration(hours: 2)),
+              dataHora: (pedidoRow.dataHoraEntregaPrevista ?? DateTime.now()).toLocal(),
             );
           }
 
@@ -950,36 +926,10 @@ class PdvExpressController extends ChangeNotifier {
       int? tempoDeslocamentoSegundos = _entrega.tempoDeslocamentoSegundos;
 
       if (_entrega.tipo == 'Entrega' && (distanciaMetros == null || tempoDeslocamentoSegundos == null)) {
-        try {
-          final serverpodClient = DependencyInjection().get<client.Client>();
-          final empresa = tenantContext.empresa;
-          final origin = [
-            empresa.logradouro,
-            empresa.numero,
-            empresa.bairro,
-            empresa.cidade,
-            empresa.estado,
-            empresa.cep
-          ].where((s) => s != null && s.trim().isNotEmpty).join(', ');
-
-          final destination = [
-            _entrega.logradouro,
-            _entrega.numero,
-            _entrega.bairro,
-            _entrega.cidade,
-            _entrega.cep
-          ].where((s) => s != null && s.trim().isNotEmpty).join(', ');
-
-          if (origin.isNotEmpty && destination.isNotEmpty) {
-            final routeResult = await serverpodClient.mapRoute.calculateRoute(origin, destination);
-            if (routeResult.status != 'error') {
-              distanciaMetros = routeResult.distanciaMetros;
-              tempoDeslocamentoSegundos = routeResult.tempoDeslocamentoSegundos;
-            }
-          }
-        } catch (e) {
-          LogService.instance.warning(LogModule.sync, 'Falha ao calcular rota do pedido: $e');
-        }
+        // NOTA: Cálculo de rota via Serverpod foi removido (arquitetura local-first).
+        // A taxa de entrega é inserida manualmente pelo operador.
+        // TODO: Reimplementar via Google Maps HTTP API diretamente.
+        LogService.instance.info(LogModule.app, '[PDV] Distância não calculada — operador deve inserir taxa manualmente.');
       }
 
       final enderecoStr = _entrega.tipo == 'Entrega' ? jsonEncode({

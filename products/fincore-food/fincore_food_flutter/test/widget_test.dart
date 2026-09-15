@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/shell/fincore_shell.dart';
 import 'package:fincore_food_flutter/src/pdv_express/views/pdv_express_screen.dart';
 import 'package:fincore_food_flutter/src/shared/database_initializer.dart';
 
-import 'package:fincore_core/di/dependency_injection.dart';
-import 'package:fincore_core/sync/sync_engine.dart';
+import 'package:intl/date_symbol_data_local.dart';
+
 import 'package:fincore_core/fincore_core.dart';
 
 void main() {
@@ -24,8 +23,8 @@ void main() {
       } catch (_) {}
     });
 
-    // Inicializar o banco de dados em memória e injeção para o escopo do teste
-    await DatabaseInitializer.init(Client('http://localhost:8080/'));
+    await initializeDateFormatting('pt_BR', null);
+    await DatabaseInitializer.init();
 
     // Configura contexto administrativo para expor opções de menu nos testes de widget
     final context = DependencyInjection().get<TenantContext>();

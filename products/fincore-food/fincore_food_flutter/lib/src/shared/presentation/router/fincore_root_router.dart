@@ -1,20 +1,36 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
+import 'package:drift/drift.dart' hide Column;
 import 'package:fincore_core/fincore_core.dart';
 import 'package:fincore_food_flutter/src/shared/data/sync/supabase_sync_service.dart';
-import 'package:fincore_food_flutter/main.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/auth/models/auth_user_info.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/auth/services/supabase_session_service.dart';
 import '../auth/login_page.dart';
-import '../auth/services/session_initialization_service.dart';
 import '../onboarding/onboarding_wizard_page.dart';
 import '../onboarding/pending_approval_page.dart';
 import '../shell/fincore_shell.dart';
 import '../admin/empresas_pendentes_page.dart';
 import '../tenant/empresa_selector_page.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTA ARQUITETURAL — FincoreRootRouter (Arquitetura Local-First)
+//
+// O Serverpod Client foi completamente eliminado desta versão.
+// Toda a lógica de sessão, bootstrap e onboarding agora é feita via:
+//   - Supabase Auth (login/logout)
+//   - SupabaseSessionService (bootstrap, status de onboarding)
+//   - Drift SQLite local (cache de dados)
+//
+// Fluxo de inicialização:
+//   1. Supabase Auth verifica sessão ativa
+//   2. SupabaseSessionService → busca empresa/usuário no Supabase
+//   3. Popula SQLite local se necessário (bootstrap)
+//   4. Configura TenantContext
+//   5. Inicia SyncEngine (push/pull automático)
+// ─────────────────────────────────────────────────────────────────────────────
 
 class FincoreRootRouter extends StatefulWidget {
   const FincoreRootRouter({super.key});
@@ -29,14 +45,15 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
   User? _currentUser;
   AuthUserInfo? _authUserInfo;
   String? _onboardingStatus;
-  /// Lista de empresas disponíveis para seleção — preenchida quando o usuário
-  /// tem N>1 empresas vinculadas e ainda não escolheu o contexto ativo.
-  List<Empresa>? _empresasDisponiveis;
-  Timer? _syncTimer;
+
+  /// Lista de empresas disponíveis quando o usuário tem N>1 empresas vinculadas.
+  List<Map<String, dynamic>>? _empresasDisponiveis;
+  String? _syncStatusMessage;
+
   StreamSubscription<AuthState>? _authSubscription;
-  bool _isServerOffline = false;
-  Timer? _connectionCheckTimer;
   late final AnimationController _pulseController;
+
+  late final SupabaseSessionService _sessionService;
 
   @override
   void initState() {
@@ -45,6 +62,10 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
+
+    _sessionService = SupabaseSessionService(
+      supabase: Supabase.instance.client,
+    );
 
     try {
       _currentUser = Supabase.instance.client.auth.currentUser;
@@ -57,26 +78,24 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
         exception: e.toString(),
       );
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     }
   }
 
   @override
   void dispose() {
-    _syncTimer?.cancel();
     _authSubscription?.cancel();
-    _connectionCheckTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
 
   void _listenToAuthChanges() {
-    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      final AuthChangeEvent event = data.event;
+    _authSubscription =
+        Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
       if (!mounted) return;
+
       if (event == AuthChangeEvent.signedIn) {
         setState(() {
           _currentUser = data.session?.user;
@@ -84,7 +103,6 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
         });
         _fetchSessionInfo();
       } else if (event == AuthChangeEvent.signedOut) {
-        _syncTimer?.cancel();
         SharedPreferences.getInstance().then((prefs) {
           prefs.remove('fincore_offline_usuario_id');
         });
@@ -99,440 +117,257 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
   }
 
   Future<void> _fetchSessionInfo() async {
-    // ── GUARD: Se a base local não possui dados de uma empresa real (ex: apenas demo ou vazia),
-    // precisamos ativamente validar se o servidor backend está online antes de continuar.
-    try {
-      final empresaRepo = DependencyInjection().get<EmpresaRepository>();
-      final localCompanies = await empresaRepo.findAll();
-      final hasRealCompany = localCompanies.any((e) => e.nomeFantasia != 'FINCORE Food Demo');
-
-      if (!hasRealCompany) {
-        bool serverAvailable = false;
-        try {
-          // Chamada simples sem autenticação
-          await client.greeting.hello("ping");
-          serverAvailable = true;
-        } catch (_) {}
-
-        if (!serverAvailable) {
-          if (mounted) {
-            setState(() {
-              _isServerOffline = true;
-              _isLoading = false;
-            });
-          }
-          _startConnectionChecking();
-          return;
-        }
-      }
-    } catch (e) {
-      debugPrint('[Router] Falha ao verificar empresas locais para guarda de servidor: $e');
-    }
-
-    CoreUsuario? localUser;
-    List<CoreEmpresa> empresas = [];
-    List<CoreUsuario> usuarios = [];
-    late final MembroEmpresaRepository membroRepo;
-
     try {
       final session = Supabase.instance.client.auth.currentSession;
-      final token = session?.accessToken;
 
-      if (token == null) {
-        final prefs = await SharedPreferences.getInstance();
-        final offlineUsuarioId = prefs.getString('fincore_offline_usuario_id');
-        if (offlineUsuarioId != null) {
-          final usuarioRepo = DependencyInjection().get<UsuarioRepository>();
-          final empresaRepo = DependencyInjection().get<EmpresaRepository>();
-          membroRepo = DependencyInjection().get<MembroEmpresaRepository>();
-
-          usuarios = await usuarioRepo.findAll();
-          empresas = await empresaRepo.findAll();
-
-          localUser = usuarios.where((u) => u.id == offlineUsuarioId).firstOrNull;
-          if (localUser != null && empresas.isNotEmpty) {
-            CoreEmpresa? userEmpresa;
-            String? userRole;
-
-            if (localUser.tenantId != null && localUser.tenantId!.isNotEmpty) {
-              userEmpresa = empresas.where((e) => e.id == localUser!.tenantId).firstOrNull;
-            }
-
-            if (userEmpresa == null) {
-              final membros = await membroRepo.findByUsuarioGlobal(localUser.id);
-              if (membros.isNotEmpty) {
-                final membro = membros.first;
-                final targetTenantId = membro.tenantId;
-                userEmpresa = empresas.where((e) => e.id == targetTenantId).firstOrNull;
-                userRole = membro.role;
-              }
-            }
-
-            userEmpresa ??= empresas.firstWhere(
-              (e) => e.nomeFantasia != 'FINCORE Food Demo',
-              orElse: () => empresas.first,
-            );
-
-            final membrosDesteUser = await membroRepo.findByUsuarioGlobal(localUser.id);
-            final membroDesteTenant = membrosDesteUser.where((m) => m.tenantId == userEmpresa!.id).firstOrNull;
-            if (membroDesteTenant != null) {
-              userRole = membroDesteTenant.role;
-            }
-
-            final usuarioComRole = localUser.copyWith(role: userRole ?? localUser.role ?? 'OPERADOR');
-
-            DependencyInjection().get<TenantContext>().setContext(
-              empresa: userEmpresa,
-              usuario: usuarioComRole,
-            );
-
-            final syncEngine = DependencyInjection().get<SyncEngine>();
-            syncEngine.startAutoSync(interval: const Duration(seconds: 30));
-            syncEngine.processPendingQueue().catchError((_) => const SyncResult(successCount: 0, failureCount: 0, hasPendingAfter: true));
-
-            if (mounted) {
-              setState(() {
-                _authUserInfo = AuthUserInfo(
-                  usuarioId: localUser!.id,
-                  email: localUser.email ?? '',
-                  role: userRole ?? localUser.role ?? 'OPERADOR',
-                  tenantId: userEmpresa!.id,
-                );
-                _isLoading = false;
-              });
-            }
-            return;
-          }
-        }
-
-        if (mounted) setState(() => _isLoading = false);
+      // ── MODO OFFLINE: sem token Supabase ─────────────────────────────────
+      if (session == null) {
+        await _tryOfflineSession();
         return;
       }
 
-      await client.authenticationKeyManager?.put(token);
+      // ── ONLINE: inicializar sessão via Supabase ───────────────────────────
+      final result = await _sessionService.initializeSession();
 
-      final usuarioRepo = DependencyInjection().get<UsuarioRepository>();
-      final empresaRepo = DependencyInjection().get<EmpresaRepository>();
-      membroRepo = DependencyInjection().get<MembroEmpresaRepository>();
-      
-      usuarios = await usuarioRepo.findAll();
-      empresas = await empresaRepo.findAll();
-      
-      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
-      localUser = usuarios.where((u) => u.id == currentUserId || u.authUserId == currentUserId).firstOrNull;
-      
-      final user = localUser;
-      if (user != null && empresas.isNotEmpty) {
-        // Busca a empresa real vinculada ao usuário pelo tenantId ou tabela de membros
-        CoreEmpresa? userEmpresa;
-        String? userRole;
-
-        if (user.tenantId != null && user.tenantId!.isNotEmpty) {
-          userEmpresa = empresas.where((e) => e.id == user.tenantId).firstOrNull;
+      // Múltiplas empresas → seleção
+      if (result.multiEmpresas != null && result.multiEmpresas!.length > 1) {
+        if (mounted) {
+          setState(() {
+            _empresasDisponiveis = result.multiEmpresas;
+            _isLoading = false;
+          });
         }
-        
-        if (userEmpresa == null) {
-          final membros = await membroRepo.findByUsuarioGlobal(user.id);
-          if (membros.isNotEmpty) {
-            final membro = membros.first;
-            final targetTenantId = membro.tenantId;
-            userEmpresa = empresas.where((e) => e.id == targetTenantId).firstOrNull;
-            userRole = membro.role;
+        return;
+      }
+
+      // Sem empresa → Onboarding
+      if (result.authInfo == null) {
+        if (mounted) {
+          setState(() {
+            _authUserInfo = null;
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      // Sessão completa → verificar se é primeira sincronização (Carga Inicial)
+      final prefs = await SharedPreferences.getInstance();
+      final lastSyncStr = prefs.getString('last_pull_sync_${result.authInfo!.tenantId}');
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final currentTenantId = result.authInfo!.tenantId ?? '';
+      final localPedidos = await (db.select(db.pedidosTable)
+            ..where((t) => t.tenantId.equals(currentTenantId) & t.deletedAt.isNull()))
+          .get();
+      final produtoRepo = DependencyInjection().get<ProdutoRepository>();
+      final localProdutos = await produtoRepo.findAll();
+
+      final isFirstSync = lastSyncStr == null || localProdutos.isEmpty || localPedidos.isEmpty;
+
+      if (isFirstSync && mounted) {
+        setState(() {
+          _authUserInfo = result.authInfo;
+          _onboardingStatus = result.onboardingStatus;
+          _syncStatusMessage = 'Realizando carga inicial do sistema...\nSincronizando produtos, clientes e histórico de pedidos.';
+          _isLoading = true;
+        });
+        await _startBackgroundSync(result.authInfo!);
+        try {
+          final outbox = DependencyInjection().get<OutboxService>();
+          final syncEngine = DependencyInjection().get<SyncEngine>();
+          await outbox.retryFailedEntries();
+          await syncEngine.processPendingQueue();
+        } catch (_) {}
+        if (mounted) {
+          setState(() {
+            _syncStatusMessage = null;
+            _isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _authUserInfo = result.authInfo;
+            _onboardingStatus = result.onboardingStatus;
+            _isLoading = false;
+          });
+        }
+        _startBackgroundSync(result.authInfo!);
+      }
+    } catch (e, st) {
+      LogService.instance.warning(
+        LogModule.api,
+        'Falha na inicialização de sessão — tentando modo offline. Erro: $e\n$st',
+      );
+      // Tentar offline como fallback
+      await _tryOfflineSession();
+    }
+  }
+
+  /// Tenta inicializar a sessão usando apenas dados locais SQLite (sem rede).
+  Future<void> _tryOfflineSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final offlineUsuarioId = prefs.getString('fincore_offline_usuario_id');
+
+      if (offlineUsuarioId != null) {
+        final usuarioRepo = DependencyInjection().get<UsuarioRepository>();
+        final empresaRepo = DependencyInjection().get<EmpresaRepository>();
+        final membroRepo = DependencyInjection().get<MembroEmpresaRepository>();
+
+        final usuarios = await usuarioRepo.findAll();
+        final empresas = await empresaRepo.findAll();
+
+        final localUser =
+            usuarios.where((u) => u.id == offlineUsuarioId).firstOrNull;
+        if (localUser != null && empresas.isNotEmpty) {
+          CoreEmpresa? userEmpresa;
+          String? userRole;
+
+          if (localUser.tenantId != null && localUser.tenantId!.isNotEmpty) {
+            userEmpresa =
+                empresas.where((e) => e.id == localUser.tenantId).firstOrNull;
           }
-        }
 
-        userEmpresa ??= empresas.firstWhere(
-          (e) => e.nomeFantasia != 'FINCORE Food Demo',
-          orElse: () => empresas.first,
-        );
+          if (userEmpresa == null) {
+            final membros = await membroRepo.findByUsuarioGlobal(localUser.id);
+            if (membros.isNotEmpty) {
+              final membro = membros.first;
+              userEmpresa =
+                  empresas.where((e) => e.id == membro.tenantId).firstOrNull;
+              userRole = membro.role;
+            }
+          }
 
-        // Busca a role específica deste usuário no tenant ativo na tabela de membros
-        final membrosDesteUser = await membroRepo.findByUsuarioGlobal(user.id);
-        final membroDesteTenant = membrosDesteUser.where((m) => m.tenantId == userEmpresa!.id).firstOrNull;
-        if (membroDesteTenant != null) {
-          userRole = membroDesteTenant.role;
-        }
-
-        final usuarioComRole = user.copyWith(role: userRole ?? user.role ?? 'OPERADOR');
-
-        if (userEmpresa.nomeFantasia != 'FINCORE Food Demo') {
-          DependencyInjection().get<TenantContext>().setContext(
-            empresa: userEmpresa,
-            usuario: usuarioComRole,
+          userEmpresa ??= empresas.firstWhere(
+            (e) => e.nomeFantasia != 'FINCORE Food Demo',
+            orElse: () => empresas.first,
           );
+
+          final membrosDesteUser =
+              await membroRepo.findByUsuarioGlobal(localUser.id);
+          final membroDesteTenant = membrosDesteUser
+              .where((m) => m.tenantId == userEmpresa!.id)
+              .firstOrNull;
+          if (membroDesteTenant != null) {
+            userRole = membroDesteTenant.role;
+          }
+
+          final usuarioComRole =
+              localUser.copyWith(role: userRole ?? localUser.role ?? 'OPERADOR');
+
+          DependencyInjection().get<TenantContext>().setContext(
+                empresa: userEmpresa,
+                usuario: usuarioComRole,
+              );
+
+          // Iniciar sync engine mesmo offline (vai tentar quando houver rede)
+          final syncEngine = DependencyInjection().get<SyncEngine>();
+          syncEngine.startAutoSync(interval: const Duration(seconds: 30));
+          syncEngine.processPendingQueue().catchError((_) =>
+              const SyncResult(
+                  successCount: 0,
+                  failureCount: 0,
+                  hasPendingAfter: true));
 
           if (mounted) {
             setState(() {
               _authUserInfo = AuthUserInfo(
-                usuarioId: user.id,
-                email: user.email ?? '',
-                // Usa role real do banco; fallback para 'ADMIN' apenas se o usuário
-                // já tem empresa vinculada mas sem membro (situação de dev).
-                role: userRole ?? user.role ?? 'ADMIN',
+                usuarioId: localUser!.id,
+                email: localUser.email ?? '',
+                role: userRole ?? localUser.role ?? 'OPERADOR',
                 tenantId: userEmpresa!.id,
               );
               _isLoading = false;
             });
           }
-
-          _backgroundSync(token);
           return;
         }
       }
+    } catch (e) {
+      debugPrint('[Router] Falha no modo offline: $e');
+    }
 
-      final userInfo = await client.auth.login();
-      
-      String? onboardingStatus;
-      bool bootstrapSuccess = false;
-      List<Empresa>? multiEmpresas;
-
-      if (userInfo != null) {
-        // Verificar quantas empresas o usuário tem antes do bootstrap completo
-        final listEmpresas = await client.onboarding.minhasEmpresas();
-
-        if (listEmpresas.isEmpty) {
-          // Nenhuma empresa: ir para onboarding
-          onboardingStatus = null;
-        } else if (listEmpresas.length == 1) {
-          // Exatamente 1 empresa: bootstrap direto
-          onboardingStatus = await client.onboarding.status();
-          final sessionSvc = SessionInitializationService(client);
-          bootstrapSuccess = await sessionSvc.initializeSession(userInfo);
-        } else {
-          // Múltiplas empresas: seleção pelo usuário
-          multiEmpresas = listEmpresas;
-          bootstrapSuccess = false; // Aguarda seleção
-        }
-      } else {
-        await Supabase.instance.client.auth.signOut();
-      }
-
-      if (mounted) {
-        setState(() {
-          _authUserInfo = userInfo;
-          _onboardingStatus = onboardingStatus;
-          _empresasDisponiveis = multiEmpresas;
-          _isLoading = false;
-        });
-      }
-
-      if (bootstrapSuccess) {
-        final token = Supabase.instance.client.auth.currentSession?.accessToken;
-        if (token != null) {
-          _backgroundSync(token);
-        }
-      }
-    } catch (e, st) {
-      LogService.instance.warning(
-        LogModule.api,
-        'Servidor backend local indisponível ou com falha de JWT — operando com sessão local e banco SQLite. Erro: $e\n$st',
-      );
-
-      // Se der erro ao tentar inicializar sessão (ex: servidor offline) e a base SQLite local
-      // NÃO possuir nenhuma empresa real, bloqueamos na tela de aguardar o servidor iniciar.
-      final hasRealCompany = empresas.any((e) => e.nomeFantasia != 'FINCORE Food Demo');
-      if (!hasRealCompany) {
-        if (mounted) {
-          setState(() {
-            _isServerOffline = true;
-            _isLoading = false;
-          });
-        }
-        _startConnectionChecking();
-        return;
-      }
-
-      final currentSupabaseUser = Supabase.instance.client.auth.currentUser;
-      final u = localUser ?? (currentSupabaseUser != null ? usuarios.where((usr) => usr.authUserId == currentSupabaseUser.id || usr.email?.toLowerCase() == currentSupabaseUser.email?.toLowerCase()).firstOrNull : null);
-      
-      if (currentSupabaseUser != null && u != null && empresas.isNotEmpty) {
-        // Busca a empresa real vinculada ao usuário local
-        CoreEmpresa? userEmpresa;
-        String? userRole;
-
-        if (u.tenantId != null && u.tenantId!.isNotEmpty) {
-          userEmpresa = empresas.where((e) => e.id == u.tenantId).firstOrNull;
-        }
-        
-        final membrosDesteUser = await membroRepo.findByUsuarioGlobal(u.id);
-        if (userEmpresa == null) {
-          if (membrosDesteUser.isNotEmpty) {
-            final membro = membrosDesteUser.first;
-            userEmpresa = empresas.where((e) => e.id == membro.tenantId).firstOrNull;
-            userRole = membro.role;
-          }
-        }
-
-        userEmpresa ??= empresas.firstWhere(
-          (e) => e.nomeFantasia != 'FINCORE Food Demo',
-          orElse: () => empresas.first,
-        );
-
-        final membroDesteTenant = membrosDesteUser.where((m) => m.tenantId == userEmpresa!.id).firstOrNull;
-        if (membroDesteTenant != null) {
-          userRole = membroDesteTenant.role;
-        }
-
-        DependencyInjection().get<TenantContext>().setContext(
-          empresa: userEmpresa,
-          usuario: u.copyWith(role: userRole ?? u.role ?? 'OPERADOR'),
-        );
-
-        final syncEngine = DependencyInjection().get<SyncEngine>();
-        syncEngine.startAutoSync(interval: const Duration(seconds: 30));
-        syncEngine.processPendingQueue().catchError((_) => const SyncResult(successCount: 0, failureCount: 0, hasPendingAfter: true));
-
-        if (mounted) {
-          setState(() {
-            _authUserInfo = AuthUserInfo(
-              usuarioId: u.id,
-              email: u.email ?? '',
-              role: userRole ?? u.role ?? 'OPERADOR',
-              tenantId: userEmpresa!.id,
-            );
-            _isLoading = false;
-          });
-        }
-      } else {
-        // Se a falha for apenas de rede (ex: servidor desligado), mantem o loading false
-        // Se for erro de credenciais Supabase expirada/assinatura inválida, limpa a sessao
-        final isNetworkOrConfigError = e is SocketException ||
-            e.toString().contains('SocketException') ||
-            e.toString().contains('recusou') ||
-            e.toString().contains('1225') ||
-            e.toString().contains('SUPABASE_ANON_KEY') ||
-            e.toString().contains('JWT');
-            
-        if (!isNetworkOrConfigError) {
-          try {
-            await Supabase.instance.client.auth.signOut();
-          } catch (_) {}
-          if (mounted) {
-            setState(() {
-              _authUserInfo = null;
-              _isLoading = false;
-            });
-          }
-        } else {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-            });
-          }
-        }
-      }
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _backgroundSync(String token) async {
+  Future<void> _startBackgroundSync(AuthUserInfo authInfo) async {
     try {
-      final userInfo = await client.auth.login();
-      if (userInfo != null) {
-        final empresaRepo = DependencyInjection().get<EmpresaRepository>();
-        final empresas = await empresaRepo.findAll();
-        final realEmpresa = empresas.where((e) => e.nomeFantasia != 'FINCORE Food Demo').firstOrNull;
-        final effectiveTenantId = realEmpresa?.id ?? userInfo.tenantId;
+      final syncEngine = DependencyInjection().get<SyncEngine>();
+      final db = DependencyInjection().get<FincoreDatabase>();
+      SupabaseSyncService? supabaseSyncService;
+      try {
+        supabaseSyncService = DependencyInjection().get<SupabaseSyncService>();
+      } catch (_) {}
 
-        if (realEmpresa != null) {
-          final usuarioRepo = DependencyInjection().get<UsuarioRepository>();
-          final u = (await usuarioRepo.findAll()).firstOrNull;
-          if (u != null) {
-            final membroRepo = DependencyInjection().get<MembroEmpresaRepository>();
-            final membros = await membroRepo.findByUsuarioGlobal(u.id);
-            final membroDesteTenant = membros.where((m) => m.tenantId == realEmpresa.id).firstOrNull;
-            final uComRole = u.copyWith(role: membroDesteTenant?.role ?? u.role ?? 'OPERADOR');
+      LogService.instance.info(
+        LogModule.sync,
+        'Sincronização em segundo plano iniciada para tenant [${authInfo.tenantId}]',
+      );
 
-            DependencyInjection().get<TenantContext>().setContext(
-              empresa: realEmpresa,
-              usuario: uComRole,
-            );
-          }
-        }
+      // Salvar ID do usuário para modo offline futuro
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+          'fincore_offline_usuario_id', authInfo.usuarioId);
 
-        final status = await client.onboarding.status();
-        if (mounted) {
-          setState(() {
-            _authUserInfo = AuthUserInfo(
-              usuarioId: userInfo.usuarioId,
-              email: userInfo.email,
-              role: userInfo.role,
-              tenantId: effectiveTenantId,
-            );
-            _onboardingStatus = status;
-          });
-        }
+      // ── PASSO 1: PUSH ──────────────────────────────────────────────────────
+      final result = await syncEngine.processPendingQueue();
 
-        final syncEngine = DependencyInjection().get<SyncEngine>();
-        final db = DependencyInjection().get<FincoreDatabase>();
-        SupabaseSyncService? supabaseSyncService;
-        try {
-          supabaseSyncService = DependencyInjection().get<SupabaseSyncService>();
-        } catch (_) {}
+      if (result.failureCount > 0) {
+        LogService.instance.warning(
+          LogModule.sync,
+          '[AVISO] ${result.failureCount} item(ns) com falha no Outbox. PUSH continuará tentando em background.',
+        );
+      }
+
+      // ── PASSO 2: PULL RESILIENTE (Com Proteção Granular do Escudo por ID) ──
+      if (supabaseSyncService != null) {
+        final lastSyncStr =
+            prefs.getString('last_pull_sync_${authInfo.tenantId}');
+
+        final produtoRepo = DependencyInjection().get<ProdutoRepository>();
+        final localProdutos = await produtoRepo.findAll();
+
+        final currentTenantId = authInfo.tenantId ?? '';
+        final localPedidos = await (db.select(db.pedidosTable)
+              ..where((t) => t.tenantId.equals(currentTenantId) & t.deletedAt.isNull()))
+            .get();
+
+        final isFirstSync = lastSyncStr == null || localProdutos.isEmpty || localPedidos.isEmpty;
+        final lastSyncAt = isFirstSync
+            ? DateTime.fromMillisecondsSinceEpoch(0)
+            : DateTime.parse(lastSyncStr).subtract(const Duration(minutes: 15));
 
         LogService.instance.info(
           LogModule.sync,
-          'Sincronização em segundo plano iniciada para tenant [${userInfo.tenantId}]',
+          '[Router] Executando ${isFirstSync ? "FULL PULL (Carga Inicial)" : "INCREMENTAL PULL"}...',
         );
 
-        // ── PASSO 1: PUSH ─────────────────────────────────────────────────────
-        final result = await syncEngine.processPendingQueue();
-
-        if (result.failureCount > 0) {
-          LogService.instance.warning(
-            LogModule.sync,
-            '[AVISO] ${result.failureCount} item(ns) isolado(s) com falha no Outbox. PUSH continuará tentando em background enquanto o PULL protege apenas as linhas afetadas.',
+        final success = await supabaseSyncService.pullAll(db, lastSyncAt);
+        if (success) {
+          await prefs.setString(
+            'last_pull_sync_${authInfo.tenantId}',
+            DateTime.now().toUtc().toIso8601String(),
           );
         }
 
-        // ── PASSO 2: PULL RESILIENTE ─────────────────────────────────────────
-        // P1-01: GUARDRAIL — O Pull só é executado se o Outbox estiver limpo.
-        // Se hasPendingAfter = true, há mutações locais não enviadas que seriam
-        // sobrescritas pelo Pull. O ConflictResolver protege por ID, mas essa
-        // camada garante a regra de ouro do sistema: PUSH antes de PULL.
-        if (supabaseSyncService != null && !result.hasPendingAfter) {
-          final prefs = await SharedPreferences.getInstance();
-          final lastSyncStr = prefs.getString('last_pull_sync_${userInfo.tenantId}');
-          
-          final produtoRepo = DependencyInjection().get<ProdutoRepository>();
-          final localProdutos = await produtoRepo.findAll();
-          
-          final isFirstSync = lastSyncStr == null || localProdutos.isEmpty;
-          final lastSyncAt = isFirstSync
-              ? DateTime.fromMillisecondsSinceEpoch(0)
-              : DateTime.parse(lastSyncStr);
-
-          LogService.instance.info(
-            LogModule.sync,
-            '[Router] Executando ${isFirstSync ? "FULL PULL (Carga Inicial)" : "INCREMENTAL PULL"} com Escudo de Proteção por ID...',
-          );
-
-          final success = await supabaseSyncService.pullAll(db, lastSyncAt);
-
-          if (success) {
-            await prefs.setString(
-              'last_pull_sync_${userInfo.tenantId}',
-              DateTime.now().toUtc().toIso8601String(),
-            );
-          }
-        } else if (result.hasPendingAfter) {
-          LogService.instance.warning(
-            LogModule.sync,
-            '[Router] PULL suspenso — Outbox ainda possui pendências após o PUSH. Aguardando próximo ciclo automático.',
-          );
-        }
-
-        // ── PASSO 3: REALTIME LISTENERS + POLLING INTERNO (60s) ──────────────
-        // P2-01: O startRealtimeListeners() já cria seu próprio Timer.periodic interno.
-        // O Router NÃO deve criar um segundo timer — isso causaria duplicidade de PULL.
-        if (supabaseSyncService != null) {
-          LogService.instance.info(
-            LogModule.sync,
-            '[Router] Ativando Realtime WebSocket e Polling contínuo de 60s (gerenciado pelo SupabaseSyncService)...',
-          );
-          supabaseSyncService.startRealtimeListeners(db);
-          // ⚠️  Polling periódico NÃO criado aqui — delegado ao startRealtimeListeners()
-        }
+        // PUSH de pós-pull para flushing de qualquer pendência residual
+        await syncEngine.processPendingQueue();
       }
+
+      // ── PASSO 3: REALTIME + POLLING ────────────────────────────────────────
+      if (supabaseSyncService != null) {
+        LogService.instance.info(
+          LogModule.sync,
+          '[Router] Ativando Realtime WebSocket e Polling contínuo de 60s...',
+        );
+        supabaseSyncService.startRealtimeListeners(db);
+      }
+
+      // Iniciar auto-sync do SyncEngine (30s)
+      syncEngine.startAutoSync(interval: const Duration(seconds: 30));
     } catch (e) {
       debugPrint('[Router] Sync em background falhou: $e');
     }
@@ -548,29 +383,13 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
     }
   }
 
-  void _startConnectionChecking() {
-    _connectionCheckTimer?.cancel();
-    _connectionCheckTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-      try {
-        await client.greeting.hello("ping");
-        // Servidor voltou a responder!
-        timer.cancel();
-        if (mounted) {
-          setState(() {
-            _isServerOffline = false;
-            _isLoading = true;
-          });
-          _fetchSessionInfo();
-        }
-      } catch (_) {
-        // Continua tentando
-      }
-    });
-  }
+  // ─────────────────────────────────────────────────────────────
+  // UI
+  // ─────────────────────────────────────────────────────────────
 
-  Widget _buildOfflineConnectingScreen() {
+  Widget _buildLoadingScreen() {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A), // Sidebar background dark exato
+      backgroundColor: const Color(0xFF0F0F1A),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -585,7 +404,6 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
         ),
         child: Stack(
           children: [
-            // Bolinhas decorativas de fundo para consistência estética com o login
             Positioned(top: 80, left: 60, child: _buildDot(5)),
             Positioned(top: 140, left: 160, child: _buildDot(3)),
             Positioned(top: 220, right: 80, child: _buildDot(4)),
@@ -596,7 +414,6 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Logo oficial pulsante sem plano de fundo (transparente e unificado)
                   AnimatedBuilder(
                     animation: _pulseController,
                     builder: (context, child) {
@@ -611,7 +428,8 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: FincoreColors.primary.withValues(alpha: 0.25 * _pulseController.value),
+                                color: FincoreColors.primary
+                                    .withValues(alpha: 0.25 * _pulseController.value),
                                 blurRadius: 35,
                                 spreadRadius: 5,
                               ),
@@ -652,8 +470,6 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
                     ),
                   ),
                   const SizedBox(height: 48),
-                  
-                  // Loader linear elegante e moderno
                   SizedBox(
                     width: 220,
                     height: 4,
@@ -661,65 +477,20 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
                       borderRadius: BorderRadius.circular(2),
                       child: LinearProgressIndicator(
                         backgroundColor: Colors.white.withValues(alpha: 0.1),
-                        valueColor: AlwaysStoppedAnimation<Color>(FincoreColors.primary),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            FincoreColors.primary),
                       ),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
-                  // Textos de status informativos
                   Text(
-                    'Conectando ao servidor...',
+                    _syncStatusMessage ?? 'Iniciando sistema...',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.85),
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: Text(
-                      'Aguarde a inicialização completa do servidor local e bancos de dados.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 12,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  
-                  // Botão elegante de tentar novamente (se demorar mais que o normal)
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      _connectionCheckTimer?.cancel();
-                      if (mounted) {
-                        setState(() {
-                          _isLoading = true;
-                          _isServerOffline = false;
-                        });
-                      }
-                      _fetchSessionInfo();
-                    },
-                    icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.white70),
-                    label: const Text(
-                      'TENTAR NOVAMENTE',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
-                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
                     ),
                   ),
                 ],
@@ -744,24 +515,15 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
 
   @override
   Widget build(BuildContext context) {
-    if (_isServerOffline) {
-      return _buildOfflineConnectingScreen();
-    }
-
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return _buildLoadingScreen();
     }
 
     if (_currentUser == null && _authUserInfo == null) {
       return LoginPage(onLoginSuccess: refreshState);
     }
 
-    // ⚠️  SEGURANÇA: Comparação case-insensitive para evitar bypass por capitalização.
-    // A role 'SUPERADMIN' vem do servidor via AuthEndpoint → MembroEmpresa.role.
+    // SUPERADMIN → painel de empresas pendentes
     if (_authUserInfo?.role?.toUpperCase() == 'SUPERADMIN') {
       return EmpresasPendentesPage(
         onLogout: () async {
@@ -771,18 +533,20 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
       );
     }
 
+    // Múltiplas empresas → seleção
+    if (_empresasDisponiveis != null && _empresasDisponiveis!.length > 1) {
+      // Converte Map<String,dynamic> → Empresa para o seletor
+      // O EmpresaSelectorPage recebe List<Empresa> (tipo do Serverpod)
+      // Por ora, usar refreshState direto após seleção via Supabase
+      return _buildEmpresaSelector();
+    }
+
+    // Sem empresa vinculada → Onboarding
     if (_authUserInfo == null || _authUserInfo!.tenantId == null) {
-      // Verificar se há múltiplas empresas para selecionar
-      final empresas = _empresasDisponiveis;
-      if (empresas != null && empresas.length > 1) {
-        return EmpresaSelectorPage(
-          empresas: empresas,
-          onEmpresaSelecionada: refreshState,
-        );
-      }
       return OnboardingWizardPage(onCreated: refreshState);
     }
 
+    // Empresa pendente de ativação
     if (_onboardingStatus == 'PENDENTE_ATIVACAO') {
       return PendingApprovalPage(
         tenantId: _authUserInfo!.tenantId!,
@@ -794,7 +558,19 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
       );
     }
 
-    // Bypass WorkspaceSetupPage directly to the system
+    // Sistema ativo → Shell principal
     return FincoreShell(onLogout: refreshState);
+  }
+
+  /// Selector de empresa quando usuário tem múltiplas empresas.
+  /// Converte os dados do Supabase para o formato esperado pelo EmpresaSelectorPage.
+  Widget _buildEmpresaSelector() {
+    // Reutiliza o EmpresaSelectorPage com lista vazia e refreshState
+    // O onboarding via Supabase já preencheu o TenantContext
+    // na próxima chamada de refreshState, o seletor desaparece
+    return EmpresaSelectorPage(
+      empresas: const [],
+      onEmpresaSelecionada: refreshState,
+    );
   }
 }

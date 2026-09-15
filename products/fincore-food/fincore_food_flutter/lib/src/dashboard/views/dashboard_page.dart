@@ -12,7 +12,7 @@ import '../widgets/bloco_timeline.dart';
 import '../widgets/bloco_estoque_resumo.dart';
 import '../widgets/bloco_producao_tempo_real.dart';
 import '../widgets/bloco_proximas_entregas.dart';
-import '../widgets/bloco_vendas.dart';
+import '../widgets/bloco_velocimetro_vendas.dart';
 import '../widgets/bloco_ranking_produtos.dart';
 import '../widgets/bloco_projecao_dias.dart';
 import '../widgets/bloco_recomendacoes.dart';
@@ -246,7 +246,7 @@ class _DashboardPageState extends State<DashboardPage> {
           blockWidget = BlocoProximasEntregas(controller: _controller);
           break;
         case 'Vendas':
-          blockWidget = BlocoVendas(controller: _controller);
+          blockWidget = BlocoVelocimetroVendas(controller: _controller);
           break;
         case 'Produtos Mais Vendidos':
           blockWidget = BlocoRankingProdutos(controller: _controller);

@@ -34,6 +34,7 @@ class _EstoqueSnapshot {
   final DateTime? ultimaSaida;
   final int minimoEstoque;
   final int lote;
+  final List<({String numero, int qtd, String status})> pedidosReservando;
 
   const _EstoqueSnapshot({
     required this.fisico,
@@ -46,6 +47,7 @@ class _EstoqueSnapshot {
     this.ultimaSaida,
     required this.minimoEstoque,
     required this.lote,
+    this.pedidosReservando = const [],
   });
 
   const _EstoqueSnapshot.vazio()
@@ -58,7 +60,8 @@ class _EstoqueSnapshot {
         ultimaEntrada = null,
         ultimaSaida = null,
         minimoEstoque = 0,
-        lote = 0;
+        lote = 0,
+        pedidosReservando = const [];
 }
 
 class _FormFieldLabel extends StatelessWidget {
@@ -1850,6 +1853,35 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
         ? ((minimoEstoque - disponivel) / (lote > 0 ? lote : 1)).ceil() * (lote > 0 ? lote : 1)
         : 0;
 
+    // Busca pedidos ativos que contêm este produto
+    final listItens = await (db.select(db.itensPedidoTable)
+          ..where((t) =>
+              t.tenantId.equals(tenantId) &
+              t.produtoId.equals(prod.id) &
+              t.deletedAt.isNull().equals(true)))
+        .get();
+
+    final statusFinalizados = {'entregue', 'concluido', 'concluído', 'cancelado', 'finalizado', 'despachado', 'enviado'};
+    final List<({String numero, int qtd, String status})> pedidosReservando = [];
+
+    if (listItens.isNotEmpty) {
+      final pedidoIds = listItens.map((i) => i.pedidoId).toSet();
+      final pRows = await (db.select(db.pedidosTable)
+            ..where((t) => t.id.isIn(pedidoIds) & t.deletedAt.isNull().equals(true)))
+          .get();
+
+      for (final p in pRows) {
+        if (!statusFinalizados.contains(p.status.toLowerCase().trim())) {
+          final itemDoPedido = listItens.firstWhere((i) => i.pedidoId == p.id);
+          pedidosReservando.add((
+            numero: p.numeroPedido != null ? '#${p.numeroPedido}' : 'Ped #${p.id.substring(0, 4)}',
+            qtd: itemDoPedido.quantidade.toInt(),
+            status: p.status,
+          ));
+        }
+      }
+    }
+
     return _EstoqueSnapshot(
       fisico: fisico,
       reservado: reservado,
@@ -1859,6 +1891,7 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
       coberturaDias: coberturaDias,
       minimoEstoque: minimoEstoque,
       lote: lote,
+      pedidosReservando: pedidosReservando,
     );
   }
 
@@ -2036,8 +2069,16 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
                       Text('Filtrar Pedidos', style: TextStyle(fontSize: 10.5, color: FincoreColors.primary, fontWeight: FontWeight.bold)),
                     ],
                   ),
-                  if (s.reservado > 0) ...[
-                    _buildReservationOrderCard('Pedido em Reserva', '${s.reservado} unid.', 'Em Preparo', 'Aguardando expedição'),
+                  if (s.pedidosReservando.isNotEmpty) ...[
+                    for (final p in s.pedidosReservando) ...[
+                      _buildReservationOrderCard(
+                        'Pedido ${p.numero}',
+                        '${p.qtd} unid.',
+                        p.status.toUpperCase(),
+                        'Reserva Ativa',
+                      ),
+                      const SizedBox(height: 6),
+                    ],
                   ] else ...[
                     Container(
                       width: double.infinity,

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 
@@ -10,7 +11,7 @@ import 'package:fincore_design_system/fincore_design_system.dart';
 /// - [PedidoDetailDrawer]
 /// - (futuro) ClienteDetailDrawer
 /// - (futuro) ProdutoDetailDrawer
-class EntityDetailDrawer extends StatelessWidget {
+class EntityDetailDrawer extends StatefulWidget {
   /// Título principal (ex: "Pedido #AB1234")
   final String title;
 
@@ -52,11 +53,30 @@ class EntityDetailDrawer extends StatelessWidget {
   });
 
   @override
+  State<EntityDetailDrawer> createState() => _EntityDetailDrawerState();
+}
+
+class _EntityDetailDrawerState extends State<EntityDetailDrawer> {
+  late final ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Material(
       type: MaterialType.transparency,
       child: Container(
-        width: width,
+        width: widget.width,
         height: double.infinity,
         decoration: BoxDecoration(
           color: FincoreColors.surface,
@@ -76,48 +96,63 @@ class EntityDetailDrawer extends StatelessWidget {
           children: [
             // ── Header ─────────────────────────────────────────────────
             _DrawerHeader(
-              title: title,
-              subtitle: subtitle,
-              badges: badges,
-              onClose: onClose ?? () => Navigator.of(context).pop(),
+              title: widget.title,
+              subtitle: widget.subtitle,
+              badges: widget.badges,
+              onClose: widget.onClose ?? () => Navigator.of(context).pop(),
             ),
-  
+
             // ── Lifecycle ───────────────────────────────────────────────
-            if (lifecycle != null) ...[
+            if (widget.lifecycle != null) ...[
               Container(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                child: lifecycle!,
+                child: widget.lifecycle!,
               ),
               Container(height: 1, color: FincoreColors.border),
             ],
-  
+
             Expanded(
               child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      body,
-                      if (timeline != null) ...[
-                        const SizedBox(height: 24),
-                        _SectionLabel(label: 'Linha do Tempo'),
-                        const SizedBox(height: 12),
-                        timeline!,
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  scrollbars: true,
+                  dragDevices: {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad,
+                    PointerDeviceKind.stylus,
+                  },
+                ),
+                child: Scrollbar(
+                  controller: _scrollController,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  interactive: true,
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        widget.body,
+                        if (widget.timeline != null) ...[
+                          const SizedBox(height: 24),
+                          const _SectionLabel(label: 'Linha do Tempo'),
+                          const SizedBox(height: 12),
+                          widget.timeline!,
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-  
+
             // ── Ações ─────────────────────────────────────────────────
-            if (actions != null) ...[
+            if (widget.actions != null) ...[
               Container(height: 1, color: FincoreColors.border),
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: actions!,
+                child: widget.actions!,
               ),
             ],
           ],

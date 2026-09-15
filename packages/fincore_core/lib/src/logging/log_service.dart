@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 /// Módulos do sistema FINCORE para categorização dos logs.
 enum LogModule {
@@ -12,6 +13,8 @@ enum LogModule {
   printer,
   crash,
   app,
+  importExport,
+  audit,
 }
 
 /// Nível de severidade do evento (Estilo Serilog / OpenTelemetry).
@@ -62,20 +65,29 @@ class CorrelationIdGenerator {
   }
 }
 
+/// Metadata da categoria de log no disco
+class _LogCategoryConfig {
+  final String folderName;
+  final String filePrefix;
+
+  const _LogCategoryConfig(this.folderName, this.filePrefix);
+}
+
 /// ─────────────────────────────────────────────────────────────────────────────
 /// FincoreLogger
 ///
-/// Serviço de log central do FINCORE. Inspirado nos logs de campo de sistemas
-/// de integração profissionais: legível no Notepad, rastreável por grep,
-/// rotacionado por hora para evitar arquivos gigantes.
+/// Serviço de log central do FINCORE. Estruturado em categorias dentro da pasta LOG:
+///   - /LOG/Sincronizacao/  (Sync Supabase, Realtime, Outbox)
+///   - /LOG/ImportExport/   (Carga de dados, CSV, Backups)
+///   - /LOG/Operacional/    (Fluxo PDV, Caixa, Balcão, Navegação)
+///   - /LOG/Impressao/      (Impressão Térmica ESC-POS, Spooler, KDS)
+///   - /LOG/BancoDados/     (Consultas Drift/SQLite, Migrações)
+///   - /LOG/Erros/          (Espelho global de erros e exceções)
+///   - /LOG/Auditoria/      (Auditoria de usuários e políticas de preços)
 ///
-/// Formato de arquivo (plain text):
-///   2026-07-30 14:22:01.312  [SYNC]      Ciclo de envio iniciado — 3 pendente(s)
-///   2026-07-30 14:22:01.450  [SYNC]      Cliente  id=abc123  ENVIADO  (148ms)
-///   2026-07-30 14:22:01.451  [SYNC] ERRO Falha ao enviar Produto  id=xyz999
-///                            >>> PostgrestException: column not found
-///
-/// Rotação: um arquivo por hora → fincore_YYYY-MM-DD_HH.log
+/// Formatado para BareTail (Windows) com tags em caixa alta para realce de cores:
+///   2026-09-11 18:51:20.123 [INFO   ] [INSERT] [SINCRONISMO] Cliente id=123 sincronizado
+///   2026-09-11 18:51:21.450 [ERRO   ] [FALHA]  [BANCO      ] Erro ao atualizar preço (Timeout)
 /// ─────────────────────────────────────────────────────────────────────────────
 class FincoreLogger {
   static FincoreLogger? _instance;
@@ -83,9 +95,9 @@ class FincoreLogger {
   final String baseDirectory;
   final bool isProduction;
 
-  // Arquivo de log atual (rotado por hora)
-  File? _currentFile;
-  int? _currentHour;
+  // Cache de arquivos de log por categoria e data
+  final Map<String, File> _activeFiles = {};
+  final Map<String, String> _activeDates = {};
 
   FincoreLogger._(this.baseDirectory, {this.isProduction = false});
 
@@ -94,6 +106,7 @@ class FincoreLogger {
   static void init(String baseDirectory, {bool isProduction = false}) {
     _instance = FincoreLogger._(baseDirectory, isProduction: isProduction);
     _instance!._scheduleCleanup();
+    _instance!._createBareTailHelpFile();
   }
 
   static FincoreLogger get instance {
@@ -104,6 +117,15 @@ class FincoreLogger {
       );
     }
     return inst;
+  }
+
+  /// Retorna o diretório raiz absoluto onde os logs/categorias são salvos.
+  String get logRootPath {
+    final clean = baseDirectory.replaceAll('\\', '/');
+    if (clean.toUpperCase().endsWith('/LOG') || clean.toUpperCase().endsWith('/LOGS')) {
+      return baseDirectory;
+    }
+    return '$baseDirectory/LOG';
   }
 
   // ── API Pública ────────────────────────────────────────────────────────────
@@ -130,8 +152,6 @@ class FincoreLogger {
     String? detail,
   }) => _write(LogLevel.error, module, message, context: context, traceId: traceId, detail: detail);
 
-  /// Loga o início de um ciclo de operação (ex: ciclo de sync, startup, etc.)
-  /// Cria uma linha divisória visível no arquivo para fácil localização.
   Future<void> beginCycle(LogModule module, String title, {String? context}) async {
     final line = _divider(title);
     await _write(LogLevel.info, module, line);
@@ -140,12 +160,28 @@ class FincoreLogger {
     }
   }
 
-  /// Loga o fim de um ciclo com um resumo de uma linha.
   Future<void> endCycle(LogModule module, String summary) async {
     await _write(LogLevel.info, module, summary);
   }
 
-  // ── Formatação ─────────────────────────────────────────────────────────────
+  // ── Mapeamento de Categorias ──────────────────────────────────────────────
+
+  static _LogCategoryConfig _categoryForModule(LogModule module) {
+    return switch (module) {
+      LogModule.sync         => const _LogCategoryConfig('Sincronizacao', 'sync'),
+      LogModule.importExport => const _LogCategoryConfig('ImportExport', 'import_export'),
+      LogModule.printer      => const _LogCategoryConfig('Impressao', 'impressao'),
+      LogModule.database ||
+      LogModule.migration    => const _LogCategoryConfig('BancoDados', 'banco_dados'),
+      LogModule.crash        => const _LogCategoryConfig('Erros', 'erros'),
+      LogModule.audit ||
+      LogModule.api          => const _LogCategoryConfig('Auditoria', 'auditoria'),
+      LogModule.app ||
+      LogModule.startup      => const _LogCategoryConfig('Operacional', 'operacional'),
+    };
+  }
+
+  // ── Formatação BareTail Friendly ──────────────────────────────────────────
 
   static String _formatTimestamp(DateTime dt) {
     final y  = dt.year;
@@ -160,34 +196,70 @@ class FincoreLogger {
 
   static String _moduleTag(LogModule module) {
     final name = switch (module) {
-      LogModule.startup   => 'INICIO',
-      LogModule.sync      => 'SINCRONISMO',
-      LogModule.database  => 'BANCO',
-      LogModule.api       => 'SERVICO',
-      LogModule.migration => 'MIGRACAO',
-      LogModule.printer   => 'IMPRESSAO',
-      LogModule.crash     => 'FALHA',
-      LogModule.app       => 'SISTEMA',
+      LogModule.startup      => 'STARTUP',
+      LogModule.sync         => 'SINCRONISMO',
+      LogModule.database     => 'BANCO',
+      LogModule.api          => 'SERVICO',
+      LogModule.migration    => 'MIGRACAO',
+      LogModule.printer      => 'IMPRESSAO',
+      LogModule.crash        => 'FALHA',
+      LogModule.app          => 'SISTEMA',
+      LogModule.importExport => 'IMPORT_EXPORT',
+      LogModule.audit        => 'AUDITORIA',
     };
-    return '[${name.padRight(11)}]';
+    return '[${name.padRight(13)}]';
   }
 
   static String _levelTag(LogLevel level) {
     return switch (level) {
-      LogSeverity.trace    => '[TRACE]: ',
-      LogSeverity.debug    => '',
-      LogSeverity.info     => '',
-      LogSeverity.warning  => 'AVISO: ',
-      LogSeverity.error    => 'ERRO: ',
-      LogSeverity.critical => 'CRÍTICO: ',
+      LogSeverity.trace    => '[TRACE]  ',
+      LogSeverity.debug    => '[DEBUG]  ',
+      LogSeverity.info     => '[INFO]   ',
+      LogSeverity.warning  => '[AVISO]  ',
+      LogSeverity.error    => '[ERRO]   ',
+      LogSeverity.critical => '[CRÍTICO]',
     };
   }
 
+  /// Detecta se a mensagem possui verbo de operação CRUD para destacar no BareTail
+  static String _detectOperationTag(String message) {
+    final upper = message.toUpperCase();
+    if (upper.contains('[INSERT]') ||
+        upper.contains('[UPDATE]') ||
+        upper.contains('[DELETE]') ||
+        upper.contains('[SUCESSO]') ||
+        upper.contains('[FALHA]')) {
+      return '';
+    }
+
+    if (upper.contains('INSERT') || upper.contains('INSERIDO') || upper.contains('CRIADO') || upper.contains('CRIAR')) {
+      return '[INSERT] ';
+    }
+    if (upper.contains('UPDATE') || upper.contains('ATUALIZADO') || upper.contains('ALTERADO') || upper.contains('ATUALIZAR')) {
+      return '[UPDATE] ';
+    }
+    if (upper.contains('DELETE') || upper.contains('REMOVIDO') || upper.contains('EXCLUÍDO') || upper.contains('DELETADO')) {
+      return '[DELETE] ';
+    }
+    if (upper.contains('SUCESSO') || upper.contains('CONCLUÍDO') || upper.contains('CONCLUIDO') || upper.contains(' OK')) {
+      return '[SUCESSO] ';
+    }
+    if (upper.contains('FALHA') || upper.contains('FAILED') || upper.contains('ERRO')) {
+      return '[FALHA] ';
+    }
+    return '';
+  }
+
   static String _formatLine(DateTime dt, LogModule module, LogLevel level, String message) {
-    final ts  = _formatTimestamp(dt);
-    final mod = _moduleTag(module);
+    final ts = _formatTimestamp(dt);
     final lvl = _levelTag(level);
-    return '$ts $mod $lvl$message';
+    final mod = _moduleTag(module);
+    final op = _detectOperationTag(message);
+
+    if (op.isNotEmpty) {
+      return '$ts $lvl $op$mod $message';
+    }
+    return '$ts $lvl $mod $message';
   }
 
   static String _divider(String title) {
@@ -212,9 +284,7 @@ class FincoreLogger {
 
     final now = DateTime.now();
 
-    // ── Monta as linhas ──
     final lines = <String>[];
-
     final rawLines = message.split('\n');
     for (int i = 0; i < rawLines.length; i++) {
       final lineStr = rawLines[i];
@@ -225,33 +295,42 @@ class FincoreLogger {
       lines.add(_formatLine(now, module, level, formattedMsg));
     }
 
-    // Detalhes de erro/exceção (opcional)
     if (detail != null && detail.trim().isNotEmpty) {
-      for (final l in detail.trim().split('\n').take(3)) {
+      for (final l in detail.trim().split('\n').take(5)) {
         if (l.trim().isNotEmpty) {
           lines.add('    >>> ${l.trim()}');
         }
       }
     }
 
+    final category = _categoryForModule(module);
+
     for (final line in lines) {
-      await _writeLine(line, now);
+      // Escreve na pasta específica da categoria
+      await _writeLineToCategory(category, line, now);
+
+      // Se for um ERRO ou CRÍTICO (e não estiver na pasta Erros), duplica na pasta Erros dedicada
+      if ((level == LogLevel.error || level == LogLevel.critical || module == LogModule.crash) &&
+          category.folderName != 'Erros') {
+        const errorCategory = _LogCategoryConfig('Erros', 'erros');
+        await _writeLineToCategory(errorCategory, line, now);
+      }
     }
 
-    // ── Console output ──
     _printToConsole(level, lines);
   }
 
   Future<void> _writeQueue = Future.value();
 
-  Future<void> _writeLine(String line, DateTime now) async {
+  Future<void> _writeLineToCategory(_LogCategoryConfig category, String line, DateTime now) async {
+    if (kIsWeb) return;
     final completer = Completer<void>();
     _writeQueue = _writeQueue.then((_) async {
       try {
-        final file = await _getFile(now);
+        final file = await _getCategoryFile(category, now);
         await file.writeAsString('$line\n', mode: FileMode.append, encoding: utf8, flush: true);
       } catch (e) {
-        stderr.writeln('! FINCORE LOG IO ERROR: $e');
+        debugPrint('! FINCORE LOG IO ERROR ($category): $e');
       } finally {
         completer.complete();
       }
@@ -259,66 +338,119 @@ class FincoreLogger {
     return completer.future;
   }
 
-  // ── Rotação de arquivo por hora ────────────────────────────────────────────
+  // ── Obtenção / Rotação Diária de Arquivo ─────────────────────────────────
 
-  Future<File> _getFile(DateTime now) async {
-    if (_currentHour == now.hour && _currentFile != null) {
-      return _currentFile!;
-    }
-
+  Future<File> _getCategoryFile(_LogCategoryConfig category, DateTime now) async {
     final monthStr = now.month.toString().padLeft(2, '0');
     final dayStr = now.day.toString().padLeft(2, '0');
-    final hourStr = now.hour.toString().padLeft(2, '0');
+    final dateKey = '${now.year}-$monthStr-$dayStr';
 
-    final dir = Directory('$baseDirectory/logs/${now.year}-$monthStr/$dayStr');
+    final categoryKey = category.folderName;
+
+    if (_activeDates[categoryKey] == dateKey && _activeFiles[categoryKey] != null) {
+      return _activeFiles[categoryKey]!;
+    }
+
+    final rootDir = logRootPath;
+    final dir = Directory('$rootDir/${category.folderName}');
     if (!await dir.exists()) await dir.create(recursive: true);
 
-    final file = File('${dir.path}/fincore_$hourStr.log');
+    final file = File('${dir.path}/${category.filePrefix}_$dateKey.log');
 
-    // Escreve cabeçalho se o arquivo é novo
     if (!await file.exists()) {
       await file.writeAsString(
-        _fileHeader(now),
+        _fileHeader(now, category.folderName),
         mode: FileMode.write,
         encoding: utf8,
         flush: true,
       );
     }
 
-    _currentFile = file;
-    _currentHour = now.hour;
+    _activeFiles[categoryKey] = file;
+    _activeDates[categoryKey] = dateKey;
     return file;
   }
 
-  static String _fileHeader(DateTime now) {
+  static String _fileHeader(DateTime now, String categoryName) {
     final ts = _formatTimestamp(now);
     return '\uFEFF' '''
 ========================================================================
-  FINCORE Platform v1.2.0 | Log de Operação e Sincronização
-  Sessão iniciada em: $ts
+  FINCORE Platform v1.2.0 | Log da Categoria: [$categoryName]
+  Arquivo criado em: $ts
   Ambiente: Local (SQLite) <-> Nuvem (Supabase)
 ========================================================================
 
 ''';
   }
 
+  void _createBareTailHelpFile() {
+    if (kIsWeb) return;
+    Future.microtask(() async {
+      try {
+        final rootDir = Directory(logRootPath);
+        if (!await rootDir.exists()) await rootDir.create(recursive: true);
+        final file = File('${rootDir.path}/COMO_CONFIGURAR_CORES_BARETAIL.txt');
+        if (!await file.exists()) {
+          await file.writeAsString('''
+========================================================================
+  FINCORE FOOD PLATFORM - GUIA DE HIGHLIGHT DE CORES NO BARETAIL
+========================================================================
+
+Esta pasta 'LOG' contém todos os relatórios de operação do sistema,
+organizados por situação/contexto:
+
+  - /Sincronizacao : Registros de envio e recebimento via Supabase e WebSocket
+  - /ImportExport  : Operações de carga de dados, CSV, Backups e Relatórios
+  - /Operacional   : Fluxo do PDV, abertura de caixa, navegação e comandos
+  - /Impressao     : Rotas e disparos de impressão térmica (KDS e Vendas)
+  - /BancoDados    : Consultas e alterações no SQLite (Drift)
+  - /Erros         : Espelho dedicado de TODOS os erros e falhas do sistema
+  - /Auditoria     : Registro forense de ações de usuários e precificação
+
+------------------------------------------------------------------------
+ COMO CONFIGURAR DESTAQUE DE CORES NO BARETAIL (WINDOWS)
+------------------------------------------------------------------------
+1. Abra o aplicativo BareTail no Windows (software leve e portátil).
+2. Acesse o menu superior: Options -> Highlight...
+3. Clique em "Add" e cadastre as seguintes regras de palavras:
+
+ Regra (Text)    | Estilo Recomendado           | Finalidade
+-----------------+------------------------------+-------------------------
+ [ERRO]          | Fundo Vermelho / Texto Branco | Exceções e erros graves
+ [CRÍTICO]       | Fundo Vermelho / Texto Amarelo | Crash de aplicação
+ [AVISO]         | Fundo Amarelo / Texto Preto  | Alertas e retries
+ [INSERT]        | Fundo Verde Claro / Texto    | Inserção de dados
+ [UPDATE]        | Fundo Azul Claro / Texto     | Atualização de dados
+ [DELETE]        | Fundo Magenta / Texto Branco | Exclusão de dados
+ [SUCESSO]       | Texto Verde Bright           | Operação OK
+ [FALHA]         | Fundo Laranja / Texto Preto  | Falhas de conexão
+ [SINCRONISMO]   | Texto Roxo (Purple)          | Eventos de Sync
+ [IMPRESSAO]     | Texto Ciano (Cyan)           | Eventos de Impressora
+
+DICA: No BareTail você pode abrir múltiplos arquivos simultaneamente
+(ex: Sincronizacao e Erros) e marcar "Follow Tail" para acompanhar a
+operação do restaurante em tempo real!
+========================================================================
+''', encoding: utf8);
+        }
+      } catch (_) {}
+    });
+  }
+
   // ── Console ────────────────────────────────────────────────────────────────
 
   void _printToConsole(LogLevel level, List<String> lines) {
     final out = lines.join('\n');
-    if (level == LogLevel.error || level == LogLevel.warning) {
-      stderr.writeln(out);
-    } else {
-      stdout.writeln(out);
-    }
+    debugPrint(out);
   }
 
   // ── Limpeza automática (logs > 30 dias) ───────────────────────────────────
 
   void _scheduleCleanup() {
+    if (kIsWeb) return;
     Future.microtask(() async {
       try {
-        final dir = Directory('$baseDirectory/logs');
+        final dir = Directory(logRootPath);
         if (!await dir.exists()) return;
         final cutoff = DateTime.now().subtract(const Duration(days: 30));
         await for (final f in dir.list(recursive: true)) {
@@ -329,20 +461,15 @@ class FincoreLogger {
             }
           }
         }
-      } catch (_) {
-        // Limpeza silenciosa — não bloqueia o app
-      }
+      } catch (_) {}
     });
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Alias de compatibilidade: LogService → FincoreLogger
-// Mantém compatibilidade com código existente durante a migração.
+// LogService (Wrapper de Compatibilidade + Central de Consulta)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// @deprecated Use [FincoreLogger] diretamente.
-/// Mantido para compatibilidade com código legado durante a migração.
 class LogService {
   static LogService? _instance;
   final String baseDirectory;
@@ -352,7 +479,6 @@ class LogService {
 
   static void init(String baseDirectory, {bool runCleanup = true, bool isProduction = false}) {
     _instance = LogService._(baseDirectory)..isProduction = isProduction;
-    // Inicializa o novo logger também
     FincoreLogger.init(baseDirectory, isProduction: isProduction);
   }
 
@@ -373,7 +499,6 @@ class LogService {
     String? exception,
     String? stackTrace,
   }) async {
-    // Monta context string compatível
     String? ctxStr;
     if (context != null && context.isNotEmpty) {
       final usuario = context['usuario'];
@@ -385,9 +510,11 @@ class LogService {
       }
     }
 
-    // Monta detail string
     String? detailStr;
     if (exception != null) detailStr = exception;
+    if (stackTrace != null) {
+      detailStr = detailStr != null ? '$detailStr\n$stackTrace' : stackTrace;
+    }
 
     switch (level) {
       case LogSeverity.trace:
@@ -417,11 +544,94 @@ class LogService {
 
   Future<void> forceCleanup() async {}
 
+  /// Consulta os arquivos de log no disco e retorna os dados estruturados para a UI
   Future<List<Map<String, dynamic>>> queryLogs({
     LogModule? module,
     LogLevel? level,
     DateTime? start,
     DateTime? end,
     String? searchQuery,
-  }) async => [];
+  }) async {
+    if (kIsWeb) return [];
+
+    final results = <Map<String, dynamic>>[];
+    try {
+      final rootDir = Directory(FincoreLogger.instance.logRootPath);
+      if (!await rootDir.exists()) return [];
+
+      final files = await rootDir
+          .list(recursive: true)
+          .where((f) => f is File && f.path.endsWith('.log'))
+          .cast<File>()
+          .toList();
+
+      for (final file in files) {
+        final lines = await file.readAsLines(encoding: utf8);
+        Map<String, dynamic>? currentEntry;
+
+        for (final line in lines) {
+          if (line.startsWith('=') || line.startsWith('Sessão') || line.startsWith('\uFEFF') || line.trim().isEmpty) {
+            continue;
+          }
+
+          final match = RegExp(r'^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})\s+\[([A-ZÇÍ]+)\s*\](?:\s+\[[A-Z]+\])?\s+\[([A-Z_]+)\s*\]\s+(.*)$').firstMatch(line);
+
+          if (match != null) {
+            final tsStr = match.group(1)!;
+            final levelStr = match.group(2)!.trim();
+            final moduleStr = match.group(3)!.trim();
+            final msgStr = match.group(4)!;
+
+            final dt = DateTime.tryParse(tsStr);
+
+            if (start != null && dt != null && dt.isBefore(start)) {
+              currentEntry = null;
+              continue;
+            }
+            if (end != null && dt != null && dt.isAfter(end)) {
+              currentEntry = null;
+              continue;
+            }
+
+            if (level != null && !levelStr.toUpperCase().contains(level.name.toUpperCase())) {
+              currentEntry = null;
+              continue;
+            }
+            if (module != null && !moduleStr.toUpperCase().contains(module.name.toUpperCase())) {
+              currentEntry = null;
+              continue;
+            }
+
+            if (searchQuery != null && searchQuery.isNotEmpty) {
+              if (!line.toLowerCase().contains(searchQuery.toLowerCase())) {
+                currentEntry = null;
+                continue;
+              }
+            }
+
+            currentEntry = {
+              'timestamp': tsStr,
+              'level': levelStr,
+              'module': moduleStr,
+              'message': msgStr,
+              'exception': null,
+            };
+            results.add(currentEntry);
+          } else if (currentEntry != null && line.trim().startsWith('>>>')) {
+            final detailText = line.trim().substring(3).trim();
+            if (currentEntry['exception'] == null) {
+              currentEntry['exception'] = detailText;
+            } else {
+              currentEntry['exception'] = '${currentEntry['exception']}\n$detailText';
+            }
+          }
+        }
+      }
+
+      results.sort((a, b) => b['timestamp'].compareTo(a['timestamp']));
+    } catch (e) {
+      debugPrint('Erro ao consultar logs de disco: $e');
+    }
+    return results;
+  }
 }

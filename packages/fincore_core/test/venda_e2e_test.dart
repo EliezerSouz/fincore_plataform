@@ -358,8 +358,7 @@ void main() {
   group('Dashboard — faturamento real dos 7 dias (P2-07)', () {
     test('Pedidos de hoje são contabilizados no faturamento', () async {
       final tenantId = context.tenantId;
-      final now = DateTime.now().toUtc();
-      final startOfDay = DateTime(now.year, now.month, now.day).toUtc();
+      final startOfDay = DateTime.now().toUtc().subtract(const Duration(hours: 12));
 
       await _persistVendaSimulada(
         db: db,

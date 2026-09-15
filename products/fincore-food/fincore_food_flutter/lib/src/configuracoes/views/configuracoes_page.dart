@@ -2827,7 +2827,7 @@ class _TestarImpressoraDialogState extends State<_TestarImpressoraDialog> {
             statusWidget,
             const SizedBox(height: 16),
             const Text(
-              'Visualização da Via de Teste:',
+              'Pré-visualização do modelo real de impressão:',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -2839,21 +2839,87 @@ class _TestarImpressoraDialogState extends State<_TestarImpressoraDialog> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: FincoreColors.background,
-                borderRadius: BorderRadius.circular(6),
+                color: const Color(0xFF1E1E2E),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: FincoreColors.border),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('--------------------------------', style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  const Text('TESTE DE IMPRESSAO FINCORE FOOD', style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('Impressora: ${widget.printer.nome}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('IP/Porta: ${widget.printer.ip}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('Depto: ${widget.printer.departamento}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  Text('Data: ${DateTime.now().toString().substring(0, 19)}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                  const Text('--------------------------------', style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: FincoreColors.textPrimary)),
-                ],
+                children: () {
+                  final sampleData = PrintData(
+                    pedidoId: 'TEST-101',
+                    numeroPedido: 101,
+                    clienteNome: 'Cliente Teste (Demonstração)',
+                    clienteTelefone: '(15) 99999-8888',
+                    tipoLogistica: 'Entrega',
+                    endereco: 'Av. Paulista, 1000 - Apt 42',
+                    bairro: 'Bela Vista',
+                    cidade: 'Sorocaba',
+                    uf: 'SP',
+                    formaPagamento: 'PIX',
+                    totalCentavos: 4500,
+                    taxaEntregaCentavos: 500,
+                    trocoParaCentavos: 5000,
+                    itens: const [
+                      PrintDataItem(
+                        nome: 'X-Tudo Especial Gourmet',
+                        quantidade: 2,
+                        precoUnitarioCentavos: 1800,
+                        totalCentavos: 3600,
+                        observacao: 'Sem cebola, bacon extra',
+                      ),
+                      PrintDataItem(
+                        nome: 'Coca-Cola 2L Gelada',
+                        quantidade: 1,
+                        precoUnitarioCentavos: 900,
+                        totalCentavos: 900,
+                      ),
+                    ],
+                    dataHora: DateTime.now(),
+                    observacao: 'TESTE DE IMPRESSAO - Exemplo de layout real',
+                    status: 'confirmado',
+                  );
+
+                  final config = PrintConfig(
+                    printers: const {
+                      PrintVia.cliente: 'default',
+                      PrintVia.cozinha: 'default',
+                      PrintVia.balcao: 'default',
+                      PrintVia.expedicao: 'default',
+                    },
+                    autoprint: const {
+                      PrintVia.cliente: true,
+                      PrintVia.cozinha: true,
+                      PrintVia.balcao: true,
+                      PrintVia.expedicao: true,
+                    },
+                    vias: const {
+                      PrintVia.cliente: 1,
+                      PrintVia.cozinha: 1,
+                      PrintVia.balcao: 1,
+                      PrintVia.expedicao: 1,
+                    },
+                    larguraPapel: 80,
+                    nomeEmpresaCupom: 'FINCORE FOOD - TESTE',
+                    imprimirRodape: true,
+                    mensagemRodape: 'Obrigado pela preferência! Volte sempre!',
+                  );
+
+                  final lines = const PrintTemplateEngine().render(
+                    via: widget.via,
+                    data: sampleData,
+                    config: config,
+                  );
+
+                  return lines.map((l) => Text(
+                    l.replaceAll(RegExp(r'\[.*?\]'), ''),
+                    style: const TextStyle(
+                      fontFamily: 'Courier New',
+                      fontSize: 11,
+                      color: Color(0xFFE2E8F0),
+                    ),
+                  )).toList();
+                }(),
               ),
             ),
           ],

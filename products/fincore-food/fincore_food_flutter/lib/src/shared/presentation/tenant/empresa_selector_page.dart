@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_flutter/main.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:fincore_core/fincore_core.dart';
 
 /// Tela de seleção de empresa exibida quando o usuário possui múltiplos vínculos
 /// em [membro_empresa]. Permite que o proprietário escolha com qual contexto
 /// (Matriz, Filial, etc.) deseja operar a sessão atual.
 class EmpresaSelectorPage extends StatefulWidget {
-  /// Lista de empresas às quais o usuário tem acesso.
-  final List<Empresa> empresas;
+  /// Lista de empresas às quais o usuário tem acesso (dados do Supabase).
+  final List<Map<String, dynamic>> empresas;
 
   /// Callback invocado após a empresa ser selecionada e o bootstrap concluído.
   final VoidCallback onEmpresaSelecionada;
@@ -45,23 +45,56 @@ class _EmpresaSelectorPageState extends State<EmpresaSelectorPage>
     super.dispose();
   }
 
-  Future<void> _selecionarEmpresa(Empresa empresa) async {
-    setState(() => _loadingTenantId = empresa.id.toString());
+  Future<void> _selecionarEmpresa(Map<String, dynamic> empresa) async {
+    final empresaId = empresa['id'] as String;
+    setState(() => _loadingTenantId = empresaId);
 
     try {
-      // Solicita ao servidor a troca de contexto e retorna o novo bootstrap
-      final payload = await client.onboarding.trocarEmpresa(empresa.id.toString());
+      // Buscar membro da empresa para obter a role do usuário
+      final supabase = Supabase.instance.client;
+      final currentUserId = supabase.auth.currentUser?.id;
+      if (currentUserId == null) return;
 
-      if (payload == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Não foi possível acessar esta empresa. Verifique suas permissões.'),
-            backgroundColor: Colors.red,
-          ),
+      // Buscar perfil do usuário local
+      final usuarioRows = await supabase
+          .from('usuarios')
+          .select('id')
+          .eq('authUserId', currentUserId)
+          .limit(1);
+
+      final usuarioId = usuarioRows.isNotEmpty
+          ? (usuarioRows.first as Map<String, dynamic>)['id'] as String
+          : currentUserId;
+
+      // Buscar membro nesta empresa
+      final membroRows = await supabase
+          .from('membro_empresa')
+          .select()
+          .eq('usuarioId', usuarioId)
+          .eq('tenantId', empresaId)
+          .limit(1);
+
+      final role = membroRows.isNotEmpty
+          ? (membroRows.first as Map<String, dynamic>)['role'] as String? ?? 'OPERADOR'
+          : 'OPERADOR';
+
+      // Buscar empresa no banco local
+      final di = DependencyInjection();
+      final empresaRepo = di.get<EmpresaRepository>();
+      final usuarioRepo = di.get<UsuarioRepository>();
+      final tenantContext = di.get<TenantContext>();
+
+      final localEmpresas = await empresaRepo.findAll();
+      final localUsuarios = await usuarioRepo.findAll();
+
+      CoreEmpresa? localEmpresa = localEmpresas.where((e) => e.id == empresaId).firstOrNull;
+      CoreUsuario? localUser = localUsuarios.where((u) => u.id == usuarioId || u.authUserId == currentUserId).firstOrNull;
+
+      if (localEmpresa != null && localUser != null) {
+        tenantContext.setContext(
+          empresa: localEmpresa,
+          usuario: localUser.copyWith(role: role),
         );
-        setState(() => _loadingTenantId = null);
-        return;
       }
 
       if (!mounted) return;
@@ -155,7 +188,8 @@ class _EmpresaSelectorPageState extends State<EmpresaSelectorPage>
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final empresa = widget.empresas[index];
-                      final isLoading = _loadingTenantId == empresa.id.toString();
+                      final empresaId = empresa['id'] as String;
+                      final isLoading = _loadingTenantId == empresaId;
                       final isDisabled = _loadingTenantId != null && !isLoading;
 
                       return _EmpresaCard(
@@ -190,7 +224,7 @@ class _EmpresaSelectorPageState extends State<EmpresaSelectorPage>
 }
 
 class _EmpresaCard extends StatelessWidget {
-  final Empresa empresa;
+  final Map<String, dynamic> empresa;
   final bool isLoading;
   final bool isDisabled;
   final VoidCallback onTap;
@@ -202,8 +236,13 @@ class _EmpresaCard extends StatelessWidget {
     required this.onTap,
   });
 
+  String get _nomeFantasia => empresa['nomeFantasia'] as String? ?? '';
+  String get _documentoFiscal => empresa['documentoFiscal'] as String? ?? '';
+  String get _status => (empresa['status'] as String? ?? 'ATIVO').toUpperCase();
+  String get _plano => (empresa['plano'] as String? ?? '').toUpperCase();
+
   Color get _statusColor {
-    switch (empresa.status.toUpperCase()) {
+    switch (_status) {
       case 'ATIVO':
         return const Color(0xFF3FB950);
       case 'PENDENTE_ATIVACAO':
@@ -216,7 +255,7 @@ class _EmpresaCard extends StatelessWidget {
   }
 
   String get _statusLabel {
-    switch (empresa.status.toUpperCase()) {
+    switch (_status) {
       case 'ATIVO':
         return 'Ativa';
       case 'PENDENTE_ATIVACAO':
@@ -224,12 +263,12 @@ class _EmpresaCard extends StatelessWidget {
       case 'SUSPENSO':
         return 'Suspensa';
       default:
-        return empresa.status;
+        return _status;
     }
   }
 
   String get _initials {
-    final nome = empresa.nomeFantasia.trim();
+    final nome = _nomeFantasia.trim();
     final parts = nome.split(' ').where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return '?';
     if (parts.length == 1) return parts[0][0].toUpperCase();
@@ -292,7 +331,7 @@ class _EmpresaCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      empresa.nomeFantasia,
+                      _nomeFantasia,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 16,
@@ -304,7 +343,7 @@ class _EmpresaCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      empresa.documentoFiscal,
+                      _documentoFiscal,
                       style: const TextStyle(
                         color: Color(0xFF8B949E),
                         fontSize: 13,
@@ -332,7 +371,7 @@ class _EmpresaCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 12),
-                        if (empresa.plano.isNotEmpty)
+                        if (_plano.isNotEmpty)
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                             decoration: BoxDecoration(
@@ -340,7 +379,7 @@ class _EmpresaCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              empresa.plano.toUpperCase(),
+                              _plano,
                               style: const TextStyle(
                                 color: Color(0xFF9D8EFF),
                                 fontSize: 10,

@@ -101,7 +101,15 @@ class DashboardAlertsService {
         .get();
 
     for (final pedido in pedidosAtivos) {
-      final dataEntrega = pedido.dataHoraEntregaPrevista?.toLocal();
+      DateTime? dataEntrega;
+      final ordens = await (_db.select(_db.ordensPreparoTable)
+            ..where((t) => t.pedidoId.equals(pedido.id) & t.deletedAt.isNull()))
+          .get();
+      if (ordens.isNotEmpty && ordens.first.observacoes != null) {
+        dataEntrega = _parseAgendadoFromObs(ordens.first.observacoes!);
+      }
+      dataEntrega ??= pedido.dataHoraEntregaPrevista?.toLocal();
+
       final dataCriacao = pedido.dataHoraCriacao.toLocal();
 
       bool isAtrasado = false;
@@ -199,7 +207,7 @@ class DashboardAlertsService {
           ..where((t) =>
               t.tenantId.equals(tenantId) &
               t.deletedAt.isNull() &
-              t.status.isNotIn(['cancelado', 'rascunho']) &
+              t.status.isNotIn(['cancelado', 'rascunho', 'entregue', 'concluido']) &
               t.dataHoraEntregaPrevista.isBiggerOrEqualValue(startOfDay) &
               t.dataHoraEntregaPrevista.isSmallerOrEqualValue(endOfDay)))
         .get();
@@ -358,5 +366,17 @@ class DashboardAlertsService {
     });
 
     return alertas;
+  }
+
+  DateTime? _parseAgendadoFromObs(String? obs) {
+    if (obs == null || obs.isEmpty) return null;
+    final regex = RegExp(r'agendado\s*:\s*(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})', caseSensitive: false);
+    final match = regex.firstMatch(obs);
+    if (match == null) return null;
+    try {
+      return DateFormat('dd/MM/yyyy HH:mm').parse(match.group(1)!.trim());
+    } catch (_) {
+      return null;
+    }
   }
 }

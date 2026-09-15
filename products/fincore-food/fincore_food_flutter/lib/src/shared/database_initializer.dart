@@ -6,7 +6,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
 // fincore_core barrel — cobre todos os repositórios, serviços e modelos do core
 import 'package:fincore_core/fincore_core.dart';
 import 'package:fincore_food_flutter/src/shared/data/sync/supabase_sync_service.dart';
@@ -24,9 +23,11 @@ import 'package:fincore_food_flutter/src/cap/printing/usecases/print_use_case.da
 import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
 import 'package:fincore_food_flutter/src/estoque/controllers/planejamento_controller.dart';
 
+import 'package:fincore_food_flutter/src/shared/services/dpapi_env_service.dart';
+
 /// Responsável por inicializar toda a infraestrutura da FINCORE Platform:
 ///
-/// 1. Variáveis de ambiente (.env via flutter_dotenv)
+/// 1. Variáveis de ambiente (.env via flutter_dotenv e DPAPI)
 /// 2. Banco de dados local Drift SQLite (offline-first)
 /// 3. Contexto de Tenant ativo
 /// 4. Seeds de dados iniciais
@@ -34,14 +35,14 @@ import 'package:fincore_food_flutter/src/estoque/controllers/planejamento_contro
 /// 6. Container de Injeção de Dependências
 /// 7. Supabase SDK (banco central remoto + Realtime)
 ///
-/// Arquitetura de dados:
+/// Arquitetura local-first (sem Serverpod):
 /// ```
 /// Flutter (Drift SQLite local) → OutboxService → SupabaseSyncService → Supabase PostgreSQL
 ///                                                        ↑
 ///                                              Realtime WebSocket ←┘
 /// ```
 class DatabaseInitializer {
-  static Future<void> init(Client client) async {
+  static Future<void> init() async {
     final stopwatch = Stopwatch()..start();
     final bool isTest = !kIsWeb && Platform.environment.containsKey('FLUTTER_TEST');
 
@@ -52,8 +53,10 @@ class DatabaseInitializer {
       LogService.init('');
       await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso (Web).');
     } else if (!isTest) {
-      final docDir = await getApplicationDocumentsDirectory();
-      LogService.init(docDir.path);
+      // Pasta LOG criada no mesmo diretório onde o executável (.exe) está rodando
+      final exeDir = p.dirname(Platform.resolvedExecutable);
+      final logDir = p.join(exeDir, 'LOG');
+      LogService.init(logDir);
       await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso.');
     } else {
       try {
@@ -62,11 +65,11 @@ class DatabaseInitializer {
     }
 
     // ──────────────────────────────────────────────────────────────
-    // 1. Carregar variáveis de ambiente (.env)
+    // 1. Carregar variáveis de ambiente (.env) de forma segura com DPAPI
     // ──────────────────────────────────────────────────────────────
     if (!isTest) {
       try {
-        await dotenv.load(fileName: '.env');
+        await DpapiEnvService.loadSecure();
       } catch (_) {}
     }
 
@@ -79,8 +82,34 @@ class DatabaseInitializer {
     } else if (isTest) {
       db = FincoreDatabase(createDatabaseConnection('fincore_v3', inMemory: true));
     } else {
-      final dbFolder = await getApplicationDocumentsDirectory();
-      final dbPath = p.join(dbFolder.path, 'fincore_v3.db');
+      final String dbPath;
+      if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        final exeDir = p.dirname(Platform.resolvedExecutable);
+        final dataDir = Directory(p.join(exeDir, 'DATA'));
+        if (!dataDir.existsSync()) {
+          dataDir.createSync(recursive: true);
+        }
+        dbPath = p.join(dataDir.path, 'fincore_v3.db');
+
+        // Migração transparente do banco antigo de Documents para DATA se existir
+        try {
+          final targetFile = File(dbPath);
+          if (!targetFile.existsSync()) {
+            final docsFolder = await getApplicationDocumentsDirectory();
+            final oldDb = File(p.join(docsFolder.path, 'fincore_v3.db'));
+            if (oldDb.existsSync()) {
+              oldDb.copySync(dbPath);
+              final oldWal = File(p.join(docsFolder.path, 'fincore_v3.db-wal'));
+              if (oldWal.existsSync()) oldWal.copySync(p.join(dataDir.path, 'fincore_v3.db-wal'));
+              final oldShm = File(p.join(docsFolder.path, 'fincore_v3.db-shm'));
+              if (oldShm.existsSync()) oldShm.copySync(p.join(dataDir.path, 'fincore_v3.db-shm'));
+            }
+          }
+        } catch (_) {}
+      } else {
+        final dbFolder = await getApplicationDocumentsDirectory();
+        dbPath = p.join(dbFolder.path, 'fincore_v3.db');
+      }
 
       // O banco local é a fonte de verdade durante operação offline. Nunca o
       // apague automaticamente: uma heurística de "correção" pode descartar
@@ -124,6 +153,14 @@ class DatabaseInitializer {
         return await supabaseSyncService.push(entry);
       },
     );
+
+    outboxService.onMutationEnqueued = () {
+      syncEngine.processPendingQueue().catchError((_) => const SyncResult(
+            successCount: 0,
+            failureCount: 0,
+            hasPendingAfter: true,
+          ));
+    };
 
     // ──────────────────────────────────────────────────────────────
     // 6. Instanciar Repositórios — TODOS com sync obrigatório
@@ -252,7 +289,7 @@ class DatabaseInitializer {
     // CAP.PRINTING
     di.register<PrintJobRepository>(printJobRepo);
     di.register<PrintUseCase>(printUseCase);
-    di.register<Client>(client);
+    // NOTA: Client do Serverpod removido — arquitetura local-first
 
     // CAP.CLIENTES — Controller registrado após os repositórios dos quais depende
     try {
@@ -301,8 +338,15 @@ class DatabaseInitializer {
     // 8. Inicializar Supabase SDK + SupabaseSyncService
     // ──────────────────────────────────────────────────────────────
     if (!isTest) {
-      final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
-      final supabaseKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+      var supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
+      var supabaseKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+
+      if (supabaseUrl.isEmpty) {
+        supabaseUrl = 'https://nlaxdeqbordmovukyypk.supabase.co';
+      }
+      if (supabaseKey.isEmpty) {
+        supabaseKey = 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy';
+      }
 
       if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty) {
         await Supabase.initialize(
@@ -334,6 +378,7 @@ class DatabaseInitializer {
         'INICIALIZACAO DO SISTEMA FINCORE v1.2.0',
       );
       await LogService.instance.info(LogModule.startup, 'Banco SQLite local inicializado com sucesso (fincore_v3.db)');
+      await LogService.instance.info(LogModule.startup, 'Arquitetura local-first ativa (sem Serverpod)');
       await LogService.instance.info(LogModule.startup, 'Conexao Supabase configurada ($supabaseShort)');
       await LogService.instance.info(LogModule.startup, 'Mecanismo de sincronizacao ativo (Fila de Envio + Tempo Real)');
       await LogService.instance.info(LogModule.startup, 'Inicializacao do sistema concluida com sucesso em $elapsedStr');

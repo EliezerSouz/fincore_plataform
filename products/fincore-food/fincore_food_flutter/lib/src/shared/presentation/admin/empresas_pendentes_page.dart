@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_flutter/main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EmpresasPendentesPage extends StatefulWidget {
   final VoidCallback onLogout;
@@ -22,7 +22,14 @@ class _EmpresasPendentesPageState extends State<EmpresasPendentesPage> {
 
   Future<void> _loadPendientes() async {
     try {
-      final list = await client.admin.empresasPendentes();
+      final rows = await Supabase.instance.client
+          .from('empresa')
+          .select('id, nomeFantasia, documentoFiscal, status')
+          .eq('status', 'PENDENTE_ATIVACAO');
+      final list = (rows as List).map((r) {
+        final m = r as Map<String, dynamic>;
+        return '${m['id']} - ${m['nomeFantasia'] ?? ''} (${m['documentoFiscal'] ?? ''})';
+      }).toList();
       setState(() {
         _pendingList = list;
         _isLoading = false;
@@ -40,30 +47,23 @@ class _EmpresasPendentesPageState extends State<EmpresasPendentesPage> {
 
     setState(() => _isLoading = true);
     try {
-      final success = await client.admin.ativarEmpresa(tenantId);
+      await Supabase.instance.client
+          .from('empresa')
+          .update({'status': 'ATIVO', 'updatedAt': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', tenantId);
       if (!mounted) return;
-      if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Empresa $tenantId ativada com sucesso!'),
-            backgroundColor: FincoreColors.success,
-          ),
-        );
-        _loadPendientes();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Falha ao ativar empresa.'),
-            backgroundColor: FincoreColors.danger,
-          ),
-        );
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Empresa $tenantId ativada com sucesso!'),
+          backgroundColor: FincoreColors.success,
+        ),
+      );
+      _loadPendientes();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erro ao ativar: $e'),
+          content: Text('Erro ao ativar empresa: $e'),
           backgroundColor: FincoreColors.danger,
         ),
       );

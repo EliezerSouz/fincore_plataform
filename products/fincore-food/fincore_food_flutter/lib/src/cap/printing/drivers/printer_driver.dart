@@ -37,6 +37,13 @@ class PrinterDriver {
     int larguraPapel = 80,
   }) async {
     final sw = Stopwatch()..start();
+    if (kIsWeb) {
+      return PrinterResult(
+        success: false,
+        message: 'Impressão física direta não suportada no ambiente Web',
+        elapsedMs: sw.elapsedMilliseconds,
+      );
+    }
     final target = printerPath.trim();
 
     if (target.isEmpty) {
@@ -238,15 +245,34 @@ class PrinterDriver {
   // ─── Helpers ─────────────────────────────────────────────────────
 
   String _sanitizar(String text) {
-    return text
-        .replaceAll('á', 'a').replaceAll('à', 'a').replaceAll('ã', 'a').replaceAll('â', 'a')
-        .replaceAll('Á', 'A').replaceAll('À', 'A').replaceAll('Ã', 'A').replaceAll('Â', 'A')
-        .replaceAll('é', 'e').replaceAll('ê', 'e').replaceAll('É', 'E').replaceAll('Ê', 'E')
-        .replaceAll('í', 'i').replaceAll('Í', 'I')
-        .replaceAll('ó', 'o').replaceAll('õ', 'o').replaceAll('ô', 'o')
-        .replaceAll('Ó', 'O').replaceAll('Õ', 'O').replaceAll('Ô', 'O')
-        .replaceAll('ú', 'u').replaceAll('Ú', 'U')
+    var result = text
+        .replaceAll('—', '-')
+        .replaceAll('–', '-')
+        .replaceAll('“', '"').replaceAll('”', '"')
+        .replaceAll('‘', "'").replaceAll('’', "'")
+        .replaceAll('•', '*')
+        .replaceAll('á', 'a').replaceAll('à', 'a').replaceAll('ã', 'a').replaceAll('â', 'a').replaceAll('ä', 'a')
+        .replaceAll('Á', 'A').replaceAll('À', 'A').replaceAll('Ã', 'A').replaceAll('Â', 'A').replaceAll('Ä', 'A')
+        .replaceAll('é', 'e').replaceAll('ê', 'e').replaceAll('ë', 'e')
+        .replaceAll('É', 'E').replaceAll('Ê', 'E').replaceAll('Ë', 'E')
+        .replaceAll('í', 'i').replaceAll('ì', 'i').replaceAll('î', 'i').replaceAll('ï', 'i')
+        .replaceAll('Í', 'I').replaceAll('Ì', 'I').replaceAll('Î', 'I').replaceAll('Ï', 'I')
+        .replaceAll('ó', 'o').replaceAll('ò', 'o').replaceAll('õ', 'o').replaceAll('ô', 'o').replaceAll('ö', 'o')
+        .replaceAll('Ó', 'O').replaceAll('Ò', 'O').replaceAll('Õ', 'O').replaceAll('Ô', 'O').replaceAll('Ö', 'O')
+        .replaceAll('ú', 'u').replaceAll('ù', 'u').replaceAll('û', 'u').replaceAll('ü', 'u')
+        .replaceAll('Ú', 'U').replaceAll('Ù', 'U').replaceAll('Û', 'U').replaceAll('Ü', 'U')
         .replaceAll('ç', 'c').replaceAll('Ç', 'C');
+
+    final sb = StringBuffer();
+    for (int i = 0; i < result.length; i++) {
+      final code = result.codeUnitAt(i);
+      if (code < 256) {
+        sb.writeCharCode(code);
+      } else {
+        sb.write('-');
+      }
+    }
+    return sb.toString();
   }
 
   Future<List<int>> _compileBytes(

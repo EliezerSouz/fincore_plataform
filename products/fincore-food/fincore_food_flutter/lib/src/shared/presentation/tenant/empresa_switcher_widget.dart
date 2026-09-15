@@ -1,24 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_core/fincore_core.dart';
-import 'package:fincore_food_flutter/main.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
-import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_flutter/src/shared/data/mappers/bootstrap_mapper.dart';
+import '../auth/services/supabase_session_service.dart';
 
 /// Widget de troca de empresa exibido dentro do Drawer/Menu do app.
 ///
 /// Permite que o proprietário alterne entre Matriz, Filiais e quaisquer
 /// outras empresas às quais possui acesso sem precisar fazer logout.
-///
-/// Uso:
-/// ```dart
-/// EmpresaSwitcherWidget(
-///   onEmpresaTrocada: () => setState(() {}),
-/// )
-/// ```
 class EmpresaSwitcherWidget extends StatefulWidget {
-  /// Callback disparado após a empresa ser trocada com sucesso.
-  /// O widget pai deve usar isso para atualizar seu estado.
   final VoidCallback? onEmpresaTrocada;
 
   const EmpresaSwitcherWidget({super.key, this.onEmpresaTrocada});
@@ -28,7 +17,7 @@ class EmpresaSwitcherWidget extends StatefulWidget {
 }
 
 class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
-  List<Empresa>? _empresas;
+  List<CoreEmpresa>? _empresas;
   bool _isLoading = true;
   String? _trocandoTenantId;
   bool _expanded = false;
@@ -41,12 +30,71 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
 
   Future<void> _carregarEmpresas() async {
     try {
-      final list = await client.onboarding.minhasEmpresas();
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      final membrosRows = await Supabase.instance.client
+          .from('membro_empresa')
+          .select('tenantId')
+          .eq('usuarioId', user.id);
+
+      final tenantIds = (membrosRows as List<dynamic>)
+          .map((m) => m['tenantId'] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList();
+
+      if (tenantIds.isEmpty) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
+      final empresaRows = await Supabase.instance.client
+          .from('empresa')
+          .select()
+          .inFilter('id', tenantIds);
+
+      final list = (empresaRows as List<dynamic>).map((empData) {
+        final statusStr = empData['status'] as String? ?? 'ATIVO';
+        final status = statusStr.toUpperCase() == 'ATIVO'
+            ? StatusEmpresa.ativo
+            : StatusEmpresa.bloqueado;
+        return CoreEmpresa(
+          id: empData['id'] as String,
+          razaoSocial: empData['razaoSocial'] as String? ?? '',
+          nomeFantasia: empData['nomeFantasia'] as String? ?? '',
+          documentoFiscal: empData['documentoFiscal'] as String? ?? empData['cnpj'] as String? ?? '',
+          email: empData['email'] as String? ?? '',
+          telefone: empData['telefone'] as String? ?? '',
+          tipoPessoa: empData['tipoPessoa'] as String? ?? 'JURIDICA',
+          status: status,
+          plano: PlanoEmpresa.prata,
+          timezone: empData['timezone'] as String? ?? 'America/Sao_Paulo',
+          locale: empData['locale'] as String? ?? 'pt_BR',
+          currency: empData['currency'] as String? ?? 'BRL',
+          country: empData['country'] as String? ?? 'BR',
+          createdFrom: empData['createdFrom'] as String? ?? 'PDV',
+          cidade: empData['cidade'] as String?,
+          estado: empData['estado'] as String?,
+          version: empData['syncVersion'] as int? ?? 1,
+          metadata: SyncMetadata(
+            version: empData['syncVersion'] as int? ?? 1,
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+            createdBy: 'system',
+            updatedBy: 'system',
+            syncStatus: SyncStatus.synced,
+          ),
+        );
+      }).toList();
+
       if (!mounted) return;
       setState(() {
         _empresas = list;
         _isLoading = false;
-        // Só expande automaticamente se houver mais de uma empresa
         _expanded = list.length > 1;
       });
     } catch (_) {
@@ -55,36 +103,25 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
     }
   }
 
-  Future<void> _trocarEmpresa(Empresa empresa) async {
+  Future<void> _trocarEmpresa(CoreEmpresa empresa) async {
     final tenantContext = DependencyInjection().get<TenantContext>();
     final currentTenantId = tenantContext.hasContext ? tenantContext.empresa.id : null;
 
-    // Não faz nada se já é a empresa ativa
-    if (currentTenantId == empresa.id.toString()) {
+    if (currentTenantId == empresa.id) {
       setState(() => _expanded = false);
       return;
     }
 
-    setState(() => _trocandoTenantId = empresa.id.toString());
+    setState(() => _trocandoTenantId = empresa.id);
 
     try {
-      final payload = await client.onboarding.trocarEmpresa(empresa.id.toString());
-      if (payload == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sem permissão para acessar esta empresa.'),
-            backgroundColor: Colors.red,
-          ),
+      final tenantContext = DependencyInjection().get<TenantContext>();
+      if (tenantContext.hasContext) {
+        tenantContext.setContext(
+          empresa: empresa,
+          usuario: tenantContext.usuario,
         );
-        setState(() => _trocandoTenantId = null);
-        return;
       }
-
-      // Atualizar o contexto na memória do app
-      final usuario = BootstrapMapper.toCoreUsuario(payload.usuario);
-      final empresaCore = BootstrapMapper.toCoreEmpresa(payload.empresa);
-      tenantContext.setContext(empresa: empresaCore, usuario: usuario);
 
       if (!mounted) return;
       setState(() {
@@ -94,7 +131,7 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Operando: ${payload.empresa.nomeFantasia}'),
+          content: Text('Operando: ${empresa.nomeFantasia}'),
           backgroundColor: const Color(0xFF3FB950),
           duration: const Duration(seconds: 2),
         ),
@@ -125,19 +162,16 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
     final empresas = _empresas;
     if (empresas == null || empresas.isEmpty) return const SizedBox.shrink();
 
-    // Se só tem 1 empresa, exibe apenas o nome da empresa ativa (sem troca)
     if (empresas.length == 1) {
       return _EmpresaAtivaTile(empresa: empresas.first, isActive: true);
     }
 
     final tenantContext = DependencyInjection().get<TenantContext>();
-    final currentTenantId =
-        tenantContext.hasContext ? tenantContext.empresa.id : null;
+    final currentTenantId = tenantContext.hasContext ? tenantContext.empresa.id : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Cabeçalho expansível — empresa ativa
         InkWell(
           onTap: () => setState(() => _expanded = !_expanded),
           borderRadius: BorderRadius.circular(12),
@@ -145,8 +179,7 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                const Icon(Icons.swap_horiz_rounded,
-                    size: 18, color: Color(0xFF8B949E)),
+                const Icon(Icons.swap_horiz_rounded, size: 18, color: Color(0xFF8B949E)),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -185,8 +218,6 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
             ),
           ),
         ),
-
-        // Lista expansível com outras empresas
         AnimatedCrossFade(
           duration: const Duration(milliseconds: 250),
           crossFadeState:
@@ -197,8 +228,8 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
               const Divider(color: Color(0xFF21262D), height: 1),
               const SizedBox(height: 4),
               ...empresas.map((emp) {
-                final isActive = emp.id.toString() == currentTenantId;
-                final isTrocando = _trocandoTenantId == emp.id.toString();
+                final isActive = emp.id == currentTenantId;
+                final isTrocando = _trocandoTenantId == emp.id;
                 return _EmpresaAtivaTile(
                   empresa: emp,
                   isActive: isActive,
@@ -217,7 +248,7 @@ class _EmpresaSwitcherWidgetState extends State<EmpresaSwitcherWidget> {
 }
 
 class _EmpresaAtivaTile extends StatelessWidget {
-  final Empresa empresa;
+  final CoreEmpresa empresa;
   final bool isActive;
   final bool isLoading;
   final VoidCallback? onTap;

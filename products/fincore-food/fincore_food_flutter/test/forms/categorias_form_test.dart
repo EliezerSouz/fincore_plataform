@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
 import 'package:fincore_food_flutter/src/categorias/views/categorias_page.dart';
 import 'package:fincore_food_flutter/src/shared/database_initializer.dart';
 
@@ -9,7 +8,7 @@ import 'package:fincore_core/fincore_core.dart';
 void main() {
   setUpAll(() async {
     LogService.init('.');
-    await DatabaseInitializer.init(Client('http://localhost:8080/'));
+    await DatabaseInitializer.init();
   });
 
   setUp(() {
@@ -172,7 +171,7 @@ void main() {
 
       // Ordem é o 3º TextFormField — busca pelo hint '0'
       final ordemField = find.widgetWithText(TextFormField, '0');
-      await tester.enterText(ordemField, 'abc');
+      await tester.enterText(ordemField.first, 'abc');
 
       await tester.tap(find.text('Salvar Categoria'));
       await tester.pump();
@@ -208,7 +207,7 @@ void main() {
 
       // Ordem válida
       final ordemField = find.widgetWithText(TextFormField, '0');
-      await tester.enterText(ordemField, '2');
+      await tester.enterText(ordemField.first, '2');
 
       await tester.tap(find.text('Salvar Categoria'));
       await tester.pump();

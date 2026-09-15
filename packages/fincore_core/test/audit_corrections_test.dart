@@ -136,17 +136,17 @@ void main() {
       expect(decision.strategy, equals(ConflictStrategy.lww));
     });
 
-    test('rejectAndLock — Pedido com versão divergente bloqueia sobrescrita', () {
+    test('rejectAndLock — Transação financeira com versão divergente bloqueia sobrescrita', () {
       final decision = resolver.resolve(
-        entityName: 'pedidos',
-        entityId: 'ped-001',
+        entityName: 'transacao_financeira',
+        entityId: 'fin-001',
         hasOutboxPending: false,
         localVersion: 2,
         serverVersion: 3, // ← Servidor diferente, mas entidade crítica
       );
 
       expect(decision.allowOverwrite, isFalse,
-          reason: 'Pedidos com conflito de versão nunca devem ser sobrescritos automaticamente');
+          reason: 'Entidades financeiras com conflito de versão nunca devem ser sobrescritas automaticamente');
       expect(decision.strategy, equals(ConflictStrategy.rejectAndLock));
     });
 

@@ -12,6 +12,7 @@ import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_food_flutter/src/shared/services/dados_ordem_parser.dart';
 import '../../shared/services/permissao_service.dart';
 import '../../estoque/controllers/estoque_controller.dart';
+import '../../shared/data/sync/supabase_sync_service.dart';
 
 class DeadlineInfo {
   final DateTime horarioEntrega;
@@ -84,14 +85,19 @@ class CentralPedidosController extends ChangeNotifier {
   String _selectedOrigem = 'Todos';
 
   Timer? _refreshTimer;
+  StreamSubscription? _syncSub;
 
   CentralPedidosController({OrdemPreparoRepository? ordemRepo})
       : _ordemRepo =
             ordemRepo ?? DependencyInjection().get<OrdemPreparoRepository>() {
     carregarOrdens();
-    // Atualização automática a cada 15s (igual ao sync monitor do shell)
+    // Atualização automática a cada 15s (fallback) + escuta instantânea de eventos Realtime
     _refreshTimer =
         Timer.periodic(const Duration(seconds: 15), (_) => carregarOrdens());
+    try {
+      final syncService = DependencyInjection().get<SupabaseSyncService>();
+      _syncSub = syncService.onDataSynced.listen((_) => carregarOrdens());
+    } catch (_) {}
   }
 
   // ── Getters públicos ────────────────────────────────────────────────
@@ -239,10 +245,12 @@ class CentralPedidosController extends ChangeNotifier {
         await _carregarPrecos(); // ← Mantém mapa de preparo atualizado
         await _carregarDadosAuxiliares(list);
         await carregarListaPedidos();
+        if (_isDisposed) return;
         _todasOrdens = list;
         _applyFilters();
         notifyListeners();
       } catch (e) {
+        if (_isDisposed) return;
         debugPrint('[CentralPedidosController] Erro no refresh: $e');
       }
       return;
@@ -254,14 +262,18 @@ class CentralPedidosController extends ChangeNotifier {
       await _carregarPrecos();
       await _carregarDadosAuxiliares(list);
       await carregarListaPedidos();
+      if (_isDisposed) return;
       _todasOrdens = list;
       _applyFilters();
     } catch (e) {
+      if (_isDisposed) return;
       _error = 'Erro ao carregar pedidos: $e';
       debugPrint('[CentralPedidosController] $e');
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (!_isDisposed) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -413,8 +425,8 @@ class CentralPedidosController extends ChangeNotifier {
     //    → se dataHoraCriacao do pedido for >30 min no futuro vs criadaEm da ordem,
     //      provavelmente é o horário de entrega armazenado com o bug
     final pedido = _pedidosMap[o.pedidoId];
-    DateTime? dataAgendada = pedido?.dataHoraEntregaPrevista?.toLocal()
-        ?? parsed.dataAgendada;
+    DateTime? dataAgendada = parsed.dataAgendada
+        ?? pedido?.dataHoraEntregaPrevista?.toLocal();
 
     if (dataAgendada == null && pedido != null) {
       final pedidoCriadaLocal = pedido.dataHoraCriacao.toLocal();
@@ -453,10 +465,12 @@ class CentralPedidosController extends ChangeNotifier {
     final DateTime targetEntrega;
     final DateTime inicioRecomendado;
 
+    final criadaEmLocal = o.criadaEm.toLocal();
+
     if (isImmediate) {
       // Pedido imediato: entrega estimada a partir de agora
-      targetEntrega = o.criadaEm.add(Duration(minutes: tempoPrep + tempoDesloc + margem));
-      inicioRecomendado = o.criadaEm;
+      targetEntrega = criadaEmLocal.add(Duration(minutes: tempoPrep + tempoDesloc + margem));
+      inicioRecomendado = criadaEmLocal;
     } else {
       targetEntrega = dataAgendada;
       inicioRecomendado = targetEntrega.subtract(Duration(minutes: tempoPrep + tempoDesloc + margem));
@@ -541,7 +555,7 @@ class CentralPedidosController extends ChangeNotifier {
     // ── Pendente: urgência em relação ao horário de INÍCIO ───────────────
     } else {
       if (isImmediate) {
-        final minutosCriado = agora.difference(o.criadaEm).inMinutes;
+        final minutosCriado = agora.difference(criadaEmLocal).inMinutes;
         if (minutosCriado >= 0 && minutosCriado <= 2) {
           statusLabel = 'Iniciar agora';
           statusColor = const Color(0xFFEF4444);
@@ -702,6 +716,26 @@ class CentralPedidosController extends ChangeNotifier {
       } catch (_) {}
     }
 
+    // Enfileira alteração no Outbox para sincronização com o Supabase
+    try {
+      final outboxService = DependencyInjection().get<OutboxService>();
+      final tenantId = _ordemRepo.activeTenantId;
+      await outboxService.enqueue(
+        entity: 'Pedido',
+        entityId: pedidoId,
+        action: 'update',
+        payload: {
+          'id': pedidoId,
+          'tenantId': tenantId,
+          'status': novoStatus,
+          'updatedAt': now.toIso8601String(),
+        },
+        version: 1,
+      );
+    } catch (e) {
+      debugPrint('[PEDIDOS] Erro ao enfileirar outbox em atualizarStatusPedidoDireto: $e');
+    }
+
     // Recalcula reservas e atualiza o histórico
     try {
       final estoqueCtrl = DependencyInjection().get<EstoqueController>();
@@ -727,13 +761,13 @@ class CentralPedidosController extends ChangeNotifier {
       operadorId: ordem.operadorId,
       criadaEm: ordem.criadaEm,
       iniciadaEm: novoStatus == StatusOrdemPreparo.emPreparo
-          ? DateTime.now()
+          ? (ordem.iniciadaEm ?? DateTime.now())
           : ordem.iniciadaEm,
-      concluidaEm: novoStatus == StatusOrdemPreparo.pronto
-          ? DateTime.now()
+      concluidaEm: (novoStatus == StatusOrdemPreparo.pronto || novoStatus == StatusOrdemPreparo.entregue)
+          ? (ordem.concluidaEm ?? DateTime.now())
           : ordem.concluidaEm,
       canceladaEm: novoStatus == StatusOrdemPreparo.cancelado
-          ? DateTime.now()
+          ? (ordem.canceladaEm ?? DateTime.now())
           : ordem.canceladaEm,
       tempoEstimadoSegundos: ordem.tempoEstimadoSegundos,
       observacoes: ordem.observacoes,
@@ -749,11 +783,16 @@ class CentralPedidosController extends ChangeNotifier {
     try {
       final db = DependencyInjection().get<FincoreDatabase>();
       final now = DateTime.now().toUtc();
-      // Mapeamento explícito obrigatório: o CHECK CONSTRAINT do Postgres
-      // exige snake_case ('em_preparo'), mas Dart enum .name retorna camelCase
-      // ('emPreparo'). Cada novo status DEVE ser adicionado aqui.
       final statusStr = switch (novoStatus) {
         StatusOrdemPreparo.pendente  => 'confirmado',
+        StatusOrdemPreparo.emPreparo => 'em_preparo',
+        StatusOrdemPreparo.pronto    => 'pronto',
+        StatusOrdemPreparo.entregue  => 'entregue',
+        StatusOrdemPreparo.cancelado => 'cancelado',
+      };
+
+      final statusOrdemStr = switch (novoStatus) {
+        StatusOrdemPreparo.pendente  => 'pendente',
         StatusOrdemPreparo.emPreparo => 'em_preparo',
         StatusOrdemPreparo.pronto    => 'pronto',
         StatusOrdemPreparo.entregue  => 'entregue',
@@ -768,9 +807,59 @@ class CentralPedidosController extends ChangeNotifier {
         syncStatus: const Value(SyncStatus.pending),
       ));
 
-      // Registrar no outbox a alteração do status do pedido para sincronização com o Supabase
+      // Se o pedido estava ENTREGUE e está sendo revertido/modificado, estorna as baixas físicas de expedição anteriores
+      if (ordem.status == StatusOrdemPreparo.entregue && novoStatus != StatusOrdemPreparo.entregue) {
+        final movsExp = await (db.select(db.movimentacoesEstoqueTable)
+              ..where((t) =>
+                  t.tenantId.equals(ordem.tenantId) &
+                  t.pedidoId.equals(ordem.pedidoId) &
+                  t.tipo.equals('expedicao') &
+                  t.deletedAt.isNull()))
+            .get();
+
+        for (final m in movsExp) {
+          await (db.update(db.movimentacoesEstoqueTable)
+                ..where((t) => t.id.equals(m.id)))
+              .write(MovimentacoesEstoqueTableCompanion(
+            deletedAt: Value(now),
+            updatedAt: Value(now),
+            syncStatus: const Value(SyncStatus.pending),
+          ));
+
+          try {
+            final outboxService = DependencyInjection().get<OutboxService>();
+            await outboxService.enqueue(
+              entity: 'movimentacao_estoque',
+              entityId: m.id,
+              action: 'DELETE',
+              payload: {
+                'id': m.id,
+                'tenantId': ordem.tenantId,
+                'deletedAt': now.toIso8601String(),
+              },
+              version: 1,
+            );
+          } catch (_) {}
+        }
+      }
+
+      // Registrar no outbox a alteração do status do pedido e da ordem de preparo para sincronização com o Supabase
       try {
         final outboxService = DependencyInjection().get<OutboxService>();
+
+        // Busca syncVersion atual do pedido local para incrementar corretamente
+        final pedidoRow = await (db.select(db.pedidosTable)
+              ..where((t) => t.id.equals(ordem.pedidoId)))
+            .getSingleOrNull();
+        final pedidoSyncVersion = (pedidoRow?.syncVersion ?? 0) + 1;
+
+        // Atualiza syncVersion do pedido localmente
+        await (db.update(db.pedidosTable)
+              ..where((t) => t.id.equals(ordem.pedidoId)))
+            .write(PedidosTableCompanion(
+          syncVersion: Value(pedidoSyncVersion),
+        ));
+
         await outboxService.enqueue(
           entity: 'Pedido',
           entityId: ordem.pedidoId,
@@ -779,12 +868,64 @@ class CentralPedidosController extends ChangeNotifier {
             'id': ordem.pedidoId,
             'tenantId': ordem.tenantId,
             'status': statusStr,
+            'syncVersion': pedidoSyncVersion,
             'updatedAt': now.toIso8601String(),
           },
-          version: 1,
+          version: pedidoSyncVersion,
         );
+
+        // Busca syncVersion atual da ordem de preparo local para incrementar
+        final ordemRow = await (db.select(db.ordensPreparoTable)
+              ..where((t) => t.id.equals(updated.id)))
+            .getSingleOrNull();
+        final ordemSyncVersion = (ordemRow?.syncVersion ?? 0) + 1;
+
+        // Atualiza syncVersion da ordem localmente
+        if (ordemRow != null) {
+          await (db.update(db.ordensPreparoTable)
+                ..where((t) => t.id.equals(updated.id)))
+              .write(OrdensPreparoTableCompanion(
+            syncVersion: Value(ordemSyncVersion),
+            updatedAt: Value(now),
+          ));
+        }
+
+        final kdsItensJson = jsonEncode(updated.itens.map((i) => i.toJson()).toList());
+        await outboxService.enqueue(
+          entity: 'OrdemPreparo',
+          entityId: updated.id,
+          action: 'update',
+          payload: {
+            'id': updated.id,
+            'tenantId': updated.tenantId,
+            'pedidoId': updated.pedidoId,
+            'itensJson': kdsItensJson,
+            'status': statusOrdemStr,
+            'prioridade': updated.prioridade.name,
+            'operadorId': updated.operadorId,
+            'criadaEm': updated.criadaEm.toUtc().toIso8601String(),
+            if (updated.iniciadaEm != null) 'iniciadaEm': updated.iniciadaEm!.toUtc().toIso8601String(),
+            if (updated.concluidaEm != null) 'concluidaEm': updated.concluidaEm!.toUtc().toIso8601String(),
+            if (updated.canceladaEm != null) 'canceladaEm': updated.canceladaEm!.toUtc().toIso8601String(),
+            'tempoEstimadoSegundos': updated.tempoEstimadoSegundos,
+            'observacoes': updated.observacoes,
+            'syncVersion': ordemSyncVersion,
+            'updatedAt': now.toIso8601String(),
+          },
+          version: ordemSyncVersion,
+        );
+
+        // Dispara push imediato para o Supabase sem aguardar o timer de 30s
+        try {
+          final syncEngine = DependencyInjection().get<SyncEngine>();
+          unawaited(syncEngine.processPendingQueue().catchError((_) => const SyncResult(
+                successCount: 0,
+                failureCount: 0,
+                hasPendingAfter: true,
+              )));
+        } catch (_) {}
       } catch (e) {
-        debugPrint('[PEDIDOS] Erro ao registrar status do pedido no outbox: $e');
+        debugPrint('[PEDIDOS] Erro ao registrar status no outbox: $e');
       }
 
       // Estorno ou reativação do lançamento financeiro do pedido
@@ -1091,9 +1232,20 @@ class CentralPedidosController extends ChangeNotifier {
     return resultado;
   }
 
+  bool _isDisposed = false;
+  bool get isDisposed => _isDisposed;
+
+  @override
+  void notifyListeners() {
+    if (_isDisposed) return;
+    super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _isDisposed = true;
     _refreshTimer?.cancel();
+    _syncSub?.cancel();
     super.dispose();
   }
 }

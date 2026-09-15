@@ -4,7 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_core/fincore_core.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_flutter/main.dart';
 
 class PendingApprovalPage extends StatefulWidget {
   final String tenantId;
@@ -97,7 +96,7 @@ class _PendingApprovalPageState extends State<PendingApprovalPage>
       }
     } catch (_) {}
 
-    // 2. Atualizar via repositórios locais ou backend Serverpod
+    // 2. Atualizar via repositórios locais (sem Serverpod)
     try {
       final empresaRepo = DependencyInjection().get<EmpresaRepository>();
       final empresas = await empresaRepo.findAll();
@@ -115,17 +114,26 @@ class _PendingApprovalPageState extends State<PendingApprovalPage>
         });
       }
 
-      final emp = await client.onboarding.minhaEmpresa();
-      if (!mounted) return;
-      if (emp != null) {
+      // Buscar empresa no Supabase como fallback
+      final rows = await Supabase.instance.client
+          .from('empresa')
+          .select('nomeFantasia, razaoSocial, email, plano, documentoFiscal, segmento')
+          .eq('id', widget.tenantId)
+          .limit(1);
+      if (rows.isNotEmpty && mounted) {
+        final emp = rows.first as Map<String, dynamic>;
         setState(() {
-          _empresaNome = emp.nomeFantasia.isNotEmpty ? emp.nomeFantasia : emp.razaoSocial;
-          _email = emp.email.isNotEmpty ? emp.email : currentEmail;
-          _plano = _formatPlano(emp.plano);
-          final doc = emp.documentoFiscal;
-          if (doc != null && doc.isNotEmpty) _documentoFiscal = doc;
-          final seg = emp.segmento;
-          if (seg != null && seg.isNotEmpty) _segmento = seg;
+          _empresaNome = (emp['nomeFantasia'] as String? ?? '').isNotEmpty
+              ? emp['nomeFantasia'] as String
+              : emp['razaoSocial'] as String? ?? _empresaNome;
+          _email = (emp['email'] as String? ?? '').isNotEmpty
+              ? emp['email'] as String
+              : currentEmail;
+          _plano = _formatPlano(emp['plano'] ?? 'prata');
+          final doc = emp['documentoFiscal'] as String? ?? '';
+          if (doc.isNotEmpty) _documentoFiscal = doc;
+          final seg = emp['segmento'] as String? ?? '';
+          if (seg.isNotEmpty) _segmento = seg;
         });
       }
     } catch (e) {
@@ -156,12 +164,19 @@ class _PendingApprovalPageState extends State<PendingApprovalPage>
   }
 
   void _startPolling() {
-    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
       try {
-        final status = await client.onboarding.status();
-        if (status == 'ativo') {
-          timer.cancel();
-          widget.onApproved();
+        final rows = await Supabase.instance.client
+            .from('empresa')
+            .select('status')
+            .eq('id', widget.tenantId)
+            .limit(1);
+        if (rows.isNotEmpty) {
+          final status = (rows.first as Map<String, dynamic>)['status'] as String? ?? '';
+          if (status.toUpperCase() == 'ATIVO') {
+            timer.cancel();
+            widget.onApproved();
+          }
         }
       } catch (e) {
         debugPrint('Erro no polling de status: $e');
@@ -171,17 +186,24 @@ class _PendingApprovalPageState extends State<PendingApprovalPage>
 
   Future<void> _verificarStatus() async {
     try {
-      final status = await client.onboarding.status();
+      final rows = await Supabase.instance.client
+          .from('empresa')
+          .select('status')
+          .eq('id', widget.tenantId)
+          .limit(1);
       if (!mounted) return;
-      if (status == 'ativo') {
-        widget.onApproved();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sua conta está em análise final pela equipe comercial.'),
-            backgroundColor: FincoreColors.surface,
-          ),
-        );
+      if (rows.isNotEmpty) {
+        final status = (rows.first as Map<String, dynamic>)['status'] as String? ?? '';
+        if (status.toUpperCase() == 'ATIVO') {
+          widget.onApproved();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sua conta está em análise final pela equipe comercial.'),
+              backgroundColor: FincoreColors.surface,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -190,6 +212,7 @@ class _PendingApprovalPageState extends State<PendingApprovalPage>
       );
     }
   }
+
 
   void _abrirSuporteWhatsApp() {
     showDialog(

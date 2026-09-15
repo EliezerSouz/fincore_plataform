@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
@@ -8,8 +10,6 @@ import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:uuid/uuid.dart';
 import 'package:fincore_food_flutter/src/clientes/views/widgets/cliente_form_dialog.dart';
-import 'package:fincore_core/di/dependency_injection.dart';
-import 'package:fincore_food_client/fincore_food_client.dart' as client;
 import '../../controllers/pdv_express_controller.dart';
 
 /// Tela de Identificação do Cliente e Agendamento & Entrega do PDV
@@ -164,6 +164,171 @@ class _CustomerStepState extends State<CustomerStep> {
     });
   }
 
+  Future<({double lat, double lon})?> _geocodeAddress(String address) async {
+    if (kIsWeb) return null;
+    final cleanDigits = address.replaceAll(RegExp(r'[^0-9]'), '');
+    final cepMatch = RegExp(r'\b\d{8}\b').firstMatch(cleanDigits);
+    final cep = cepMatch?.group(0) ?? '';
+
+    // 1. Tentar BrasilAPI v2 (lat/lon de CEPs brasileiros)
+    if (cep.length == 8) {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 3);
+      try {
+        final req = await client.getUrl(Uri.parse('https://brasilapi.com.br/api/cep/v2/$cep'));
+        final res = await req.close();
+        if (res.statusCode == 200) {
+          final body = await res.transform(utf8.decoder).join();
+          final json = jsonDecode(body) as Map<String, dynamic>;
+          final location = json['location'] as Map<String, dynamic>?;
+          if (location != null) {
+            final coords = location['coordinates'] as Map<String, dynamic>?;
+            if (coords != null) {
+              final lat = double.tryParse(coords['latitude']?.toString() ?? '');
+              final lon = double.tryParse(coords['longitude']?.toString() ?? '');
+              if (lat != null && lon != null && (lat != 0 || lon != 0)) {
+                return (lat: lat, lon: lon);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('BrasilAPI erro: $e');
+      } finally {
+        client.close();
+      }
+
+      // 2. Tentar AwesomeAPI CEP
+      final clientAwesome = HttpClient();
+      clientAwesome.connectionTimeout = const Duration(seconds: 3);
+      try {
+        final req = await clientAwesome.getUrl(Uri.parse('https://cep.awesomeapi.com.br/json/$cep'));
+        final res = await req.close();
+        if (res.statusCode == 200) {
+          final body = await res.transform(utf8.decoder).join();
+          final json = jsonDecode(body) as Map<String, dynamic>;
+          final lat = double.tryParse(json['lat']?.toString() ?? '');
+          final lon = double.tryParse(json['lng']?.toString() ?? '');
+          if (lat != null && lon != null && (lat != 0 || lon != 0)) {
+            return (lat: lat, lon: lon);
+          }
+        }
+      } catch (e) {
+        debugPrint('AwesomeAPI erro: $e');
+      } finally {
+        clientAwesome.close();
+      }
+    }
+
+    // 3. Fallback Nominatim OpenStreetMap
+    final clientNom = HttpClient();
+    clientNom.connectionTimeout = const Duration(seconds: 4);
+    try {
+      final query = Uri.encodeComponent(address.contains('Brasil') ? address : '$address, Brasil');
+      final req = await clientNom.getUrl(Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1'));
+      req.headers.set(HttpHeaders.userAgentHeader, 'FincoreFoodApp/1.0 (contact: support@fincore.com)');
+      final res = await req.close();
+      if (res.statusCode == 200) {
+        final body = await res.transform(utf8.decoder).join();
+        final list = jsonDecode(body) as List<dynamic>;
+        if (list.isNotEmpty) {
+          final first = list.first as Map<String, dynamic>;
+          final lat = double.tryParse(first['lat']?.toString() ?? '');
+          final lon = double.tryParse(first['lon']?.toString() ?? '');
+          if (lat != null && lon != null) {
+            return (lat: lat, lon: lon);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Nominatim erro: $e');
+    } finally {
+      clientNom.close();
+    }
+
+    return null;
+  }
+
+  Future<({int distanceMeters, int durationSeconds})?> _calculateOsrmRoute(
+      double lat1, double lon1, double lat2, double lon2) async {
+    if (kIsWeb) return null;
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 4);
+    try {
+      final url = 'http://router.project-osrm.org/route/v1/driving/$lon1,$lat1;$lon2,$lat2?overview=false';
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.userAgentHeader, 'FincoreFoodApp/1.0 (contact: support@fincore.com)');
+      final res = await req.close();
+      if (res.statusCode == 200) {
+        final body = await res.transform(utf8.decoder).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        final routes = json['routes'] as List<dynamic>?;
+        if (routes != null && routes.isNotEmpty) {
+          final firstRoute = routes.first as Map<String, dynamic>;
+          final distance = (firstRoute['distance'] as num?)?.round();
+          final duration = (firstRoute['duration'] as num?)?.round();
+          if (distance != null && duration != null) {
+            return (distanceMeters: distance, durationSeconds: duration);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('OSRM erro: $e');
+    } finally {
+      client.close();
+    }
+    return null;
+  }
+
+  int _calculateHaversineMeters(double lat1, double lon1, double lat2, double lon2) {
+    const R = 6371000.0;
+    final dLat = (lat2 - lat1) * pi / 180.0;
+    final dLon = (lon2 - lon1) * pi / 180.0;
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(lat1 * pi / 180.0) * cos(lat2 * pi / 180.0) *
+        sin(dLon / 2) * sin(dLon / 2);
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    final straightMeters = (R * c).round();
+    return (straightMeters * 1.35).round();
+  }
+
+  Future<void> _calcularTaxaEntrega(int distanceMeters) async {
+    final bairro = _bairroCtrl.text.trim();
+    if (bairro.isNotEmpty) {
+      final taxaBairro = await widget.controller.taxaRepo.findByBairro(bairro);
+      if (taxaBairro != null && taxaBairro.valorCentavos > 0) {
+        final valorReais = (taxaBairro.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+        _taxaCtrl.removeListener(_onEntregaFieldsChanged);
+        _taxaCtrl.text = valorReais;
+        _taxaCtrl.addListener(_onEntregaFieldsChanged);
+
+        widget.controller.updateEntrega(
+          widget.controller.entrega.copyWith(
+            taxaEntregaCentavos: taxaBairro.valorCentavos,
+          ),
+        );
+        return;
+      }
+    }
+
+    final config = widget.controller.empresaConfig;
+    if (config != null && (config.taxaEntregaPorKm || config.valorPorKmCentavos > 0)) {
+      final km = distanceMeters / 1000.0;
+      final taxaCentavos = (km * config.valorPorKmCentavos).round();
+      final valorReais = (taxaCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+
+      _taxaCtrl.removeListener(_onEntregaFieldsChanged);
+      _taxaCtrl.text = valorReais;
+      _taxaCtrl.addListener(_onEntregaFieldsChanged);
+
+      widget.controller.updateEntrega(
+        widget.controller.entrega.copyWith(
+          taxaEntregaCentavos: taxaCentavos,
+        ),
+      );
+    }
+  }
+
   Future<void> _calcularRotaPreview() async {
     var cep = _cepCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (cep.length == 7) {
@@ -209,40 +374,48 @@ class _CustomerStepState extends State<CustomerStep> {
         cep
       ].where((s) => s != null && s.trim().isNotEmpty).join(', ');
 
-      debugPrint('[_calcularRotaPreview] Requisitando rota no servidor. Origem: "$origin" | Destino: "$destination"');
-      if (origin.isNotEmpty && destination.isNotEmpty) {
-        final serverpodClient = DependencyInjection().get<client.Client>();
-        final routeResult = await serverpodClient.mapRoute.calculateRoute(origin, destination);
-        debugPrint('[_calcularRotaPreview] Retorno do servidor: status=${routeResult.status}, distancia=${routeResult.distanciaMetros}m, tempo=${routeResult.tempoDeslocamentoSegundos}s');
-        if (routeResult.status != 'error' && mounted) {
-          final config = widget.controller.empresaConfig;
-          int? calculatedTaxaCentavos;
-          if (config != null && config.taxaEntregaPorKm) {
-            final distanciaKm = routeResult.distanciaMetros / 1000.0;
-            final valorPorKm = config.valorPorKmCentavos / 100.0;
-            final taxaBruta = distanciaKm * valorPorKm;
-            // Arredondamento para múltiplos de R$ 0,50
-            final taxaArredondada = (taxaBruta * 2).round() / 2;
-            calculatedTaxaCentavos = (taxaArredondada * 100).round();
-          }
+      final originAddress = origin.isNotEmpty ? origin : '${_cidadeCtrl.text}, Brasil';
+      final destAddress = destination.isNotEmpty ? destination : cep;
 
+      debugPrint('[_calcularRotaPreview] Origem: "$originAddress" | Destino: "$destAddress"');
+
+      final locOrig = await _geocodeAddress(originAddress);
+      final locDest = await _geocodeAddress(destAddress);
+
+      if (locOrig != null && locDest != null) {
+        int distance = 0;
+        int duration = 0;
+
+        if (locOrig.lat == locDest.lat && locOrig.lon == locDest.lon) {
+          distance = 100;
+          duration = 30;
+        } else {
+          final osrmResult = await _calculateOsrmRoute(locOrig.lat, locOrig.lon, locDest.lat, locDest.lon);
+          if (osrmResult != null && osrmResult.distanceMeters > 0) {
+            distance = osrmResult.distanceMeters;
+            duration = osrmResult.durationSeconds;
+          } else {
+            distance = _calculateHaversineMeters(locOrig.lat, locOrig.lon, locDest.lat, locDest.lon);
+            duration = (distance / 8.33).round();
+          }
+        }
+
+        final minutos = (duration / 60).round().clamp(1, 999);
+
+        if (mounted) {
           setState(() {
-            _distanciaMetros = routeResult.distanciaMetros;
-            _tempoDeslocamentoMinutos = (routeResult.tempoDeslocamentoSegundos / 60).round();
-            if (calculatedTaxaCentavos != null) {
-              _taxaCtrl.removeListener(_onEntregaFieldsChanged);
-              _taxaCtrl.text = (calculatedTaxaCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
-              _taxaCtrl.addListener(_onEntregaFieldsChanged);
-            }
+            _distanciaMetros = distance;
+            _tempoDeslocamentoMinutos = minutos;
           });
 
           widget.controller.updateEntrega(
             widget.controller.entrega.copyWith(
-              distanciaMetros: routeResult.distanciaMetros,
-              tempoDeslocamentoSegundos: routeResult.tempoDeslocamentoSegundos,
-              taxaEntregaCentavos: calculatedTaxaCentavos ?? widget.controller.entrega.taxaEntregaCentavos,
+              distanciaMetros: distance,
+              tempoDeslocamentoSegundos: duration,
             ),
           );
+
+          await _calcularTaxaEntrega(distance);
         }
       }
     } catch (e) {
@@ -432,6 +605,7 @@ class _CustomerStepState extends State<CustomerStep> {
   }
 
   Future<void> _buscarCepViaApi(String cep) async {
+    if (kIsWeb) return;
     final cleanCep = cep.replaceAll(RegExp(r'[^0-9]'), '');
     if (cleanCep.length != 8) return;
 
@@ -1607,6 +1781,7 @@ class _CadastroClienteDialogState extends State<_CadastroClienteDialog> {
   }
 
   Future<void> _buscarCep(String cep) async {
+    if (kIsWeb) return;
     final cleanCep = cep.replaceAll(RegExp(r'[^0-9]'), '');
     if (cleanCep.length != 8) return;
 

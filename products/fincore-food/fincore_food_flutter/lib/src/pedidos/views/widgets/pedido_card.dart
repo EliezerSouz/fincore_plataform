@@ -107,8 +107,8 @@ class PedidoCard extends StatelessWidget {
 
     // Prioridade de data de entrega: banco > parse obs > fallback legado > criadaEm da ordem
     final pedidoRow = controller.pedidosMap[ordem.pedidoId];
-    DateTime? dataEntregaRef = pedidoRow?.dataHoraEntregaPrevista?.toLocal()
-        ?? parsed.dataAgendada?.toLocal();
+    DateTime? dataEntregaRef = parsed.dataAgendada?.toLocal()
+        ?? pedidoRow?.dataHoraEntregaPrevista?.toLocal();
 
     // Fallback legado: código antigo salvava dataHoraCriacao = horário de entrega
     if (dataEntregaRef == null && pedidoRow != null) {

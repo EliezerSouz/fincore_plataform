@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_flutter/main.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
 
 class SignupPage extends StatefulWidget {
   final VoidCallback onSignupSuccess;
@@ -77,28 +75,96 @@ class _SignupPageState extends State<SignupPage> {
         throw Exception('Sessão não iniciada. Verifique suas credenciais.');
       }
 
-      // 2. Colocar token no Key Manager do Serverpod
-      await client.authenticationKeyManager?.put(token);
+      final currentUser = authResponse.user;
+      if (currentUser == null) throw Exception('Usuário não autenticado.');
 
-      // 3. Criar empresa no Serverpod Backend
-      // O servidor gera o tenantId internamente — o cliente nunca deve gerar IDs de tenant.
-      final nomeFantasiaFinal = _nomeFantasiaController.text.trim().isEmpty 
+      // 2. Criar ou vincular empresa e membro no Supabase
+      final now = DateTime.now().toUtc().toIso8601String();
+      final userEmail = _emailController.text.trim();
+      final docFiscal = _documentoController.text.trim();
+      final nomeFantasiaFinal = _nomeFantasiaController.text.trim().isEmpty
           ? _razaoSocialController.text.trim()
           : _nomeFantasiaController.text.trim();
 
-      final success = await client.onboarding.criarEmpresa(
-        razaoSocial: _razaoSocialController.text.trim(),
-        nomeFantasia: nomeFantasiaFinal,
-        documentoFiscal: _documentoController.text.trim(),
-        emailEmpresa: _emailController.text.trim(),
-        telefoneEmpresa: _telefoneController.text.trim(),
-        usuarioNome: _nameController.text.trim(),
-        segmento: _segmento,
-        plano: _plano,
-      );
+      // Verificar se a empresa já foi cadastrada previamente (por CPF/CNPJ ou e-mail)
+      final existingEmpresas = await Supabase.instance.client
+          .from('empresa')
+          .select('id, status, nomeFantasia')
+          .or('documentoFiscal.eq.$docFiscal,email.eq.$userEmail')
+          .limit(1);
 
-      if (!success) {
-        throw Exception('Falha ao registrar espaço da empresa no servidor.');
+      String tenantId;
+      if (existingEmpresas.isNotEmpty) {
+        tenantId = existingEmpresas.first['id'] as String;
+      } else {
+        final empresaResult = await Supabase.instance.client.from('empresa').insert({
+          'razaoSocial': _razaoSocialController.text.trim(),
+          'nomeFantasia': nomeFantasiaFinal,
+          'documentoFiscal': docFiscal,
+          'email': userEmail,
+          'telefone': _telefoneController.text.trim(),
+          'segmento': _segmento,
+          'plano': _plano,
+          'status': 'PENDENTE_ATIVACAO',
+          'timezone': 'America/Sao_Paulo',
+          'locale': 'pt_BR',
+          'currency': 'BRL',
+          'country': 'BR',
+          'createdFrom': 'PDV',
+          'createdBy': currentUser.id,
+          'updatedBy': currentUser.id,
+          'createdAt': now,
+          'updatedAt': now,
+          'syncVersion': 1,
+        }).select('id').single();
+
+        tenantId = empresaResult['id'] as String;
+      }
+
+      // Buscar ou criar perfil do usuário
+      final usuarioRows = await Supabase.instance.client
+          .from('usuarios')
+          .select('id')
+          .or('authUserId.eq.${currentUser.id},email.eq.$userEmail')
+          .limit(1);
+      String usuarioId;
+      if (usuarioRows.isNotEmpty) {
+        usuarioId = (usuarioRows.first as Map<String, dynamic>)['id'] as String;
+      } else {
+        final insertUser = await Supabase.instance.client.from('usuarios').insert({
+          'authUserId': currentUser.id,
+          'email': currentUser.email ?? userEmail,
+          'username': userEmail.split('@').first,
+          'nome': _nameController.text.trim(),
+          'ativo': true,
+          'criadoEm': now,
+          'atualizadoEm': now,
+        }).select('id').single();
+        usuarioId = insertUser['id'] as String;
+      }
+
+      // Buscar ou criar vínculo de membro com a empresa
+      final existingMembros = await Supabase.instance.client
+          .from('membro_empresa')
+          .select('id')
+          .eq('tenantId', tenantId)
+          .eq('usuarioId', usuarioId)
+          .limit(1);
+
+      if (existingMembros.isEmpty) {
+        await Supabase.instance.client.from('membro_empresa').insert({
+          'tenantId': tenantId,
+          'usuarioId': usuarioId,
+          'role': 'ADMIN',
+          'ativo': true,
+          'convidadoEm': now,
+          'aceitoEm': now,
+          'createdBy': currentUser.id,
+          'updatedBy': currentUser.id,
+          'createdAt': now,
+          'updatedAt': now,
+          'syncVersion': 1,
+        });
       }
 
       // Salvar em cache local para exibição imediata na tela de liberação
@@ -122,14 +188,6 @@ class _SignupPageState extends State<SignupPage> {
 
       widget.onSignupSuccess();
       Navigator.of(context).pop();
-    } on OnboardingException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: FincoreColors.danger,
-        ),
-      );
     } on AuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

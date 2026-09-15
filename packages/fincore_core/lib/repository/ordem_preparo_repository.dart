@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
@@ -5,6 +6,9 @@ import '../common/kds_models.dart';
 import '../common/domain_primitives.dart';
 import '../context/tenant_context.dart';
 import '../database/fincore_database.dart';
+import '../di/dependency_injection.dart';
+import '../sync/outbox_service.dart';
+import '../sync/sync_engine.dart';
 import 'base_repository.dart';
 
 class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
@@ -34,13 +38,51 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
     return rows.map(_mapToDomain).toList();
   }
 
+  static StatusOrdemPreparo parseStatus(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'confirmado':
+      case 'pendente':
+        return StatusOrdemPreparo.pendente;
+      case 'em_preparo':
+      case 'empreparo':
+        return StatusOrdemPreparo.emPreparo;
+      case 'pronto':
+        return StatusOrdemPreparo.pronto;
+      case 'entregue':
+        return StatusOrdemPreparo.entregue;
+      case 'cancelado':
+        return StatusOrdemPreparo.cancelado;
+      default:
+        return StatusOrdemPreparo.values.firstWhere(
+          (e) => e.name.toLowerCase() == raw.toLowerCase(),
+          orElse: () => StatusOrdemPreparo.pendente,
+        );
+    }
+  }
+
+  static String statusToString(StatusOrdemPreparo status) {
+    switch (status) {
+      case StatusOrdemPreparo.pendente:
+        return 'pendente';
+      case StatusOrdemPreparo.emPreparo:
+        return 'em_preparo';
+      case StatusOrdemPreparo.pronto:
+        return 'pronto';
+      case StatusOrdemPreparo.entregue:
+        return 'entregue';
+      case StatusOrdemPreparo.cancelado:
+        return 'cancelado';
+    }
+  }
+
   /// Retorna as ordens de preparo ativas na cozinha (pendentes, em preparo, prontas) ordenadas por prioridade e criacao.
   Future<List<OrdemPreparo>> findAtivasKds() async {
     final activeTenant = activeTenantId;
     final statusAtivos = [
-      StatusOrdemPreparo.pendente.name,
-      StatusOrdemPreparo.emPreparo.name,
-      StatusOrdemPreparo.pronto.name,
+      'pendente',
+      'em_preparo',
+      'emPreparo',
+      'pronto',
     ];
 
     final rows = await (db.select(db.ordensPreparoTable)
@@ -73,7 +115,7 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
       tenantId: activeTenant,
       pedidoId: ordem.pedidoId,
       itensJson: itensRaw,
-      status: ordem.status.name,
+      status: statusToString(ordem.status),
       prioridade: ordem.prioridade.name,
       operadorId: Value(ordem.operadorId),
       criadaEm: ordem.criadaEm,
@@ -104,7 +146,7 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
           deletedAt: Value(now),
           syncStatus: Value(SyncStatus.pending),
           updatedAt: Value(now),
-          status: Value(StatusOrdemPreparo.cancelado.name),
+          status: Value(statusToString(StatusOrdemPreparo.cancelado)),
           canceladaEm: Value(now),
         ));
   }
@@ -120,17 +162,15 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
       tenantId: data.tenantId,
       pedidoId: data.pedidoId,
       itens: itens,
-      status: StatusOrdemPreparo.values.firstWhere(
-          (e) => e.name == data.status,
-          orElse: () => StatusOrdemPreparo.pendente),
+      status: parseStatus(data.status),
       prioridade: PrioridadeOrdem.values.firstWhere(
           (e) => e.name == data.prioridade,
           orElse: () => PrioridadeOrdem.normal),
       operadorId: data.operadorId,
-      criadaEm: data.criadaEm,
-      iniciadaEm: data.iniciadaEm,
-      concluidaEm: data.concluidaEm,
-      canceladaEm: data.canceladaEm,
+      criadaEm: data.criadaEm.toLocal(),
+      iniciadaEm: data.iniciadaEm?.toLocal(),
+      concluidaEm: data.concluidaEm?.toLocal(),
+      canceladaEm: data.canceladaEm?.toLocal(),
       tempoEstimadoSegundos: data.tempoEstimadoSegundos,
       observacoes: data.observacoes,
       metadata: SyncMetadata(
@@ -160,7 +200,7 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
           titulo: row.titulo,
           descricao: row.descricao,
           operadorNome: row.operadorNome,
-          criadaEm: row.criadaEm,
+          criadaEm: row.criadaEm.toLocal(),
           versao: row.versao,
           metadata: SyncMetadata(
             version: row.syncVersion,
@@ -177,7 +217,7 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
 
   Future<void> registrarHistorico(String ordemId, String titulo, String descricao, {String? operadorNome}) async {
     final activeTenant = activeTenantId;
-    final now = DateTime.now().toUtc();
+    final nowUtc = DateTime.now().toUtc();
     final id = const Uuid().v4();
 
     final entry = HistoricosOrdemPreparoTableCompanion.insert(
@@ -187,14 +227,53 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
       titulo: titulo,
       descricao: descricao,
       operadorNome: Value(operadorNome ?? 'Operador'),
-      criadaEm: now,
-      createdAt: now,
-      updatedAt: now,
+      criadaEm: nowUtc,
+      createdAt: nowUtc,
+      updatedAt: nowUtc,
       createdBy: activeTenant,
       updatedBy: activeTenant,
       syncStatus: SyncStatus.pending,
     );
 
     await db.into(db.historicosOrdemPreparoTable).insertOnConflictUpdate(entry);
+
+    // Sincroniza linha do tempo com o Supabase via Outbox + Push instantâneo
+    try {
+      final outboxService = DependencyInjection().tryGet<OutboxService>();
+      if (outboxService != null) {
+        await outboxService.enqueue(
+          entity: 'HistoricoOrdemPreparo',
+          entityId: id,
+          action: 'INSERT',
+          payload: {
+            'id': id,
+            'tenantId': activeTenant,
+            'ordemPreparoId': ordemId,
+            'titulo': titulo,
+            'descricao': descricao,
+            'operadorNome': operadorNome ?? 'Operador',
+            'criadaEm': nowUtc.toIso8601String(),
+            'versao': 'v1',
+            'createdAt': nowUtc.toIso8601String(),
+            'updatedAt': nowUtc.toIso8601String(),
+            'createdBy': activeTenant,
+            'updatedBy': activeTenant,
+            'syncVersion': 1,
+          },
+          version: 1,
+        );
+
+        try {
+          final syncEngine = DependencyInjection().tryGet<SyncEngine>();
+          if (syncEngine != null) {
+            unawaited(syncEngine.processPendingQueue().catchError((_) => const SyncResult(
+                  successCount: 0,
+                  failureCount: 0,
+                  hasPendingAfter: true,
+                )));
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 }

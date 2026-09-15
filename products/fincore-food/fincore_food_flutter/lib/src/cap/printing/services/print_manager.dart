@@ -144,36 +144,77 @@ class PrintManager {
     );
   }
 
-  /// Imprime um teste rápido em uma impressora específica.
+  /// Imprime um teste realista de cupom em uma impressora específica.
   Future<PrinterResult> imprimirTeste({
     required String printerPath,
     required PrintVia via,
     int larguraPapel = 80,
   }) async {
-    final w = larguraPapel == 58 ? 32 : 48;
-    final line = '=' * w;
-    final sep = '-' * w;
-    final now = DateTime.now();
-    final nowStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    final sampleData = PrintData(
+      pedidoId: 'TEST-101',
+      numeroPedido: 101,
+      clienteNome: 'Cliente Teste (Demonstração)',
+      clienteTelefone: '(15) 99999-8888',
+      tipoLogistica: 'Entrega',
+      endereco: 'Av. Paulista, 1000 - Apt 42',
+      bairro: 'Bela Vista',
+      cidade: 'Sorocaba',
+      uf: 'SP',
+      formaPagamento: 'PIX',
+      totalCentavos: 4500,
+      taxaEntregaCentavos: 500,
+      trocoParaCentavos: 5000,
+      itens: const [
+        PrintDataItem(
+          nome: 'X-Tudo Especial Gourmet',
+          quantidade: 2,
+          precoUnitarioCentavos: 1800,
+          totalCentavos: 3600,
+          observacao: 'Sem cebola, bacon extra',
+        ),
+        PrintDataItem(
+          nome: 'Coca-Cola 2L Gelada',
+          quantidade: 1,
+          precoUnitarioCentavos: 900,
+          totalCentavos: 900,
+        ),
+      ],
+      dataHora: DateTime.now(),
+      observacao: 'TESTE DE IMPRESSAO - Demonstracao de layout fisico',
+      status: 'confirmado',
+    );
 
-    final sb = StringBuffer();
-    sb.writeln(line);
-    sb.writeln(_center('FINCORE FOOD', w));
-    sb.writeln(_center('TESTE DE IMPRESSAO', w));
-    sb.writeln(line);
-    sb.writeln('VIA      : ${via.displayName}');
-    sb.writeln('LARGURA  : ${larguraPapel}mm');
-    sb.writeln('DATA     : $nowStr');
-    sb.writeln('STATUS   : ONLINE [OK]');
-    sb.writeln(sep);
-    sb.writeln(_center('Impressora configurada', w));
-    sb.writeln(_center('com sucesso!', w));
-    sb.writeln(line);
-    sb.writeln('\n\n\n');
+    final config = PrintConfig(
+      printers: const {
+        PrintVia.cliente: 'default',
+        PrintVia.cozinha: 'default',
+        PrintVia.balcao: 'default',
+        PrintVia.expedicao: 'default',
+      },
+      autoprint: const {
+        PrintVia.cliente: true,
+        PrintVia.cozinha: true,
+        PrintVia.balcao: true,
+        PrintVia.expedicao: true,
+      },
+      vias: const {
+        PrintVia.cliente: 1,
+        PrintVia.cozinha: 1,
+        PrintVia.balcao: 1,
+        PrintVia.expedicao: 1,
+      },
+      larguraPapel: larguraPapel,
+      nomeEmpresaCupom: 'FINCORE FOOD - TESTE',
+      imprimirRodape: true,
+      mensagemRodape: 'Obrigado pela preferência! Volte sempre!',
+    );
+
+    final lines = _templateEngine.render(via: via, data: sampleData, config: config);
+    final text = lines.join('\n');
 
     return _driver.send(
       printerPath: printerPath,
-      text: sb.toString(),
+      text: text,
       cortarPapel: true,
       abrirGaveta: false,
       larguraPapel: larguraPapel,

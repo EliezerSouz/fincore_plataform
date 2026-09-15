@@ -20,6 +20,11 @@ class DependencyInjection {
     return instance as T;
   }
 
+  /// Retorna a instância registrada correspondente ao tipo T, ou null se não estiver registrada.
+  T? tryGet<T extends Object>() {
+    return _registry[T] as T?;
+  }
+
   /// Limpa todos os registros do contêiner.
   void clear() {
     _registry.clear();

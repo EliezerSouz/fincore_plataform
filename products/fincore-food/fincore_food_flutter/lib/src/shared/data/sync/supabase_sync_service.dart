@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:drift/drift.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_core/fincore_core.dart';
+import '../../../estoque/controllers/estoque_controller.dart';
 
 /// Estado de conectividade com a nuvem.
 enum CloudConnectivity { online, offline, unknown }
@@ -48,6 +50,9 @@ class SupabaseSyncService {
   // Callback para notificar a UI sobre mudanças de conectividade
   void Function(CloudConnectivity)? onConnectivityChanged;
 
+  final StreamController<String> _syncEventsController = StreamController<String>.broadcast();
+  Stream<String> get onDataSynced => _syncEventsController.stream;
+
   // Mapeamento: entityName do outbox → nome da tabela no Supabase
   static const Map<String, String> _entityToTable = {
     'empresa_configuracao': 'empresa_configuracao',
@@ -87,6 +92,8 @@ class SupabaseSyncService {
     'EstoqueProduto': 'estoque_produto',
     'movimentacao_estoque': 'movimentacao_estoque',
     'MovimentacaoEstoque': 'movimentacao_estoque',
+    'planejamento_producao': 'planejamento_producao',
+    'PlanejamentoProducao': 'planejamento_producao',
     // FINANCEIRO: Sessões de caixa e lançamentos
     'sessao_caixa': 'sessao_caixa',
     'SessaoCaixa': 'sessao_caixa',
@@ -112,6 +119,10 @@ class SupabaseSyncService {
   /// Verifica se há conectividade com o Supabase fazendo um health check leve.
   /// Retorna false se estiver offline, em vez de lançar exceção.
   Future<bool> isOnline() async {
+    if (kIsWeb) {
+      _updateConnectivity(CloudConnectivity.online);
+      return true;
+    }
     try {
       final result = await InternetAddress.lookup('supabase.co')
           .timeout(const Duration(seconds: 3));
@@ -144,8 +155,11 @@ class SupabaseSyncService {
   /// Retorna false se offline — o SyncEngine irá fazer retry automaticamente.
   Future<bool> push(OutboxEntry entry) async {
     if (_connectivity == CloudConnectivity.offline) {
-      LogService.instance.debug(LogModule.sync, 'Offline - push de ${entry.entity} adiado');
-      throw OfflineSyncException('Sem conexao com o servidor (Offline)');
+      final recheck = await isOnline();
+      if (!recheck) {
+        LogService.instance.debug(LogModule.sync, 'Offline - push de ${entry.entity} adiado');
+        throw OfflineSyncException('Sem conexao com o servidor (Offline)');
+      }
     }
 
     final tableName = _entityToTable[entry.entity];
@@ -180,24 +194,148 @@ class SupabaseSyncService {
         payload.remove('entityModule');
       }
 
+      if (tableName == 'usuarios') {
+        payload.remove('createdAt');
+        payload.remove('updatedAt');
+        payload.remove('createdBy');
+        payload.remove('updatedBy');
+        payload.remove('syncVersion');
+        payload.remove('sync_version');
+        payload.remove('syncStatus');
+        payload.remove('sync_status');
+        payload.remove('lastSyncedAt');
+        payload.remove('last_synced_at');
+
+        if (payload.containsKey('username')) {
+          final usernameVal = payload['username'] as String? ?? '';
+          if (usernameVal.isNotEmpty) {
+            try {
+              final existing = await _supabase.from('usuarios').select('id').eq('username', usernameVal).maybeSingle();
+              if (existing != null && existing['id'] != null) {
+                final remoteId = existing['id'] as String;
+                if (remoteId != payload['id']) {
+                  payload['id'] = remoteId;
+                  LogService.instance.info(
+                    LogModule.sync,
+                    'Usuário "$usernameVal" alinhado com ID existente no Supabase: $remoteId',
+                  );
+                }
+              }
+            } catch (_) {}
+          }
+        }
+      }
+
+      if (tableName == 'membro_empresa' && payload.containsKey('usuarioId')) {
+        final usrId = payload['usuarioId'] as String? ?? '';
+        if (usrId.isNotEmpty) {
+          try {
+            final db = DependencyInjection().get<FincoreDatabase>();
+            final usr = await (db.select(db.usuariosTable)..where((t) => t.id.equals(usrId))).getSingleOrNull();
+            if (usr != null) {
+              final existingRemote = await _supabase.from('usuarios').select('id').eq('username', usr.username).maybeSingle();
+              final targetUserId = existingRemote != null ? (existingRemote['id'] as String) : usr.id;
+              payload['usuarioId'] = targetUserId;
+
+              await _supabase.from('usuarios').upsert({
+                'id': targetUserId,
+                'tenantId': usr.tenantId,
+                'authUserId': usr.authUserId,
+                'username': usr.username,
+                'email': usr.email,
+                'nome': usr.nome,
+                'avatarUrl': usr.avatarUrl,
+                'ativo': usr.ativo,
+                'criadoEm': usr.criadoEm.toIso8601String(),
+                'atualizadoEm': usr.atualizadoEm.toIso8601String(),
+              }, onConflict: 'id');
+            } else if (_context.hasContext && _context.usuario.id.isNotEmpty) {
+              final ctxUsr = _context.usuario;
+              await _supabase.from('usuarios').upsert({
+                'id': ctxUsr.id,
+                'tenantId': ctxUsr.tenantId,
+                'authUserId': null,
+                'username': ctxUsr.nome.toLowerCase().replaceAll(' ', '_'),
+                'email': ctxUsr.email,
+                'nome': ctxUsr.nome,
+                'avatarUrl': null,
+                'ativo': true,
+                'criadoEm': DateTime.now().toIso8601String(),
+                'atualizadoEm': DateTime.now().toIso8601String(),
+              }, onConflict: 'id');
+              payload['usuarioId'] = ctxUsr.id;
+            }
+          } catch (_) {}
+        }
+
+        final targetUsrId = payload['usuarioId'] as String? ?? '';
+        final targetTenantId = payload['tenantId'] as String? ?? '';
+        if (targetUsrId.isNotEmpty && targetTenantId.isNotEmpty) {
+          try {
+            final existingMembro = await _supabase
+                .from('membro_empresa')
+                .select('id')
+                .eq('usuarioId', targetUsrId)
+                .eq('tenantId', targetTenantId)
+                .maybeSingle();
+            if (existingMembro != null && existingMembro['id'] != null) {
+              final remoteMembroId = existingMembro['id'] as String;
+              if (remoteMembroId != payload['id']) {
+                payload['id'] = remoteMembroId;
+                LogService.instance.info(
+                  LogModule.sync,
+                  'Membro empresa (usuarioId, tenantId) alinhado com ID existente no Supabase: $remoteMembroId',
+                );
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
       LogService.instance.debug(
         LogModule.sync,
         'Supabase PUSH: Tabela: $tableName | Acao: ${entry.action} | ID: ${entry.entityId}',
         tenantId: _context.hasContext ? _context.tenantId : null,
       );
 
-      // Sanitizar createdBy e updatedBy se contiverem strings não-UUID (ex: 'PDV')
+      // Sanitizar tenantId, createdBy e updatedBy
       final tenantUserId = _context.hasContext ? _context.usuario.id : '00000000-0000-0000-0000-000000000000';
-      if (payload.containsKey('createdBy')) {
-        final val = payload['createdBy'] as String? ?? '';
-        if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
-          payload['createdBy'] = tenantUserId;
+      if (!payload.containsKey('tenantId') || payload['tenantId'] == null || (payload['tenantId'] as String).isEmpty) {
+        if (_context.hasContext && _context.tenantId.isNotEmpty) {
+          payload['tenantId'] = _context.tenantId;
         }
       }
+
       if (payload.containsKey('updatedBy')) {
         final val = payload['updatedBy'] as String? ?? '';
         if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
           payload['updatedBy'] = tenantUserId;
+        }
+      }
+
+      // REGRA DE IMUTABILIDADE DO CRIADOR [VAL-002]:
+      // O criador original (createdBy / created_by) NUNCA pode ser alterado em edições/updates na nuvem.
+      // Se o registro já existir no Supabase, removemos 'createdBy' do payload para que o PostgreSQL
+      // mantenha o criador original intacto e evite erro 42501 (RLS Policy Violation) em contas de funcionários.
+      if (tableName != 'audit_logs' && payload.containsKey('id')) {
+        try {
+          final idVal = payload['id'] as String;
+          final existingRemote = await _supabase.from(tableName).select('id').eq('id', idVal).maybeSingle();
+          if (existingRemote != null) {
+            payload.remove('createdBy');
+          } else if (payload.containsKey('createdBy')) {
+            final val = payload['createdBy'] as String? ?? '';
+            if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
+              payload['createdBy'] = tenantUserId;
+            }
+          }
+        } catch (_) {
+          if (payload.containsKey('createdBy')) {
+            final val = payload['createdBy'] as String? ?? '';
+            if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
+              payload['createdBy'] = tenantUserId;
+            }
+          }
         }
       }
 
@@ -212,9 +350,9 @@ class SupabaseSyncService {
         }
       }
 
-      // Sanitizar campo 'status' para tabela pedido: o CHECK CONSTRAINT
-      // pedido_status_check exige snake_case ('em_preparo'), mas o Dart enum
-      // .name retorna camelCase ('emPreparo'). Tradução defensiva aqui.
+      // Sanitizar campo 'status' para tabelas pedido e ordens_preparo:
+      // O CHECK CONSTRAINT exige snake_case ('em_preparo'), mas enums no Dart
+      // podem enviar camelCase ('emPreparo'). Tradução defensiva aqui.
       if (tableName == 'pedido' && payload.containsKey('status')) {
         const statusCamelToSnake = {
           'emPreparo': 'em_preparo',
@@ -225,7 +363,20 @@ class SupabaseSyncService {
           payload['status'] = statusCamelToSnake[rawStatus];
           LogService.instance.debug(
             LogModule.sync,
-            'Status sanitizado: "$rawStatus" → "${payload['status']}" (pedido_status_check)',
+            'Status sanitizado: "$rawStatus" → "${payload['status']}" ($tableName)',
+          );
+        }
+      } else if (tableName == 'ordens_preparo' && payload.containsKey('status')) {
+        const statusCamelToSnake = {
+          'emPreparo': 'em_preparo',
+          'confirmado': 'pendente',
+        };
+        final rawStatus = payload['status'] as String? ?? '';
+        if (statusCamelToSnake.containsKey(rawStatus)) {
+          payload['status'] = statusCamelToSnake[rawStatus];
+          LogService.instance.debug(
+            LogModule.sync,
+            'Status sanitizado: "$rawStatus" → "${payload['status']}" ($tableName)',
           );
         }
       }
@@ -273,6 +424,31 @@ class SupabaseSyncService {
             break;
           } on PostgrestException catch (e) {
             attempts++;
+            if (e.code == '23505') {
+              if (tableName == 'membro_empresa' && payload.containsKey('usuarioId') && payload.containsKey('tenantId')) {
+                await _supabase
+                    .from('membro_empresa')
+                    .update(payload)
+                    .eq('usuarioId', payload['usuarioId'])
+                    .eq('tenantId', payload['tenantId']);
+                LogService.instance.info(
+                  LogModule.sync,
+                  'Membro empresa duplicado atualizado via (usuarioId, tenantId) no Supabase com sucesso.',
+                );
+                break;
+              }
+              if (tableName == 'usuarios' && payload.containsKey('username')) {
+                await _supabase
+                    .from('usuarios')
+                    .update(payload)
+                    .eq('username', payload['username']);
+                LogService.instance.info(
+                  LogModule.sync,
+                  'Usuário duplicado atualizado via username no Supabase com sucesso.',
+                );
+                break;
+              }
+            }
             if ((e.code == 'PGRST204' || e.message.contains("Could not find the '")) && attempts < 5) {
               final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(e.message);
               if (match != null) {
@@ -352,11 +528,11 @@ class SupabaseSyncService {
       int totalProtected = 0;
 
       final tables = [
-        'empresa_configuracao',
-        'empresas',
-        'categorias',
-        'membros_empresa',
         'usuarios',
+        'empresas',
+        'empresa_configuracao',
+        'membros_empresa',
+        'categorias',
         'tabelas_precificacao',
         'taxas_entrega',
         'formas_pagamento',
@@ -366,23 +542,29 @@ class SupabaseSyncService {
         'itens_tabela_precificacao',
         'produtos_tabelas_precificacao',
         'categorias_tabelas_precificacao',
-        // P0-01: Pedidos (Pull para sincronizar entre dispositivos do mesmo tenant)
+        // P0-01: Pedidos e KDS Ordens de Preparo (Pull para sincronizar entre dispositivos)
         'pedidos',
         'itens_pedido',
+        'ordens_preparo',
+        'historicos_ordem_preparo',
         // Onboarding / IAM
         'empresa_convites',
         // ESTOQUE
         'estoque_produto',
         'movimentacao_estoque',
+        'planejamento_producao',
         // FINANCEIRO
         'sessao_caixa',
         'lancamento_financeiro',
       ];
 
+      // Rastreia quais tabelas tiveram mudanças aplicadas (para recálculo seletivo de estoque)
+      final tablesWithChanges = <String>{};
       for (final table in tables) {
         final res = await _pullTable(table, tenantId, lastSyncAt, db);
         totalApplied += res.applied;
         totalProtected += res.protected;
+        if (res.applied > 0) tablesWithChanges.add(table);
       }
 
       final durationMs = DateTime.now().difference(startTime).inMilliseconds;
@@ -401,10 +583,35 @@ class SupabaseSyncService {
         );
       }
 
+      // Se pedidos, itens ou movimentações foram atualizados via pull, recalcula
+      // reservas e estoques para manter consistência entre múltiplos dispositivos.
+      // O recálculo é idempotente e seguro de chamar após qualquer pull.
+      final estoqueAlterado = tablesWithChanges.any((t) =>
+          t == 'pedidos' ||
+          t == 'itens_pedido' ||
+          t == 'movimentacao_estoque' ||
+          t == 'estoque_produto');
+      if (estoqueAlterado) {
+        try {
+          final estoqueCtrl = DependencyInjection().tryGet<EstoqueController>();
+          if (estoqueCtrl != null) {
+            await estoqueCtrl.recalcularReservasEEstoques(isFromSync: true);
+            LogService.instance.info(
+              LogModule.sync,
+              '[ESTOQUE] Recálculo de reservas disparado após pull (tabelas: ${tablesWithChanges.where((t) => t == "pedidos" || t == "itens_pedido" || t == "movimentacao_estoque" || t == "estoque_produto").join(", ")})',
+              tenantId: tenantId,
+            );
+          }
+        } catch (e) {
+          LogService.instance.debug(LogModule.sync, '[ESTOQUE] Recálculo pós-pull adiado: $e');
+        }
+      }
+
       await FincoreLogger.instance.endCycle(LogModule.sync, 'FIM DO CICLO DE RECEBIMENTO (PULL)');
 
       // Marca a data/hora exata em UTC do término do PULL bem-sucedido
       _lastPullTimestamp = DateTime.now().toUtc();
+      _syncEventsController.add('ALL');
       return true;
     } catch (e) {
       LogService.instance.error(LogModule.sync, '[PULL] Falha critica durante o ciclo de recebimento (Pull)', exception: e.toString());
@@ -425,18 +632,40 @@ class SupabaseSyncService {
     final tableName = _entityToTable[entityName];
     if (tableName == null) return (applied: 0, protected: 0);
 
-    final isFullPull = since.isBefore(DateTime.now().subtract(const Duration(days: 6)));
-    final pullType = isFullPull ? 'Carga Total' : 'Incremental';
-
     try {
-      final queryBuilder = _supabase.from(tableName).select();
-      final dateColumn = tableName == 'usuarios' ? 'atualizadoEm' : 'updatedAt';
-      final rows = await (tableName == 'empresa'
-              ? queryBuilder.eq('id', tenantId)
-              : tableName == 'usuarios'
-                  ? queryBuilder.eq('activeTenantId', tenantId)
-                  : queryBuilder.eq('tenantId', tenantId))
-          .gte(dateColumn, since.toIso8601String());
+      var queryBuilder = _supabase.from(tableName).select();
+      final dateColumn = (tableName == 'usuarios' || tableName == 'usuario') ? 'atualizadoEm' : 'updatedAt';
+
+      List<Map<String, dynamic>> rows = [];
+
+      if (tableName == 'empresa') {
+        var q = queryBuilder.eq('id', tenantId);
+        if (since.millisecondsSinceEpoch > 0) {
+          try { q = q.gte(dateColumn, since.toIso8601String()); } catch (_) {}
+        }
+        final res = await q;
+        rows = res.cast<Map<String, dynamic>>();
+      } else if (tableName == 'usuarios') {
+        try {
+          final membroRows = await _supabase.from('membro_empresa').select('usuarioId').eq('tenantId', tenantId);
+          final userIds = membroRows.map((m) => m['usuarioId'] as String?).whereType<String>().toSet().toList();
+          if (userIds.isNotEmpty) {
+            var q = queryBuilder.inFilter('id', userIds);
+            if (since.millisecondsSinceEpoch > 0) {
+              try { q = q.gte(dateColumn, since.toIso8601String()); } catch (_) {}
+            }
+            final res = await q;
+            rows = res.cast<Map<String, dynamic>>();
+          }
+        } catch (_) {}
+      } else {
+        var q = queryBuilder.eq('tenantId', tenantId);
+        if (since.millisecondsSinceEpoch > 0) {
+          try { q = q.gte(dateColumn, since.toIso8601String()); } catch (_) {}
+        }
+        final res = await q;
+        rows = res.cast<Map<String, dynamic>>();
+      }
 
       if (rows.isEmpty) {
         return (applied: 0, protected: 0);
@@ -518,17 +747,6 @@ class SupabaseSyncService {
     }
   }
 
-  String _formatDateTime(DateTime dt) {
-    final local = dt.toLocal();
-    final y = local.year.toString().padLeft(4, '0');
-    final m = local.month.toString().padLeft(2, '0');
-    final d = local.day.toString().padLeft(2, '0');
-    final hh = local.hour.toString().padLeft(2, '0');
-    final mm = local.minute.toString().padLeft(2, '0');
-    final ss = local.second.toString().padLeft(2, '0');
-    return '$y-$m-$d $hh:$mm:$ss';
-  }
-
   /// Retorna a syncVersion atual do registro local, ou null se não existir.
   Future<int?> _getLocalSyncVersion(
     String entityName,
@@ -605,6 +823,48 @@ class SupabaseSyncService {
                 ..where((t) => t.id.equals(entityId)))
               .getSingleOrNull();
           return row?.atualizadoEm.millisecondsSinceEpoch ?? 1;
+        case 'pedidos':
+        case 'Pedido':
+          final row = await (db.select(db.pedidosTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
+        case 'itens_pedido':
+        case 'ItensPedido':
+          final row = await (db.select(db.itensPedidoTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
+        case 'ordens_preparo':
+        case 'OrdemPreparo':
+          final row = await (db.select(db.ordensPreparoTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
+        case 'historicos_ordem_preparo':
+        case 'HistoricoOrdemPreparo':
+          final row = await (db.select(db.historicosOrdemPreparoTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
+        case 'estoque_produto':
+        case 'EstoqueProduto':
+          final row = await (db.select(db.estoqueProdutosTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
+        case 'movimentacao_estoque':
+        case 'MovimentacaoEstoque':
+          final row = await (db.select(db.movimentacoesEstoqueTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
+        case 'planejamento_producao':
+        case 'PlanejamentoProducao':
+          final row = await (db.select(db.planejamentoProducaoTable)
+                ..where((t) => t.id.equals(entityId)))
+              .getSingleOrNull();
+          return row?.syncVersion;
         default:
           return null;
       }
@@ -970,6 +1230,23 @@ class SupabaseSyncService {
         break;
 
       case 'membros_empresa':
+        final usrId = row['usuarioId'] as String?;
+        if (usrId != null && usrId.isNotEmpty) {
+          final usrExists = await (db.select(db.usuariosTable)..where((t) => t.id.equals(usrId))).getSingleOrNull();
+          if (usrExists == null) {
+            // Garante que o usuário existe localmente antes de inserir membro_empresa (evita FK 787)
+            await db.into(db.usuariosTable).insertOnConflictUpdate(
+              UsuariosTableCompanion.insert(
+                id: usrId,
+                tenantId: Value(row['tenantId'] as String?),
+                username: 'usuario_$usrId',
+                nome: 'Usuário do Sistema',
+                criadoEm: DateTime.now(),
+                atualizadoEm: DateTime.now(),
+              ),
+            );
+          }
+        }
         await db.into(db.membrosEmpresaTable).insertOnConflictUpdate(
               MembrosEmpresaTableCompanion.insert(
                 id: row['id'] as String,
@@ -1041,16 +1318,19 @@ class SupabaseSyncService {
                 deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
               ),
             );
+        break;
       case 'OrdemPreparo':
       case 'ordens_preparo':
         final listItensRaw = row['itensJson'] as String? ?? '[]';
+        final statusOrdem = row['status'] as String? ?? 'pendente';
+        final pedidoIdOrdem = row['pedidoId'] as String? ?? '';
         await db.into(db.ordensPreparoTable).insertOnConflictUpdate(
               OrdensPreparoTableCompanion.insert(
                 id: row['id'] as String,
                 tenantId: row['tenantId'] as String,
-                pedidoId: row['pedidoId'] as String? ?? '',
+                pedidoId: pedidoIdOrdem,
                 itensJson: listItensRaw,
-                status: row['status'] as String? ?? 'pendente',
+                status: statusOrdem,
                 prioridade: row['prioridade'] as String? ?? 'normal',
                 operadorId: Value(row['operadorId'] as String?),
                 criadaEm: _parseDate(row['criadaEm'] as String?) ?? DateTime.now(),
@@ -1069,6 +1349,19 @@ class SupabaseSyncService {
                 deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
               ),
             );
+        if (pedidoIdOrdem.isNotEmpty) {
+          try {
+            String pedidoStatus = statusOrdem;
+            if (statusOrdem == 'pendente') pedidoStatus = 'confirmado';
+            await (db.update(db.pedidosTable)..where((t) => t.id.equals(pedidoIdOrdem))).write(
+              PedidosTableCompanion(
+                status: Value(pedidoStatus),
+                updatedAt: Value(DateTime.now()),
+              ),
+            );
+          } catch (_) {}
+        }
+        break;
       case 'HistoricoOrdemPreparo':
       case 'historicos_ordem_preparo':
         await db.into(db.historicosOrdemPreparoTable).insertOnConflictUpdate(
@@ -1156,6 +1449,32 @@ class SupabaseSyncService {
         );
         break;
 
+      case 'planejamento_producao':
+      case 'PlanejamentoProducao':
+        await db.into(db.planejamentoProducaoTable).insertOnConflictUpdate(
+          PlanejamentoProducaoTableCompanion.insert(
+            id: row['id'] as String,
+            tenantId: row['tenantId'] as String,
+            produtoId: row['produtoId'] as String,
+            quantidadePlanejada: row['quantidadePlanejada'] as int? ?? 0,
+            quantidadeProduzida: Value(row['quantidadeProduzida'] as int? ?? 0),
+            status: Value(row['status'] as String? ?? 'planejada'),
+            dataPlano: _parseDate(row['dataPlano'] as String?) ?? DateTime.now(),
+            observacoes: Value(row['observacoes'] as String?),
+            necessidadeOrigem: Value(row['necessidadeOrigem'] as String?),
+            syncVersion: Value(row['syncVersion'] as int? ?? 1),
+            syncStatus: SyncStatus.synced,
+            lastSyncedAt: Value(DateTime.now().toUtc()),
+            createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
+            updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
+            createdBy: row['createdBy'] as String? ?? '',
+            updatedBy: row['updatedBy'] as String? ?? '',
+            deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+            deletedBy: const Value(null),
+          ),
+        );
+        break;
+
       // FINANCEIRO: Sessões de Caixa e Lançamentos
       case 'sessao_caixa':
       case 'SessaoCaixa':
@@ -1226,11 +1545,14 @@ class SupabaseSyncService {
   // dispositivos do mesmo tenant (multi-caixa, multi-operador).
   // ──────────────────────────────────────────────────────────────
   Future<void> _applyPedidoLocally(Map<String, dynamic> row, FincoreDatabase db) async {
+    final pedidoId = row['id'] as String;
+    final statusStr = row['status'] as String? ?? 'confirmado';
+
     await db.into(db.pedidosTable).insertOnConflictUpdate(
       PedidosTableCompanion.insert(
-        id: row['id'] as String,
+        id: pedidoId,
         tenantId: row['tenantId'] as String,
-        status: Value(row['status'] as String? ?? 'confirmado'),
+        status: Value(statusStr),
         tipoLogistica: row['tipoLogistica'] as String? ?? 'Retirada',
         clienteId: Value(row['clienteId'] as String?),
         clienteNomeAvulso: Value(row['clienteNomeAvulso'] as String?),
@@ -1244,6 +1566,7 @@ class SupabaseSyncService {
         enderecoJson: Value(row['enderecoJson'] as String?),
         operadorId: Value(row['operadorId'] as String?),
         dataHoraCriacao: _parseDate(row['dataHoraCriacao'] as String?) ?? DateTime.now(),
+        dataHoraEntregaPrevista: Value(_parseDate(row['dataHoraEntregaPrevista'] as String?)),
         numeroPedido: Value(row['numeroPedido'] as int?),
         observacoes: Value(row['observacoes'] as String?),
         canalOrigem: Value(row['canalOrigem'] as String? ?? 'pdv_express'),
@@ -1258,6 +1581,20 @@ class SupabaseSyncService {
         deletedBy: const Value(null),
       ),
     );
+
+    try {
+      final ordens = await (db.select(db.ordensPreparoTable)..where((t) => t.pedidoId.equals(pedidoId))).get();
+      if (ordens.isNotEmpty) {
+        String ordensStatusStr = statusStr;
+        if (statusStr == 'confirmado') ordensStatusStr = 'pendente';
+        await (db.update(db.ordensPreparoTable)..where((t) => t.pedidoId.equals(pedidoId))).write(
+          OrdensPreparoTableCompanion(
+            status: Value(ordensStatusStr),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _applyItemPedidoLocally(Map<String, dynamic> row, FincoreDatabase db) async {
@@ -1297,11 +1634,13 @@ class SupabaseSyncService {
     // Cancela timer de polling ativo para evitar duplicidade
     _pollingTimer?.cancel();
 
-    // 1. Configura Polling de Fallback Periódico (caso o Realtime não esteja ativo)
-    _pollingTimer = Timer.periodic(const Duration(seconds: 60), (timer) async {
+    // 1. Configura Polling de Fallback Periódico (3s de intervalo para sync rápido)
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       final online = await isOnline();
       if (online) {
-        final dateThreshold = _lastPullTimestamp ?? DateTime.now().subtract(const Duration(minutes: 10)).toUtc();
+        final dateThreshold = _lastPullTimestamp != null
+            ? _lastPullTimestamp!.subtract(const Duration(minutes: 2))
+            : DateTime.fromMillisecondsSinceEpoch(0);
         try {
           await pullAll(db, dateThreshold);
         } catch (e) {
@@ -1311,9 +1650,9 @@ class SupabaseSyncService {
     });
 
     // 3. Configura Realtime Listeners (WebSocket)
-    for (final entry in _entityToTable.entries) {
-      final entityName = entry.key;
-      final tableName = entry.value;
+    final uniqueTables = _entityToTable.values.toSet();
+    for (final tableName in uniqueTables) {
+      final entityName = _entityToTable.entries.firstWhere((e) => e.value == tableName).key;
 
       final channel = _supabase
           .channel('fincore_${tableName}_$tenantId')
@@ -1321,14 +1660,15 @@ class SupabaseSyncService {
             event: PostgresChangeEvent.all,
             schema: 'public',
             table: tableName,
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'tenantId',
-              value: tenantId,
-            ),
             callback: (payload) async {
               final newRecord = payload.newRecord;
               if (newRecord.isEmpty) return;
+
+              // Validação de TenantContext defensiva (suporta tenantId ou tenant_id do Postgres)
+              final recTenant = newRecord['tenantId'] ?? newRecord['tenant_id'];
+              if (recTenant != null && recTenant.toString() != tenantId) {
+                return;
+              }
 
               final rowId = newRecord['id'] as String?;
               if (rowId == null) return;
@@ -1366,6 +1706,7 @@ class SupabaseSyncService {
                   await _applyRowLocally(entityName, newRecord, db);
                 });
                 _updateConnectivity(CloudConnectivity.online);
+                _syncEventsController.add(entityName);
                 final serverVersion = (newRecord['syncVersion'] as num?)?.toInt() ?? 1;
                 LogService.instance.info(
                   LogModule.sync,
@@ -1409,9 +1750,19 @@ class SupabaseSyncService {
     LogService.instance.info(LogModule.sync, 'Serviço de sincronização em tempo real encerrado.');
   }
 
-  DateTime? _parseDate(String? s) {
-    if (s == null || s.isEmpty) return null;
-    return DateTime.tryParse(s);
+  DateTime? _parseDate(dynamic input) {
+    if (input == null) return null;
+    final s = input.toString().trim();
+    if (s.isEmpty) return null;
+    try {
+      String formatted = s;
+      if (!s.endsWith('Z') && !RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(s)) {
+        formatted = '${s.replaceAll(' ', 'T')}Z';
+      }
+      return DateTime.parse(formatted).toUtc();
+    } catch (_) {
+      return DateTime.tryParse(s)?.toUtc();
+    }
   }
 }
 

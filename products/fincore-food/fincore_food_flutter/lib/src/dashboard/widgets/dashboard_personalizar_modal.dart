@@ -172,8 +172,6 @@ class _DashboardPersonalizarModalState extends State<DashboardPersonalizarModal>
   }
 
   bool _isEssencial(String modulo) {
-    return modulo == 'Operação Agora' ||
-        modulo == 'Produção' ||
-        modulo == 'Entregas Futuras';
+    return modulo == 'Operação Agora' || modulo == 'Central de Atenção';
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
@@ -121,6 +122,7 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
   }
 
   Future<void> _buscarCep(String cep) async {
+    if (kIsWeb) return;
     final cleanCep = cep.replaceAll(RegExp(r'[^0-9]'), '');
     if (cleanCep.length != 8) return;
 

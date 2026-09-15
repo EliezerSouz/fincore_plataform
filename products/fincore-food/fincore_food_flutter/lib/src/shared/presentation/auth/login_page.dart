@@ -80,24 +80,42 @@ class _LoginPageState extends State<LoginPage>
       CoreUsuario? localMatchedUser;
 
       if (!loginInput.contains('@')) {
-        // Se for login por nome de usuário (ex: caixa1), resolve o e-mail correspondente localmente no SQLite
+        // Se for login por nome de usuário (ex: caixa1), resolve o e-mail correspondente localmente no SQLite ou no Supabase
         try {
           final usuarioRepo = DependencyInjection().get<UsuarioRepository>();
           final list = await usuarioRepo.findAll();
-          final matched = list.firstWhere(
+          final matched = list.where(
             (u) => u.username.toLowerCase() == loginInput.toLowerCase(),
-            orElse: () => throw Exception('Nome de usuário não encontrado localmente.'),
-          );
-          localMatchedUser = matched;
-          emailToAuth = matched.email ?? '${matched.username}@fincore.local';
+          ).firstOrNull;
 
-          // Extrai o hash de senha local para validacao offline caso o Supabase falhe
-          if (matched.avatarUrl != null && matched.avatarUrl!.startsWith('{')) {
-            final map = jsonDecode(matched.avatarUrl!);
-            localPasswordHash = map['password_hash'] as String?;
+          if (matched != null) {
+            localMatchedUser = matched;
+            emailToAuth = matched.email ?? '${matched.username}@fincore.local';
+
+            if (matched.avatarUrl != null && matched.avatarUrl!.startsWith('{')) {
+              final map = jsonDecode(matched.avatarUrl!);
+              localPasswordHash = map['password_hash'] as String?;
+            }
+          } else {
+            // Se for um computador novo (SQLite local vazio), busca o e-mail do username diretamente no Supabase
+            final remoteRows = await Supabase.instance.client
+                .from('usuarios')
+                .select('email, username')
+                .ilike('username', loginInput)
+                .limit(1);
+
+            if (remoteRows.isNotEmpty) {
+              final remoteEmail = remoteRows.first['email'] as String?;
+              if (remoteEmail != null && remoteEmail.isNotEmpty) {
+                emailToAuth = remoteEmail;
+              } else {
+                emailToAuth = '$loginInput@fincore.local';
+              }
+            } else {
+              emailToAuth = '$loginInput@fincore.local';
+            }
           }
-        } catch (e) {
-          // Se não achar localmente, tenta usar o e-mail fake padrão para o login
+        } catch (_) {
           emailToAuth = '$loginInput@fincore.local';
         }
       } else {

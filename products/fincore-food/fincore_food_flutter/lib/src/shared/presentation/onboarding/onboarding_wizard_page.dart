@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
-import 'package:fincore_food_flutter/main.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:fincore_food_client/fincore_food_client.dart';
 
 class OnboardingWizardPage extends StatefulWidget {
   final VoidCallback onCreated;
@@ -57,51 +55,128 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
         usuarioNome = Supabase.instance.client.auth.currentUser?.userMetadata?['name'] ?? 'Administrador';
       } catch (_) {}
 
-      final success = await client.onboarding.criarEmpresa(
-        razaoSocial: _razaoSocialController.text.trim(),
-        nomeFantasia: _nomeFantasiaController.text.trim().isEmpty 
-            ? _razaoSocialController.text.trim()
-            : _nomeFantasiaController.text.trim(),
-        documentoFiscal: _documentoController.text.trim().isEmpty 
-            ? '00.000.000/0001-00'
-            : _documentoController.text.trim(),
-        emailEmpresa: _emailEmpresaController.text.trim(),
-        telefoneEmpresa: _telefoneController.text.trim(),
-        usuarioNome: usuarioNome,
-        segmento: _segmento,
-      );
+      final supabase = Supabase.instance.client;
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) throw Exception('Usuário não autenticado');
 
-      if (success) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Empresa criada com sucesso! Aguardando ativação.'),
-            backgroundColor: FincoreColors.success,
-          ),
-        );
-        widget.onCreated();
+      final now = DateTime.now().toUtc().toIso8601String();
+      final razaoSocial = _razaoSocialController.text.trim();
+      final nomeFantasia = _nomeFantasiaController.text.trim().isEmpty
+          ? razaoSocial
+          : _nomeFantasiaController.text.trim();
+      final documentoFiscal = _documentoController.text.trim().isEmpty
+          ? '00.000.000/0001-00'
+          : _documentoController.text.trim();
+      final emailEmpresa = _emailEmpresaController.text.trim();
+      final telefoneEmpresa = _telefoneController.text.trim();
+
+      // 1. Criar empresa no Supabase
+      final empresaResult = await supabase.from('empresa').insert({
+        'razaoSocial': razaoSocial,
+        'nomeFantasia': nomeFantasia,
+        'documentoFiscal': documentoFiscal,
+        'email': emailEmpresa,
+        'telefone': telefoneEmpresa,
+        'segmento': _segmento,
+        'status': 'PENDENTE_ATIVACAO',
+        'plano': 'bronze',
+        'timezone': 'America/Sao_Paulo',
+        'locale': 'pt_BR',
+        'currency': 'BRL',
+        'country': 'BR',
+        'createdFrom': 'PDV',
+        'createdBy': currentUser.id,
+        'updatedBy': currentUser.id,
+        'createdAt': now,
+        'updatedAt': now,
+        'syncVersion': 1,
+      }).select('id').single();
+
+      final tenantId = empresaResult['id'] as String;
+
+      // 2. Buscar ou criar perfil do usuário
+      final usuarioRows = await supabase
+          .from('usuarios')
+          .select('id')
+          .eq('authUserId', currentUser.id)
+          .limit(1);
+
+      String usuarioId;
+      if (usuarioRows.isNotEmpty) {
+        usuarioId = (usuarioRows.first as Map<String, dynamic>)['id'] as String;
       } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Falha ao criar empresa. Tente novamente.'),
-            backgroundColor: FincoreColors.danger,
-          ),
-        );
+        final username = (currentUser.email ?? 'usuario').split('@').first;
+        final insertUser = await supabase.from('usuarios').insert({
+          'authUserId': currentUser.id,
+          'email': currentUser.email,
+          'username': username,
+          'nome': usuarioNome,
+          'ativo': true,
+          'criadoEm': now,
+          'atualizadoEm': now,
+        }).select('id').single();
+        usuarioId = insertUser['id'] as String;
       }
-    } on OnboardingException catch (e) {
+
+      // 3. Criar membro como ADMIN desta empresa
+      await supabase.from('membro_empresa').insert({
+        'tenantId': tenantId,
+        'usuarioId': usuarioId,
+        'role': 'ADMIN',
+        'ativo': true,
+        'convidadoEm': now,
+        'aceitoEm': now,
+        'createdBy': currentUser.id,
+        'updatedBy': currentUser.id,
+        'createdAt': now,
+        'updatedAt': now,
+        'syncVersion': 1,
+      });
+
+      // 4. Criar configuração padrão da empresa
+      await supabase.from('empresa_configuracao').upsert({
+        'tenantId': tenantId,
+        'taxaServico': 0.10,
+        'usarWhatsApp': true,
+        'tema': 'dark',
+        'syncVersion': 1,
+        'autoPrintCaixa': true,
+        'autoPrintCozinha': true,
+        'autoPrintBalcao': false,
+        'autoPrintExpedicao': false,
+        'viasCliente': 1,
+        'viasCozinha': 1,
+        'viasBalcao': 0,
+        'viasExpedicao': 0,
+        'larguraPapel': 80,
+        'cortarPapel': true,
+        'abrirGaveta': false,
+        'imprimirQRCode': true,
+        'imprimirCopiaCola': true,
+        'imprimirLogo': false,
+        'imprimirRodape': true,
+        'mensagemRodape': 'Obrigado pela preferência!',
+        'pixTipo': 'CPF',
+        'margemSegurancaMinutos': 10,
+        'createdBy': currentUser.id,
+        'updatedBy': currentUser.id,
+        'createdAt': now,
+        'updatedAt': now,
+      }, onConflict: 'tenantId');
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: FincoreColors.danger,
+        const SnackBar(
+          content: Text('Empresa criada com sucesso! Aguardando ativação.'),
+          backgroundColor: FincoreColors.success,
         ),
       );
+      widget.onCreated();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erro: $e'),
+          content: Text('Erro ao criar empresa: $e'),
           backgroundColor: FincoreColors.danger,
         ),
       );

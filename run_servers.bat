@@ -1,22 +1,33 @@
 @echo off
-:: Configura o terminal do script principal para UTF-8
 chcp 65001 > nul
 
 echo =================================================================
-echo        FINCORE PLATFORM — INICIADOR DE SERVIDORES
+echo    FINCORE PLATFORM - INICIADOR (Arquitetura Local-First)
 echo =================================================================
 echo.
-echo [*] Iniciando o Servidor Backend (Serverpod) em uma janela separada...
-start "FINCORE Backend" powershell -NoExit -Command "cd 'f:\Eigent\fincore_platform\products\fincore-food\fincore_food_server'; $env:SUPABASE_ANON_KEY='sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy'; echo '--- Servidor Backend FINCORE ---'; dart bin/main.dart"
+echo [*] Verificando Docker Desktop...
+docker info > nul 2>&1
+if %ERRORLEVEL% NEQ 0 goto :NODOCKER
 
+echo [OK] Docker Desktop detectado.
+echo [*] Iniciando PostgreSQL local...
+cd /d "f:\Eigent\fincore_platform"
+docker compose up -d postgres
+echo [OK] PostgreSQL local rodando na porta 8090.
 echo.
-echo [*] Iniciando o Servidor Frontend (Flutter) em uma janela separada...
-start "FINCORE Frontend" powershell -NoExit -Command "cd 'f:\Eigent\fincore_platform\products\fincore-food\fincore_food_flutter'; echo '--- Servidor Frontend FINCORE ---'; flutter run -d windows --dart-define=SERVER_URL=http://127.0.0.1:18080/"
+goto :RUNAPP
 
+:NODOCKER
+echo [AVISO] Docker Desktop nao detectado ou nao esta rodando.
+echo         O banco PostgreSQL via Docker nao sera iniciado.
 echo.
+
+:RUNAPP
 echo =================================================================
-echo [OK] Ambos os servidores foram abertos em janelas dedicadas!
-echo Mantenha-as abertas para acompanhar os logs em tempo real.
+echo [*] Iniciando o App FINCORE Food (Flutter Windows)...
 echo =================================================================
 echo.
+
+powershell -NoExit -Command "cd 'f:\Eigent\fincore_platform\products\fincore-food\fincore_food_flutter'; Write-Host '--- FINCORE Food App ---' -ForegroundColor Green; flutter run -d windows"
+
 pause

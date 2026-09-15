@@ -132,12 +132,25 @@ class ConflictResolver {
 
   ConflictStrategy _getStrategyForEntity(String entityName) {
     switch (entityName.toLowerCase()) {
+      // Pedidos e KDS usam LWW por syncVersion — precisam sincronizar status entre computadores
+      // em tempo real. A proteção do Outbox (Regra 1) garante que mutações locais pendentes
+      // nunca sejam sobrescritas. Sem isso, o status de um pedido alterado no PC-A nunca
+      // chegaria ao PC-B.
       case 'pedidos':
       case 'pedido':
+      case 'ordems_preparo':
+      case 'ordens_preparo':
+      case 'historicos_ordem_preparo':
+      case 'historicoordem_preparo':
+      case 'estoque_produto':
+      case 'movimentacao_estoque':
+      case 'planejamento_producao':
+        return ConflictStrategy.lww;
+
       case 'transacao_financeira':
       case 'financeiro':
-      case 'movimentacao_estoque':
         return ConflictStrategy.rejectAndLock;
+
       default:
         return ConflictStrategy.lww;
     }
