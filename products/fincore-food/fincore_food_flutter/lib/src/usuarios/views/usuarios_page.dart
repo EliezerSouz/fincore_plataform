@@ -168,7 +168,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
     if (_selectedUsuario != null &&
         (_selectedUsuario!.role == 'OWNER' ||
             _selectedUsuario!.role == 'PROPRIETARIO' ||
-            _selectedUsuario!.role.contains('Propriet'))) {
+            (_selectedUsuario!.role ?? '').contains('Propriet'))) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -729,7 +729,7 @@ class _UsuariosPageState extends State<UsuariosPage> {
             _buildInspectorDetailRow('Data de Cadastro', '${u.criadoEm.day.toString().padLeft(2, "0")}/${u.criadoEm.month.toString().padLeft(2, "0")}/${u.criadoEm.year}'),
 
             const SizedBox(height: 24),
-            if (u.role == 'OWNER' || u.role == 'PROPRIETARIO' || u.role.contains('Propriet')) ...[
+            if (u.role == 'OWNER' || u.role == 'PROPRIETARIO' || (u.role ?? '').contains('Propriet')) ...[
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -737,10 +737,10 @@ class _UsuariosPageState extends State<UsuariosPage> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Icon(Icons.shield_outlined, color: FincoreColors.primary, size: 20),
-                    SizedBox(width: 10),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         'Conta Mestre Proprietário\nEste usuário é o titular do sistema e não pode ser editado nem desativado.',
