@@ -896,7 +896,7 @@ class _FincoreShellState extends State<FincoreShell>
             ),
           ),
           Text(
-            'v3.0.0',
+            'v1.1.0 (Build 2)',
             style: TextStyle(
               color: FincoreColors.textMuted,
               fontSize: 9,
@@ -1305,18 +1305,6 @@ class _FincoreShellState extends State<FincoreShell>
                     ],
                   ),
                 ),
-                InkWell(
-                  onTap: _logout,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.logout_rounded,
-                      size: 16,
-                      color: _textMuted,
-                    ),
-                  ),
-                ),
               ],
             ],
           ),
@@ -1401,6 +1389,41 @@ class _FincoreShellState extends State<FincoreShell>
 
 
 
+          // Storefront Badge: Nome Fantasia da Empresa Ativa
+          if (_tenantContext.hasContext && _tenantContext.empresa.nomeFantasia.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: FincoreColors.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: FincoreColors.primary.withValues(alpha: 0.25),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.storefront_rounded,
+                    size: 14,
+                    color: FincoreColors.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _tenantContext.empresa.nomeFantasia,
+                    style: const TextStyle(
+                      color: FincoreColors.textPrimary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+
           // Relógio em tempo real
           StreamBuilder(
             stream: Stream.periodic(const Duration(seconds: 30)),
@@ -1428,7 +1451,6 @@ class _FincoreShellState extends State<FincoreShell>
             },
           ),
           const SizedBox(width: 10),
-
 
           // Badge dinâmico de conectividade (Online/Offline em tempo real)
           ConnectivityBadge(

@@ -300,7 +300,12 @@ class SupabaseSyncService {
 
       // Sanitizar tenantId, createdBy e updatedBy
       final tenantUserId = _context.hasContext ? _context.usuario.id : '00000000-0000-0000-0000-000000000000';
-      if (!payload.containsKey('tenantId') || payload['tenantId'] == null || (payload['tenantId'] as String).isEmpty) {
+      
+      // A tabela 'empresa' / 'empresas' não possui a coluna 'tenantId' no Supabase (o ID da empresa É o tenantId)
+      if (tableName == 'empresa' || tableName == 'empresas') {
+        payload.remove('tenantId');
+        payload.remove('tenant_id');
+      } else if (!payload.containsKey('tenantId') || payload['tenantId'] == null || (payload['tenantId'] as String).isEmpty) {
         if (_context.hasContext && _context.tenantId.isNotEmpty) {
           payload['tenantId'] = _context.tenantId;
         }
@@ -315,26 +320,23 @@ class SupabaseSyncService {
 
       // REGRA DE IMUTABILIDADE DO CRIADOR [VAL-002]:
       // O criador original (createdBy / created_by) NUNCA pode ser alterado em edições/updates na nuvem.
-      // Se o registro já existir no Supabase, removemos 'createdBy' do payload para que o PostgreSQL
-      // mantenha o criador original intacto e evite erro 42501 (RLS Policy Violation) em contas de funcionários.
+      // Preservamos o createdBy original se ele já existir no Supabase, ou definimos um UUID válido caso novo.
       if (tableName != 'audit_logs' && payload.containsKey('id')) {
         try {
           final idVal = payload['id'] as String;
-          final existingRemote = await _supabase.from(tableName).select('id').eq('id', idVal).maybeSingle();
-          if (existingRemote != null) {
-            payload.remove('createdBy');
-          } else if (payload.containsKey('createdBy')) {
+          final existingRemote = await _supabase.from(tableName).select('id, createdBy').eq('id', idVal).maybeSingle();
+          if (existingRemote != null && existingRemote['createdBy'] != null && (existingRemote['createdBy'] as String).isNotEmpty) {
+            payload['createdBy'] = existingRemote['createdBy'];
+          } else {
             final val = payload['createdBy'] as String? ?? '';
             if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
               payload['createdBy'] = tenantUserId;
             }
           }
         } catch (_) {
-          if (payload.containsKey('createdBy')) {
-            final val = payload['createdBy'] as String? ?? '';
-            if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
-              payload['createdBy'] = tenantUserId;
-            }
+          final val = payload['createdBy'] as String? ?? '';
+          if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
+            payload['createdBy'] = tenantUserId;
           }
         }
       }

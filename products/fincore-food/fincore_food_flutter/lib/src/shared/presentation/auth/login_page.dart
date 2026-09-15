@@ -637,7 +637,7 @@ class _LoginPageState extends State<LoginPage>
                               const SizedBox(height: 32),
                               Center(
                                 child: Text(
-                                  'v1.2.0',
+                                  'v1.1.0 (Build 2)',
                                   style: TextStyle(
                                     color: FincoreColors.textMuted
                                         .withValues(alpha: 0.5),
