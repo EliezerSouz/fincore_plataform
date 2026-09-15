@@ -973,17 +973,7 @@ class _FincoreShellState extends State<FincoreShell>
           // Logo
           _buildSidebarHeader(),
 
-          if (_sidebarExpanded) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: EmpresaSwitcherWidget(
-                onEmpresaTrocada: widget.onLogout,
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
 
           // Grupos de navegação
           Expanded(
