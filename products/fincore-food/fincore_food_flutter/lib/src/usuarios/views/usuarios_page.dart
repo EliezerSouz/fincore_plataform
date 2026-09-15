@@ -165,6 +165,32 @@ class _UsuariosPageState extends State<UsuariosPage> {
   Future<void> _salvarUsuario() async {
     if (!_usuariosFormKey.currentState!.validate()) return;
 
+    if (_selectedUsuario != null &&
+        (_selectedUsuario!.role == 'OWNER' ||
+            _selectedUsuario!.role == 'PROPRIETARIO' ||
+            _selectedUsuario!.role.contains('Propriet'))) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.shield_outlined, color: Colors.white, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'O usuário Proprietário é a conta mestre do sistema e não pode ser alterado.',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: FincoreColors.warning,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() => _isSaving = true);
     try {
       final tenantCtx = DependencyInjection().get<TenantContext>();
@@ -703,16 +729,39 @@ class _UsuariosPageState extends State<UsuariosPage> {
             _buildInspectorDetailRow('Data de Cadastro', '${u.criadoEm.day.toString().padLeft(2, "0")}/${u.criadoEm.month.toString().padLeft(2, "0")}/${u.criadoEm.year}'),
 
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: ElevatedButton.icon(
-                onPressed: () => setState(() => _isEditing = true),
-                style: ElevatedButton.styleFrom(backgroundColor: FincoreColors.primary),
-                icon: const Icon(Icons.edit, color: Colors.white, size: 16),
-                label: const Text('Editar Usuário', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            if (u.role == 'OWNER' || u.role == 'PROPRIETARIO' || u.role.contains('Propriet')) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: FincoreColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield_outlined, color: FincoreColors.primary, size: 20),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Conta Mestre Proprietário\nEste usuário é o titular do sistema e não pode ser editado nem desativado.',
+                        style: TextStyle(fontSize: 11.5, color: FincoreColors.textPrimary, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ] else ...[
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton.icon(
+                  onPressed: () => setState(() => _isEditing = true),
+                  style: ElevatedButton.styleFrom(backgroundColor: FincoreColors.primary),
+                  icon: const Icon(Icons.edit, color: Colors.white, size: 16),
+                  label: const Text('Editar Usuário', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,

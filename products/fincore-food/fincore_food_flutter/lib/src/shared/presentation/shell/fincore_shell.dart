@@ -1295,40 +1295,41 @@ class _FincoreShellState extends State<FincoreShell>
                     ],
                   ),
                 ),
+                Tooltip(
+                  message: 'Sair do Sistema (Logout)',
+                  child: InkWell(
+                    onTap: _logout,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        Icons.logout_rounded,
+                        size: 18,
+                        color: FincoreColors.danger,
+                      ),
+                    ),
+                  ),
+                ),
+              ] else ...[
+                const SizedBox(height: 8),
+                Tooltip(
+                  message: 'Sair do Sistema (Logout)',
+                  child: InkWell(
+                    onTap: _logout,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.logout_rounded,
+                        size: 16,
+                        color: FincoreColors.danger,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ],
           ),
-
-          // Tenant chip
-          if (_sidebarExpanded) ...[
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-              decoration: BoxDecoration(
-                color: _surfaceBg,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.storefront_rounded,
-                      size: 12, color: _textSecondary),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      activeTenantName,
-                      style: TextStyle(
-                        color: _textSecondary,
-                        fontSize: 10,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );
