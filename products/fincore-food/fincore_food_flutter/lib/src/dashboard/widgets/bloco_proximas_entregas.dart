@@ -45,6 +45,30 @@ class BlocoProximasEntregas extends StatelessWidget {
         const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
+            if (entregas.isEmpty) {
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: FincoreColors.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: FincoreColors.border),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_outline_rounded, color: FincoreColors.success, size: 20),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Nenhuma entrega ou retirada agendada para hoje ou amanhã.',
+                        style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
             final isMobile = constraints.maxWidth < 650;
 
             final painelHoje = Container(

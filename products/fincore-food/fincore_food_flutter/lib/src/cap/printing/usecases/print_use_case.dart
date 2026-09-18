@@ -51,6 +51,12 @@ class PrintUseCase {
     final config = await loadConfig();
     if (config == null) {
       debugPrint('[PrintUseCase] Sem configuração — impressão ignorada');
+      PrinterDriver.gravarLog(
+        destinatario: 'SISTEMA',
+        sucesso: false,
+        mensagem: 'Envio ignorado: Nenhuma configuração cadastrada no banco.',
+        tempoMs: 0,
+      );
       return PrintUseCaseResult(
         managerResult: const PrintManagerResult(
           results: {},

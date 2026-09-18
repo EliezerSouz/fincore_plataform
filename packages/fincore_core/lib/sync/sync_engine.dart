@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import '../common/domain_primitives.dart';
 import '../context/tenant_context.dart';
@@ -108,14 +109,7 @@ class SyncEngine {
     int failureCount = 0;
     int initialCount = 0;
 
-    final traceId = 'SYNC-${DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase()}';
-    final logContext = {
-      if (context.hasContext) 'usuario': context.usuario.nome,
-      if (context.hasContext) 'empresa': context.empresa.nomeFantasia,
-    };
-    final logCtxStr = context.hasContext
-        ? '${context.usuario.nome} @ ${context.empresa.nomeFantasia}'
-        : null;
+    final traceId = CorrelationIdGenerator.generateCorrelationId();
 
     try {
       await outboxService.retryFailedEntries();
@@ -133,16 +127,13 @@ class SyncEngine {
       });
 
       if (entries.isNotEmpty) {
-        await FincoreLogger.instance.beginCycle(
-          LogModule.sync,
-          'CICLO DE ENVIO REMOTO (PUSH)',
-          context: logCtxStr,
-        );
-        LogService.instance.info(
-          LogModule.sync,
-          'Fila de envio: $initialCount registro(s) pendente(s) - iniciando sincronizacao com a nuvem',
+        await LogService.instance.logSync(
+          step: 'PREPARACAO',
+          action: 'INICIO',
           traceId: traceId,
-          context: logContext,
+          status: LogStatus.inProgress,
+          message: 'Fila de envio: $initialCount registro(s) pendente(s) - iniciando sincronização com a nuvem',
+          tenantId: context.hasContext ? context.tenantId : null,
         );
       }
 
@@ -150,26 +141,38 @@ class SyncEngine {
 
       for (final entry in entries) {
         final startTime = DateTime.now();
-        final shortId = entry.entityId.length > 8 ? '${entry.entityId.substring(0, 8)}...' : entry.entityId;
+        String entryTraceId = traceId;
+        try {
+          final payloadMap = jsonDecode(entry.payload) as Map<String, dynamic>;
+          if (payloadMap.containsKey('_traceId') && payloadMap['_traceId'] != null) {
+            entryTraceId = payloadMap['_traceId'].toString();
+          }
+        } catch (_) {}
 
         // ── VERIFICAÇÃO DE DEPENDÊNCIA DE ENTIDADE FALTANTE ───────
         if (_isBlockedByDependency(entry, failedEntityKeys)) {
-          LogService.instance.warning(
-            LogModule.sync,
-            '[BLOQUEADO POR DEPENDÊNCIA] Entidade [${entry.entity}] (ID: $shortId) depende de um registro pai com falha. PUSH adiado.',
+          await LogService.instance.logSync(
+            step: 'PUSH',
+            action: 'BLOQUEADO',
+            entity: entry.entity,
+            id: entry.entityId,
+            traceId: entryTraceId,
+            status: LogStatus.skipped,
+            errorMessage: 'Depende de registro pai com falha. PUSH adiado.',
             tenantId: context.hasContext ? context.tenantId : null,
-            traceId: traceId,
-            context: logContext,
           );
           continue;
         }
 
-        LogService.instance.info(
-          LogModule.sync,
-          '[ENVIANDO] Entidade: [${entry.entity}] | Acao: ${entry.action} | ID: ${entry.entityId}',
+        await LogService.instance.logSync(
+          step: 'PUSH',
+          action: 'INICIO',
+          entity: entry.entity,
+          id: entry.entityId,
+          traceId: entryTraceId,
+          attempt: entry.attemptsCount + 1,
+          status: LogStatus.inProgress,
           tenantId: context.hasContext ? context.tenantId : null,
-          traceId: traceId,
-          context: logContext,
         );
         await outboxService.updateStatus(entry.id, SyncStatus.processing);
 
@@ -189,12 +192,16 @@ class SyncEngine {
 
         if (pushSuccess) {
           final duration = DateTime.now().difference(startTime).inMilliseconds;
-          LogService.instance.info(
-            LogModule.sync,
-            '[CONFIRMADO] Entidade: [${entry.entity}] | Acao: ${entry.action} | ID: $shortId | Status: ENVIADO (${duration}ms)',
+          await LogService.instance.logSync(
+            step: 'PUSH',
+            action: 'RESULTADO',
+            entity: entry.entity,
+            id: entry.entityId,
+            traceId: entryTraceId,
+            attempt: entry.attemptsCount + 1,
+            durationMs: duration,
+            status: LogStatus.success,
             tenantId: context.hasContext ? context.tenantId : null,
-            traceId: traceId,
-            context: logContext,
           );
           await outboxService.updateStatus(entry.id, SyncStatus.synced);
           await _updateSourceTableSyncStatus(entry);
@@ -205,6 +212,8 @@ class SyncEngine {
               pushErrorStr.contains('SocketException') ||
               pushErrorStr.contains('Sem conexão');
           final isPermanent = _isPermanentError(pushErrorStr);
+          final errCode = _extractErrorCode(pushErrorStr);
+          final errReason = _classifyErrorReason(pushErrorStr);
 
           if (isNetworkOffline) {
             await outboxService.updateStatus(
@@ -213,10 +222,18 @@ class SyncEngine {
               errorMessage: pushErrorStr,
             );
             failureCount++;
-            LogService.instance.warning(
-              LogModule.sync,
-              '[OFFLINE] Conexão com o servidor interrompida. Envio da fila pausado temporariamente.',
-              traceId: traceId,
+            await LogService.instance.logSync(
+              step: 'PUSH',
+              action: 'RESULTADO',
+              entity: entry.entity,
+              id: entry.entityId,
+              traceId: entryTraceId,
+              attempt: entry.attemptsCount + 1,
+              status: LogStatus.retrying,
+              errorCode: 'NETWORK_OFFLINE',
+              errorReason: 'OFFLINE_SEM_CONEXAO',
+              errorMessage: 'Conexão interrompida. Envio da fila pausado temporariamente.',
+              tenantId: context.hasContext ? context.tenantId : null,
             );
             break; // Interrompe o envio sequencial se não há rede
           } else if (isPermanent) {
@@ -229,12 +246,18 @@ class SyncEngine {
             failedEntityKeys.add('${entry.entity}:${entry.entityId}');
             failureCount++;
 
-            LogService.instance.error(
-              LogModule.sync,
-              '[FALHA PERMANENTE] Entidade [${entry.entity}] (ID: $shortId) falhou por divergência de schema. Isolando registro e continuando fila.',
-              traceId: traceId,
-              context: logContext,
-              exception: pushErrorStr,
+            await LogService.instance.logSync(
+              step: 'PUSH',
+              action: 'RESULTADO',
+              entity: entry.entity,
+              id: entry.entityId,
+              traceId: entryTraceId,
+              attempt: entry.attemptsCount + 1,
+              status: LogStatus.failed,
+              errorCode: errCode,
+              errorReason: errReason,
+              errorMessage: pushErrorStr,
+              tenantId: context.hasContext ? context.tenantId : null,
             );
           } else {
             final attempts = entry.attemptsCount + 1;
@@ -243,13 +266,24 @@ class SyncEngine {
               failedEntityKeys.add('${entry.entity}:${entry.entityId}');
             }
 
-            LogService.instance.warning(
-              LogModule.sync,
-              '[FALHA TRANSITÓRIA] Entidade: [${entry.entity}] | ID: $shortId | Tentativa $attempts/5 - $pushErrorStr',
+            await LogService.instance.logSync(
+              step: 'PUSH',
+              action: 'RESULTADO',
+              entity: entry.entity,
+              id: entry.entityId,
+              traceId: entryTraceId,
+              attempt: attempts,
+              maxAttempts: 5,
+              status: nextStatus == SyncStatus.failed ? LogStatus.failed : LogStatus.retrying,
+              errorCode: errCode,
+              errorReason: errReason,
+              errorMessage: pushErrorStr,
               tenantId: context.hasContext ? context.tenantId : null,
-              traceId: traceId,
-              context: logContext,
             );
+
+            if (pushErrorStr.contains('23503') || pushErrorStr.contains('violates foreign key constraint')) {
+              await _autoHealMissingParent(entry);
+            }
 
             await outboxService.updateStatus(
               entry.id,
@@ -268,18 +302,23 @@ class SyncEngine {
     final hasPendingAfter = !(await outboxService.isOutboxEmpty());
 
     final statusStr = hasPendingAfter
-        ? 'Ainda ha pendencias locais - recebimento remoto suspenso'
-        : 'Fila local limpa, pronto para recebimento de atualizacoes da nuvem';
+        ? 'Ainda há pendências locais - recebimento remoto suspenso'
+        : 'Fila local limpa, pronto para recebimento de atualizações da nuvem';
 
     if (initialCount > 0) {
-      LogService.instance.info(
-        LogModule.sync,
-        '[OK] Ciclo de envio concluido: $successCount enviado(s), $failureCount falha(s) em ${durationMs}ms | Status: $statusStr',
-        tenantId: context.hasContext ? context.tenantId : null,
+      final cycleStatus = (hasPendingAfter || failureCount > 0)
+          ? (successCount > 0 ? LogStatus.partial : LogStatus.failed)
+          : LogStatus.success;
+
+      await LogService.instance.logSync(
+        step: 'FINALIZACAO',
+        action: 'CONCLUIDO',
         traceId: traceId,
-        context: logContext,
+        status: cycleStatus,
+        durationMs: durationMs,
+        message: 'Enviados: $successCount | Falhas: $failureCount | Pendentes: ${hasPendingAfter ? "SIM" : "0"} | $statusStr',
+        tenantId: context.hasContext ? context.tenantId : null,
       );
-      await FincoreLogger.instance.endCycle(LogModule.sync, 'FIM DO CICLO DE ENVIO REMOTO (PUSH)');
     }
 
     return SyncResult(
@@ -467,6 +506,7 @@ class SyncEngine {
   int _getEntityPriority(String entity) {
     switch (entity) {
       case 'Empresa':
+      case 'empresa':
       case 'empresa_configuracao':
         return 1;
       case 'Categoria':
@@ -486,22 +526,30 @@ class SyncEngine {
       case 'Cliente':
       case 'cliente':
       case 'clientes':
-        return 6; // PAI de LocalEntrega
+        return 6; // PAI de LocalEntrega e Pedido
       case 'Produto':
       case 'produto':
       case 'produtos':
-        return 7;
+        return 7; // PAI de ItemPedido e PlanoProducao
       case 'usuarios':
       case 'usuario':
       case 'Usuario':
         return 8; // PAI de MembroEmpresa — enviado antes!
-      case 'planejamento_producao':
-      case 'PlanoProducao':
-        return 30; // FILHO de Produto — sincronizado depois
-      case 'membros_empresa':
-      case 'membro_empresa':
-      case 'MembroEmpresa':
-        return 25; // FILHO de Usuario e Empresa — enviado depois do Usuario!
+      case 'Pedido':
+      case 'pedido':
+      case 'pedidos':
+        return 10; // PAI de ItemPedido — enviado ANTES dos itens!
+      case 'OrdemPreparo':
+      case 'ordem_preparo':
+      case 'ordens_preparo':
+        return 11; // PAI de HistoricoOrdemPreparo
+      case 'Caixa':
+      case 'caixa':
+      case 'caixas':
+        return 12;
+      case 'EstoqueProduto':
+      case 'estoque_produto':
+        return 13;
       case 'LocalEntrega':
       case 'local_entrega':
       case 'locais_entrega':
@@ -512,6 +560,28 @@ class SyncEngine {
       case 'ProdutoTabelaPrecificacao':
       case 'produto_tabela_precificacao':
         return 22;
+      case 'membros_empresa':
+      case 'membro_empresa':
+      case 'MembroEmpresa':
+        return 25; // FILHO de Usuario e Empresa
+      case 'planejamento_producao':
+      case 'PlanoProducao':
+        return 30; // FILHO de Produto
+      case 'ItemPedido':
+      case 'item_pedido':
+      case 'itens_pedido':
+        return 40; // FILHO de Pedido — DEVE ser enviado DEPOIS do Pedido!
+      case 'HistoricoOrdemPreparo':
+      case 'historico_ordem_preparo':
+      case 'historicos_ordem_preparo':
+        return 41; // FILHO de OrdemPreparo
+      case 'MovimentacaoCaixa':
+      case 'movimentacao_caixa':
+      case 'movimentacoes_caixa':
+        return 42;
+      case 'MovimentacaoEstoque':
+      case 'movimentacao_estoque':
+        return 43;
       default:
         return 50;
     }
@@ -519,14 +589,19 @@ class SyncEngine {
 
   bool _isPermanentError(String errorMsg) {
     final lower = errorMsg.toLowerCase();
+    // Erros RLS (42501) e FK Constraint (23503 - pai ainda não sincronizado) NÃO são falhas permanentes de schema.
+    if (lower.contains('row-level security') ||
+        lower.contains('42501') ||
+        lower.contains('violates foreign key constraint') ||
+        lower.contains('23503') ||
+        lower.contains('23505')) {
+      return false;
+    }
     return lower.contains('postgrestexception') ||
         lower.contains('pgrst') ||
         lower.contains('column') ||
         lower.contains('does not exist') ||
         lower.contains('schema cache') ||
-        lower.contains('violates foreign key constraint') ||
-        lower.contains('code: 23503') ||
-        lower.contains('code: 23505') ||
         lower.contains('syntax error') ||
         lower.contains('bad request');
   }
@@ -554,7 +629,118 @@ class SyncEngine {
       }
     }
 
+    if (entry.entity == 'itens_pedido' || entry.entity == 'item_pedido' || entry.entity == 'ItensPedido') {
+      for (final key in failedEntityKeys) {
+        if (key.startsWith('pedidos:') || key.startsWith('pedido:') || key.startsWith('Pedido:')) {
+          final parentId = key.split(':').last;
+          if (payload.contains(parentId)) return true;
+        }
+      }
+    }
+
+    if (entry.entity == 'historicos_ordem_preparo' || entry.entity == 'historico_ordem_preparo' || entry.entity == 'HistoricoOrdemPreparo') {
+      for (final key in failedEntityKeys) {
+        if (key.startsWith('ordens_preparo:') || key.startsWith('ordem_preparo:') || key.startsWith('OrdemPreparo:')) {
+          final parentId = key.split(':').last;
+          if (payload.contains(parentId)) return true;
+        }
+      }
+    }
+
     return false;
+  }
+
+  /// Auto-recuperação de entidade pai ausente na nuvem.
+  /// Quando um filho (ex: item_pedido) falha com erro de FK (23503),
+  /// este método verifica se o pai (ex: Pedido) existe no SQLite local
+  /// e o re-enfileira no Outbox para subir no próximo ciclo.
+  Future<void> _autoHealMissingParent(OutboxEntry entry) async {
+    try {
+      final entityLower = entry.entity.toLowerCase();
+      final payloadMap = jsonDecode(entry.payload) as Map<String, dynamic>?;
+      if (payloadMap == null) return;
+
+      if (entityLower.contains('item_pedido') || entityLower.contains('itens_pedido')) {
+        final parentId = payloadMap['pedidoId'] as String?;
+        if (parentId != null && parentId.isNotEmpty) {
+          final parentRow = await (db.select(db.pedidosTable)
+                ..where((t) => t.id.equals(parentId)))
+              .getSingleOrNull();
+
+          if (parentRow != null) {
+            await outboxService.enqueue(
+              entity: 'Pedido',
+              entityId: parentRow.id,
+              action: 'UPSERT',
+              payload: {
+                'id': parentRow.id,
+                'tenantId': parentRow.tenantId,
+                'clienteId': parentRow.clienteId,
+                'clienteNomeAvulso': parentRow.clienteNomeAvulso,
+                'clienteTelefoneAvulso': parentRow.clienteTelefoneAvulso,
+                'tipoLogistica': parentRow.tipoLogistica,
+                'valorSubtotalCentavos': parentRow.valorSubtotalCentavos,
+                'valorTaxaEntregaCentavos': parentRow.valorTaxaEntregaCentavos,
+                'valorTotalCentavos': parentRow.valorTotalCentavos,
+                'formaPagamentoId': parentRow.formaPagamentoId,
+                'formaPagamentoNome': parentRow.formaPagamentoNome,
+                'trocoParaCentavos': parentRow.trocoParaCentavos,
+                'observacoes': parentRow.observacoes,
+                'status': parentRow.status,
+                'canalOrigem': parentRow.canalOrigem,
+                'operadorId': parentRow.operadorId,
+                'dataHoraCriacao': parentRow.dataHoraCriacao.toIso8601String(),
+                if (parentRow.dataHoraEntregaPrevista != null)
+                  'dataHoraEntregaPrevista': parentRow.dataHoraEntregaPrevista!.toIso8601String(),
+                'numeroPedido': parentRow.numeroPedido,
+                'enderecoJson': parentRow.enderecoJson,
+                'syncVersion': parentRow.syncVersion,
+                'createdAt': parentRow.createdAt.toIso8601String(),
+                'updatedAt': parentRow.updatedAt.toIso8601String(),
+                'createdBy': parentRow.createdBy,
+                'updatedBy': parentRow.updatedBy,
+              },
+              version: parentRow.syncVersion,
+            );
+            LogService.instance.info(
+              LogModule.sync,
+              '[AUTO-HEAL] Re-enfileirado Pedido pai (ID: ${parentRow.id.length > 8 ? parentRow.id.substring(0, 8) : parentRow.id}...) no Outbox para resolver pendencia de itens.',
+            );
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  String _extractErrorCode(String errorStr) {
+    if (errorStr.contains('42501')) return '42501';
+    if (errorStr.contains('23503')) return '23503';
+    if (errorStr.contains('23505')) return '23505';
+    if (errorStr.contains('22P02')) return '22P02';
+    if (errorStr.contains('PGRST204')) return 'PGRST204';
+    if (errorStr.contains('SocketException') || errorStr.contains('OfflineSyncException')) return 'NETWORK_OFFLINE';
+    final match = RegExp(r'\b([0-9]{5}|PGRST[0-9]{3})\b').firstMatch(errorStr);
+    if (match != null) return match.group(1)!;
+    return 'ERR_PUSH';
+  }
+
+  String _classifyErrorReason(String errorStr) {
+    if (errorStr.contains('42501') || errorStr.contains('row-level security') || errorStr.contains('permission denied')) {
+      return 'RLS_POLICY_DENIED';
+    }
+    if (errorStr.contains('23503') || errorStr.contains('foreign key constraint')) {
+      return 'FOREIGN_KEY_VIOLATION';
+    }
+    if (errorStr.contains('23505') || errorStr.contains('unique constraint')) {
+      return 'UNIQUE_VIOLATION';
+    }
+    if (errorStr.contains('PGRST204') || errorStr.contains('Could not find')) {
+      return 'SCHEMA_COLUMN_MISSING';
+    }
+    if (errorStr.contains('OfflineSyncException') || errorStr.contains('SocketException') || errorStr.contains('Sem conexão')) {
+      return 'NETWORK_OFFLINE';
+    }
+    return 'GENERIC_PUSH_ERROR';
   }
 
   String _parseSyncError(String errorMsg) {

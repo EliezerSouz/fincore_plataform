@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
@@ -134,17 +135,7 @@ class _CustomerStepState extends State<CustomerStep> {
 
   void _onEntregaFieldsChanged() async {
     final cleanTaxa = _taxaCtrl.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.');
-    var taxaReais = double.tryParse(cleanTaxa) ?? 0.0;
-
-    if (taxaReais == 0.0 && _bairroCtrl.text.trim().isNotEmpty) {
-      final taxaCadastrada = await widget.controller.taxaRepo.findByBairro(_bairroCtrl.text);
-      if (taxaCadastrada != null && taxaCadastrada.valorCentavos > 0) {
-        taxaReais = taxaCadastrada.valorCentavos / 100.0;
-        _taxaCtrl.removeListener(_onEntregaFieldsChanged);
-        _taxaCtrl.text = taxaReais.toStringAsFixed(2).replaceAll('.', ',');
-        _taxaCtrl.addListener(_onEntregaFieldsChanged);
-      }
-    }
+    final taxaReais = double.tryParse(cleanTaxa) ?? 0.0;
 
     widget.controller.updateEntrega(
       widget.controller.entrega.copyWith(
@@ -824,21 +815,63 @@ class _CustomerStepState extends State<CustomerStep> {
                         child: Autocomplete<Cliente>(
                           optionsBuilder: (TextEditingValue textEditingValue) {
                             if (textEditingValue.text.isEmpty) {
-                              return const Iterable<Cliente>.empty();
+                              return widget.controller.clientes.take(10);
                             }
+                            final query = textEditingValue.text.toLowerCase();
                             return widget.controller.clientes.where((c) {
-                              return c.nome.toLowerCase().contains(textEditingValue.text.toLowerCase()) ||
-                                  c.telefone.contains(textEditingValue.text);
+                              return c.nome.toLowerCase().contains(query) ||
+                                  c.telefone.contains(query);
                             });
                           },
                           displayStringForOption: (Cliente c) => c.nome,
                           onSelected: _selectClienteFromCombobox,
+                          optionsViewBuilder: (context, onSelected, options) {
+                            return Align(
+                              alignment: Alignment.topLeft,
+                              child: Material(
+                                elevation: 8,
+                                borderRadius: BorderRadius.circular(10),
+                                color: const Color(0xFF1E1E24),
+                                child: Container(
+                                  constraints: const BoxConstraints(maxWidth: 480, maxHeight: 280),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: FincoreColors.border),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: ListView.separated(
+                                    padding: EdgeInsets.zero,
+                                    shrinkWrap: true,
+                                    itemCount: options.length,
+                                    separatorBuilder: (c, i) => const Divider(height: 1, color: FincoreColors.border),
+                                    itemBuilder: (BuildContext context, int index) {
+                                      final option = options.elementAt(index);
+                                      return ListTile(
+                                        leading: CircleAvatar(
+                                          radius: 16,
+                                          backgroundColor: FincoreColors.primary.withValues(alpha: 0.15),
+                                          child: Text(
+                                            option.nome.isNotEmpty ? option.nome[0].toUpperCase() : '?',
+                                            style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold, fontSize: 12),
+                                          ),
+                                        ),
+                                        title: Text(option.nome, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                                        subtitle: option.telefone.isNotEmpty
+                                            ? Text('📞 ${option.telefone}', style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 11))
+                                            : null,
+                                        onTap: () => onSelected(option),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                           fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
                             return TextField(
                               controller: textController,
                               focusNode: focusNode,
                               decoration: InputDecoration(
-                                hintText: '🔍 Buscar cliente por nome ou telefone...',
+                                hintText: '🔍 Buscar cliente por nome ou telefone (ou clique para ver a lista)...',
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 prefixIcon: Icon(Icons.person_search_outlined, color: FincoreColors.primary),
                                 border: OutlineInputBorder(
@@ -850,7 +883,42 @@ class _CustomerStepState extends State<CustomerStep> {
                           },
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
+
+                      // Botão Rápido Consumidor Final
+                      Tooltip(
+                        message: 'Selecionar Consumidor Final (Venda Rápida de Balcão)',
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            final cf = Cliente(
+                              id: 'consumidor_final',
+                              tenantId: '00000000-0000-4000-a000-000000000001',
+                              nome: 'Consumidor Final',
+                              telefone: '0000000000',
+                              observacoes: '',
+                              ativo: true,
+                              metadata: SyncMetadata(
+                                version: 1,
+                                createdAt: DateTime.now(),
+                                updatedAt: DateTime.now(),
+                                createdBy: 'system',
+                                updatedBy: 'system',
+                                syncStatus: SyncStatus.synced,
+                              ),
+                            );
+                            _selectClienteFromCombobox(cf);
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: FincoreColors.textPrimary,
+                            side: const BorderSide(color: FincoreColors.border),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: const Icon(Icons.person_outline, size: 18, color: FincoreColors.accent),
+                          label: const Text('Consumidor Final', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
 
                       // Botão + Novo Cliente
                       ElevatedButton.icon(
@@ -859,11 +927,11 @@ class _CustomerStepState extends State<CustomerStep> {
                           backgroundColor: FincoreColors.primary.withValues(alpha: 0.15),
                           foregroundColor: FincoreColors.primary,
                           side: BorderSide(color: FincoreColors.primary),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         icon: const Icon(Icons.person_add_outlined, size: 18),
-                        label: const Text('Novo Cliente', style: TextStyle(fontWeight: FontWeight.bold)),
+                        label: const Text('Novo Cliente', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       ),
                     ],
                   ),
@@ -1447,14 +1515,32 @@ class _CustomerStepState extends State<CustomerStep> {
                     TextField(
                       controller: _taxaCtrl,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      readOnly: widget.controller.empresaConfig?.taxaEntregaPorKm ?? false,
+                      readOnly: false,
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d,.]'))],
                       decoration: InputDecoration(
                         labelText: 'Digite a Taxa de Entrega (R\$)',
                         prefixText: 'R\$ ',
-                        helperText: (widget.controller.empresaConfig?.taxaEntregaPorKm ?? false)
-                            ? 'Calculada automaticamente por KM'
-                            : null,
+                        hintText: '0,00',
+                        helperText: 'Ajuste manual da taxa de entrega para este pedido',
+                        suffixIcon: IconButton(
+                          icon: Icon(Icons.check_circle_outline, color: FincoreColors.primary),
+                          onPressed: () {
+                            setState(() {
+                              _mostrarAjusteTaxa = false;
+                            });
+                          },
+                        ),
                       ),
+                      onChanged: (v) {
+                        final clean = v.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.');
+                        final taxaReais = double.tryParse(clean) ?? 0.0;
+                        widget.controller.updateEntrega(
+                          widget.controller.entrega.copyWith(
+                            taxaEntregaCentavos: (taxaReais * 100).round(),
+                          ),
+                        );
+                        setState(() {});
+                      },
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -1632,7 +1718,7 @@ class _CustomerStepState extends State<CustomerStep> {
                             final d = await showDatePicker(
                               context: context,
                               initialDate: now,
-                              firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                              firstDate: DateTime(2020, 1, 1),
                               lastDate: DateTime.now().add(const Duration(days: 365)),
                             );
                             if (d != null && mounted) {

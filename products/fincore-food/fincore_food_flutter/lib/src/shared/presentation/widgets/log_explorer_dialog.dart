@@ -19,6 +19,8 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
   List<Map<String, dynamic>> _logs = [];
   Map<String, dynamic>? _selectedLog;
   bool _isLoading = true;
+  bool _newestFirst = true;
+  String? _filterTraceId;
 
   @override
   void initState() {
@@ -35,13 +37,19 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
   Future<void> _loadLogs() async {
     setState(() => _isLoading = true);
     try {
+      final query = _filterTraceId ?? (_searchCtrl.text.trim().isEmpty ? null : _searchCtrl.text.trim());
       final results = await LogService.instance.queryLogs(
         module: _selectedModule,
         level: _selectedLevel,
         start: _selectedDateRange?.start,
         end: _selectedDateRange?.end,
-        searchQuery: _searchCtrl.text.trim().isEmpty ? null : _searchCtrl.text.trim(),
+        searchQuery: query,
       );
+      if (!_newestFirst) {
+        results.sort((a, b) => (a['timestamp'] as String).compareTo(b['timestamp'] as String));
+      } else {
+        results.sort((a, b) => (b['timestamp'] as String).compareTo(a['timestamp'] as String));
+      }
       setState(() {
         _logs = results;
         _selectedLog = results.isNotEmpty ? results.first : null;
@@ -303,7 +311,21 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
+
+                // Toggle Ordem Cronológica
+                IconButton(
+                  tooltip: _newestFirst ? 'Mais recentes primeiro' : 'Mais antigos primeiro',
+                  icon: Icon(
+                    _newestFirst ? Icons.arrow_downward : Icons.arrow_upward,
+                    color: FincoreColors.primary,
+                  ),
+                  onPressed: () {
+                    setState(() => _newestFirst = !_newestFirst);
+                    _loadLogs();
+                  },
+                ),
+                const SizedBox(width: 8),
 
                 // Botão Exportar Todos
                 ElevatedButton.icon(
@@ -319,6 +341,35 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
               ],
             ),
           ),
+          if (_filterTraceId != null)
+            Container(
+              color: FincoreColors.surface,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  Icon(Icons.hub_outlined, color: FincoreColors.primary, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Filtrado por Rastreio (Trace ID): $_filterTraceId',
+                    style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const Spacer(),
+                  InkWell(
+                    onTap: () {
+                      setState(() => _filterTraceId = null);
+                      _loadLogs();
+                    },
+                    child: const Row(
+                      children: [
+                        Icon(Icons.close, color: FincoreColors.danger, size: 16),
+                        SizedBox(width: 4),
+                        Text('Limpar Filtro de Rastreio', style: TextStyle(color: FincoreColors.danger, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           const Divider(height: 1, color: FincoreColors.border),
 
           // Área Principal Split View
@@ -444,17 +495,31 @@ class _LogExplorerDialogState extends State<LogExplorerDialog> {
                                           'Registrado em: ${_selectedLog!['timestamp']}',
                                           style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
                                         ),
-                                        if (_selectedLog!['traceId'] != null) ...[
-                                          const SizedBox(height: 4),
-                                          SelectableText(
-                                            'Trace ID: ${_selectedLog!['traceId']}',
-                                            style: TextStyle(
-                                              color: FincoreColors.primary,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
+                                         if (_selectedLog!['traceId'] != null) ...[
+                                           const SizedBox(height: 4),
+                                           Row(
+                                             children: [
+                                               SelectableText(
+                                                 'Trace ID: ${_selectedLog!['traceId']}',
+                                                 style: TextStyle(
+                                                   color: FincoreColors.primary,
+                                                   fontWeight: FontWeight.bold,
+                                                   fontSize: 13,
+                                                 ),
+                                               ),
+                                               const SizedBox(width: 8),
+                                               TextButton.icon(
+                                                 style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                                 icon: Icon(Icons.hub_outlined, size: 16, color: FincoreColors.primary),
+                                                 label: Text('Reconstruir Fluxo (Trace ID)', style: TextStyle(fontSize: 12, color: FincoreColors.primary)),
+                                                 onPressed: () {
+                                                   setState(() => _filterTraceId = _selectedLog!['traceId'] as String?);
+                                                   _loadLogs();
+                                                 },
+                                               ),
+                                             ],
+                                           ),
+                                         ],
                                         const SizedBox(height: 12),
 
                                         // Contexto (se houver)

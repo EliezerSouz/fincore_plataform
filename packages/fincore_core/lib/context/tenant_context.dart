@@ -74,15 +74,7 @@ class TenantContext {
 
     LogService.instance.info(
       LogModule.startup,
-      '''
---------------------------------------
-FINCORE WORKSPACE LOADED
-Tenant: ${empresa.nomeFantasia}
-Usuario: ${usuario.nome} (${usuario.email})
-Empresa ID: ${empresa.id}
-Role: ${usuario.role ?? 'OPERADOR'}
-Versao: ${AppConstants.version}
---------------------------------------''',
+      'FINCORE WORKSPACE LOADED | Tenant: ${empresa.nomeFantasia} | Usuario: ${usuario.nome} (${usuario.email}) | Role: ${usuario.role ?? 'OPERADOR'} | Versao: ${AppConstants.version}',
       tenantId: empresa.id,
       userId: usuario.id,
     );

@@ -75,10 +75,16 @@ class SupabaseSessionService {
 
     final supabaseUserId = currentUser.id;
     final email = currentUser.email ?? '';
+    final traceId = CorrelationIdGenerator.generateCorrelationId();
 
-    LogService.instance.info(
-      LogModule.startup,
-      '[Session] Inicializando sessão para authUserId=$supabaseUserId email=$email',
+    await LogService.instance.logOperational(
+      process: 'AUTENTICACAO',
+      step: 'INICIALIZACAO_SESSAO',
+      action: 'INICIO',
+      message: 'Iniciando autenticação e verificação de perfil | Email: $email',
+      traceId: traceId,
+      entityType: 'usuario',
+      entityId: supabaseUserId,
     );
 
     // 1. Buscar perfil de usuário no Supabase (tabela usuarios)
@@ -275,6 +281,19 @@ class SupabaseSessionService {
         ? 'PENDENTE_ATIVACAO'
         : 'ATIVO';
 
+    await LogService.instance.logOperational(
+      process: 'AUTENTICACAO',
+      step: 'INICIALIZACAO_SESSAO',
+      action: 'RESULTADO',
+      message: 'Sessão autenticada | Usuário: $usuarioId | Tenant: $tenantId | Role: $role | Onboarding: $onboardingStatus',
+      traceId: traceId,
+      entityType: 'usuario',
+      entityId: usuarioId,
+      status: LogStatus.success,
+      tenantId: tenantId,
+      userId: usuarioId,
+    );
+
     return SupabaseSessionResult(
       authInfo: AuthUserInfo(
         usuarioId: usuarioId,
@@ -377,14 +396,14 @@ class SupabaseSessionService {
         // Definir contexto temporário para que os repos aceitem o save
         tenantContext.setContext(empresa: coreEmpresa, usuario: coreUsuario);
 
-        // Salvar empresa
-        await empresaRepo.save(coreEmpresa);
+        // Salvar empresa localmente sem enfileirar no Outbox (já veio do Supabase)
+        await empresaRepo.saveLocal(coreEmpresa);
 
-        // Salvar usuário
-        await usuarioRepo.save(coreUsuario);
+        // Salvar usuário localmente
+        await usuarioRepo.saveLocal(coreUsuario);
 
-        // Salvar membro
-        await membroRepo.save(coreMembro);
+        // Salvar membro localmente
+        await membroRepo.saveLocal(coreMembro);
       });
 
       // Buscar configuração da empresa no Supabase e salvar localmente
@@ -472,7 +491,7 @@ class SupabaseSessionService {
             syncStatus: SyncStatus.synced,
           ),
         );
-        await configRepo.save(config);
+        await configRepo.saveLocal(config);
       }
     } catch (e) {
       // Config não crítica — apenas loga

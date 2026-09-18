@@ -3,8 +3,10 @@ Map<String, dynamic> generateJsonDiff(Map<String, dynamic> original, Map<String,
   final diff = <String, dynamic>{};
 
   for (final key in copy.keys) {
-    // Ignorar propriedades de metadados padrão que sempre mudam
-    if (key == 'metadata' || key == 'updatedAt' || key == 'createdAt') continue;
+    // Ignorar propriedades de metadados padrão do sistema
+    if (key == 'metadata' || key == 'updatedAt' || key == 'createdAt' ||
+        key == 'syncVersion' || key == 'syncStatus' || key == 'lastSyncedAt' ||
+        key == 'createdBy' || key == 'updatedBy' || key == 'deletedAt') continue;
 
     final origVal = original[key];
     final copyVal = copy[key];
@@ -19,7 +21,9 @@ Map<String, dynamic> generateJsonDiff(Map<String, dynamic> original, Map<String,
 
   // Verificar chaves que existiam no original e foram removidas na cópia (se aplicável)
   for (final key in original.keys) {
-    if (key == 'metadata' || key == 'updatedAt' || key == 'createdAt') continue;
+    if (key == 'metadata' || key == 'updatedAt' || key == 'createdAt' ||
+        key == 'syncVersion' || key == 'syncStatus' || key == 'lastSyncedAt' ||
+        key == 'createdBy' || key == 'updatedBy' || key == 'deletedAt') continue;
     if (!copy.containsKey(key)) {
       diff[key] = {
         'old': original[key],

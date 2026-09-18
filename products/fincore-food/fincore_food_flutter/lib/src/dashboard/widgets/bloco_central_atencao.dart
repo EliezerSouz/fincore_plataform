@@ -29,10 +29,58 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
   @override
   Widget build(BuildContext context) {
     final alertas = widget.controller.alertas;
-    if (alertas.isEmpty) return const SizedBox.shrink();
-
     final planeCtrl = DependencyInjection().get<PlanoProducaoController>();
     final estoqueCtrl = DependencyInjection().get<EstoqueController>();
+
+    if (alertas.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              'O Que Precisa da Minha Atenção',
+              style: TextStyle(
+                color: FincoreColors.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: FincoreColors.success.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: FincoreColors.success.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: FincoreColors.success, size: 20),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'OPERAÇÃO NORMAL',
+                        style: TextStyle(color: FincoreColors.success, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Nenhuma ação urgente ou crítico pendente no momento. Estoque e entregas sob controle.',
+                        style: TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
 
     final acoesNecessarias = alertas.where((a) => a.categoria == CategoriaAlerta.acaoNecessaria).toList();
     final acompanhamentos = alertas.where((a) => a.categoria == CategoriaAlerta.acompanhamento).toList();
@@ -55,7 +103,7 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Central de Atenção ($totalAlertas)',
+                'O Que Precisa da Minha Atenção ($totalAlertas)',
                 style: const TextStyle(
                   color: FincoreColors.textPrimary,
                   fontSize: 16,

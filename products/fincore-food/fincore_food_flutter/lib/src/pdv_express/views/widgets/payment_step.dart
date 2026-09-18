@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import '../../controllers/pdv_express_controller.dart';
 
+import 'package:fincore_food_flutter/src/shared/services/impressao_service.dart';
+import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
+
 class PaymentStep extends StatefulWidget {
   final PdvExpressController controller;
 
@@ -18,6 +21,7 @@ class PaymentStep extends StatefulWidget {
 class _PaymentStepState extends State<PaymentStep> {
   late final TextEditingController _trocoCtrl;
   late final TextEditingController _obsCtrl;
+  FincoreImpressaoConfig? _impConfig;
 
   @override
   void initState() {
@@ -32,6 +36,16 @@ class _PaymentStepState extends State<PaymentStep> {
 
     _trocoCtrl.addListener(_updateTroco);
     _obsCtrl.addListener(_updateObs);
+    _loadPixConfig();
+  }
+
+  Future<void> _loadPixConfig() async {
+    final config = await FincoreImpressaoConfig.carregar();
+    if (mounted) {
+      setState(() {
+        _impConfig = config;
+      });
+    }
   }
 
   @override
@@ -153,47 +167,115 @@ class _PaymentStepState extends State<PaymentStep> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: FincoreColors.accent.withValues(alpha: 0.2)),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.qr_code, color: FincoreColors.accent),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Chave Pix para Pagamento (CNPJ):',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: FincoreColors.textSecondary,
-                                fontWeight: FontWeight.bold,
+                      Row(
+                        children: [
+                          const Icon(Icons.qr_code_2_rounded, color: FincoreColors.accent, size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Chave Pix Principal (${_impConfig?.pixTipo ?? "PIX"}):',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: FincoreColors.textSecondary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  (_impConfig?.pixChave ?? '').isNotEmpty
+                                      ? _impConfig!.pixChave
+                                      : 'Nenhuma Chave PIX Principal configurada',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: (_impConfig?.pixChave ?? '').isNotEmpty ? FincoreColors.textPrimary : FincoreColors.warning,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                if ((_impConfig?.pixFavorecido ?? '').isNotEmpty) ...[
+                                  Text(
+                                    'Favorecido: ${_impConfig!.pixFavorecido}',
+                                    style: const TextStyle(fontSize: 11, color: FincoreColors.textSecondary),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if ((_impConfig?.pixChave ?? '').isNotEmpty)
+                            Tooltip(
+                              message: 'Copiar apenas a chave PIX',
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: FincoreColors.accent,
+                                  side: const BorderSide(color: FincoreColors.accent),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                ),
+                                icon: const Icon(Icons.copy, size: 14),
+                                label: const Text('Copiar Chave', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: _impConfig!.pixChave));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      backgroundColor: FincoreColors.success,
+                                      content: Text('Chave Pix copiada com sucesso!'),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
                               ),
                             ),
-                            SizedBox(height: 4),
-                            Text(
-                              '12.345.678/0001-90',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: FincoreColors.textPrimary,
-                                fontWeight: FontWeight.bold,
+                        ],
+                      ),
+                      if ((_impConfig?.pixChave ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        const Divider(color: FincoreColors.border, height: 1),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            const Icon(Icons.chat_outlined, color: Color(0xFF10B981), size: 18),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Pix Copia e Cola (Ideal para enviar no WhatsApp com o valor exato do pedido):',
+                                style: TextStyle(fontSize: 11, color: FincoreColors.textSecondary),
                               ),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF10B981),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                              icon: const Icon(Icons.content_copy_rounded, size: 14),
+                              label: const Text('Copiar Pix Copia e Cola', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              onPressed: () {
+                                final valorReais = widget.controller.totalInCents / 100.0;
+                                final payload = PixGenerator.gerarCopiaCola(
+                                  chave: _impConfig!.pixChave,
+                                  favorecido: _impConfig!.pixFavorecido.isNotEmpty ? _impConfig!.pixFavorecido : 'Estabelecimento',
+                                  cidade: 'Sorocaba',
+                                  valor: valorReais,
+                                );
+                                Clipboard.setData(ClipboardData(text: payload));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: const Color(0xFF10B981),
+                                    content: Text('Código Pix Copia e Cola de R\$ ${valorReais.toStringAsFixed(2)} copiado para o WhatsApp!'),
+                                    duration: const Duration(seconds: 3),
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.copy, size: 20, color: FincoreColors.accent),
-                        onPressed: () {
-                          Clipboard.setData(const ClipboardData(text: '12.345.678/0001-90'));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              backgroundColor: FincoreColors.success,
-                              content: Text('Chave Pix copiada com sucesso!'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                      ),
+                      ],
                     ],
                   ),
                 ),

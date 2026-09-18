@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:drift/drift.dart';
 import 'package:fincore_core/fincore_core.dart';
 import 'package:uuid/uuid.dart';
 import 'estoque_controller.dart';
+import '../../shared/data/sync/supabase_sync_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PlanoProducaoController
@@ -28,12 +30,23 @@ class PlanoProducaoController extends ChangeNotifier {
   bool _loading = false;
   String? _error;
   Map<String, EstoqueProdutoData> _estoqueMap = {};
+  StreamSubscription? _syncSub;
 
   PlanoProducaoController()
       : _db = DependencyInjection().get<FincoreDatabase>(),
         _context = DependencyInjection().get<TenantContext>(),
         _estoqueCtrl = DependencyInjection().get<EstoqueController>() {
     _carregar();
+    try {
+      final syncService = DependencyInjection().get<SupabaseSyncService>();
+      _syncSub = syncService.onDataSynced.listen((_) => _carregar());
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _syncSub?.cancel();
+    super.dispose();
   }
 
   // ── Getters públicos ──────────────────────────────────────────────────────
@@ -331,6 +344,7 @@ class PlanoProducaoController extends ChangeNotifier {
       operadorId: Value(operadorId),
       updatedAt: Value(now),
       updatedBy: Value(operadorId),
+      syncVersion: Value(plano.syncVersion + 1),
       syncStatus: const Value(SyncStatus.pending),
     ));
 
@@ -388,6 +402,7 @@ class PlanoProducaoController extends ChangeNotifier {
       operadorId: Value(operadorId),
       updatedAt: Value(now),
       updatedBy: Value(operadorId),
+      syncVersion: Value(plano.syncVersion + 1),
       syncStatus: const Value(SyncStatus.pending),
     ));
 
@@ -464,6 +479,7 @@ class PlanoProducaoController extends ChangeNotifier {
       operadorId: Value(operadorId),
       updatedAt: Value(now),
       updatedBy: Value(operadorId),
+      syncVersion: Value(plano.syncVersion + 1),
       syncStatus: const Value(SyncStatus.pending),
     ));
 
@@ -848,6 +864,7 @@ class PlanoProducaoController extends ChangeNotifier {
       operadorId: Value(operadorId),
       updatedAt: Value(now),
       updatedBy: Value(operadorId),
+      syncVersion: Value(plano.syncVersion + 1),
       syncStatus: const Value(SyncStatus.pending),
     ));
 
@@ -894,19 +911,39 @@ class PlanoProducaoController extends ChangeNotifier {
 
     if (plano == null) return;
 
-    await _db.into(_db.outboxSync).insertOnConflictUpdate(
-      OutboxSyncCompanion.insert(
-        tenantId: tenantId,
+    try {
+      final outboxService = DependencyInjection().get<OutboxService>();
+      await outboxService.enqueue(
         entity: 'planejamento_producao',
         entityId: planoId,
-        action: action,
-        payload: _planoToJson(plano),
-        status: 'pending',
+        action: action.toUpperCase(),
+        payload: {
+          'id': plano.id,
+          'tenantId': plano.tenantId,
+          'produtoId': plano.produtoId,
+          'dataPlano': plano.dataPlano.toIso8601String(),
+          'quantidadePlanejada': plano.quantidadePlanejada,
+          'quantidadeProduzida': plano.quantidadeProduzida,
+          'capacidadeCampanha': plano.capacidadeCampanha,
+          'status': plano.status,
+          'motivoCancelamento': plano.motivoCancelamento,
+          'observacoes': plano.observacoes,
+          'necessidadeOrigem': plano.necessidadeOrigem,
+          'operadorId': plano.operadorId,
+          'syncVersion': plano.syncVersion,
+          'createdAt': plano.createdAt.toIso8601String(),
+          'updatedAt': plano.updatedAt.toIso8601String(),
+          'createdBy': plano.createdBy,
+          'updatedBy': plano.updatedBy,
+        },
         version: plano.syncVersion,
-        createdAt: DateTime.now(),
-        attemptsCount: const Value(0),
-      ),
-    );
+      );
+
+      final syncEngine = DependencyInjection().get<SyncEngine>();
+      syncEngine.processPendingQueue();
+    } catch (e) {
+      debugPrint('[PlanoProducaoController] Erro ao enfileirar outbox: $e');
+    }
   }
 
   String _planoToJson(PlanoProducaoData p) {

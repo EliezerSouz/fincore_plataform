@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:fincore_core/fincore_core.dart';
 
 /// Resultado de uma operação de impressão.
 class PrinterResult {
@@ -47,11 +48,13 @@ class PrinterDriver {
     final target = printerPath.trim();
 
     if (target.isEmpty) {
-      return PrinterResult(
+      final res = PrinterResult(
         success: false,
-        message: 'Nenhuma impressora configurada',
+        message: 'Nenhuma impressora configurada (caminho/IP em branco)',
         elapsedMs: sw.elapsedMilliseconds,
       );
+      gravarLog(destinatario: 'NENHUMA', sucesso: false, mensagem: res.message, tempoMs: res.elapsedMs);
+      return res;
     }
 
     try {
@@ -86,11 +89,13 @@ class PrinterDriver {
       }
     } catch (e) {
       sw.stop();
-      return PrinterResult(
+      final res = PrinterResult(
         success: false,
         message: 'Erro ao imprimir: $e',
         elapsedMs: sw.elapsedMilliseconds,
       );
+      gravarLog(destinatario: target, sucesso: false, mensagem: res.message, tempoMs: res.elapsedMs);
+      return res;
     }
   }
 
@@ -126,6 +131,12 @@ class PrinterDriver {
       stopwatch.stop();
 
       debugPrint('[PrinterDriver] ✅ Impresso via IP $host:$port (${stopwatch.elapsedMilliseconds}ms)');
+      gravarLog(
+        destinatario: '$host:$port',
+        sucesso: true,
+        mensagem: 'Impresso com sucesso via IP $host:$port',
+        tempoMs: stopwatch.elapsedMilliseconds,
+      );
       return PrinterResult(
         success: true,
         message: 'Impresso com sucesso via $host:$port',
@@ -134,6 +145,12 @@ class PrinterDriver {
     } on SocketException catch (e) {
       stopwatch.stop();
       debugPrint('[PrinterDriver] ❌ Erro de conexão IP: $e');
+      gravarLog(
+        destinatario: '$host:$port',
+        sucesso: false,
+        mensagem: 'Impressora offline ($host:$port): ${e.message}',
+        tempoMs: stopwatch.elapsedMilliseconds,
+      );
       return PrinterResult(
         success: false,
         message: 'Impressora offline ($host:$port): ${e.message}',
@@ -167,78 +184,236 @@ class PrinterDriver {
         await rawFile.writeAsBytes(rawBytes, flush: true);
         stopwatch.stop();
         debugPrint('[PrinterDriver] ✅ Impresso diretamente via porta/caminho: $printerName (${stopwatch.elapsedMilliseconds}ms)');
+        gravarLog(
+          destinatario: printerName,
+          sucesso: true,
+          mensagem: 'Impresso com sucesso via porta: $printerName',
+          tempoMs: stopwatch.elapsedMilliseconds,
+        );
         return PrinterResult(
           success: true,
-          message: 'Impresso com sucesso via porta/compartilhamento: $printerName',
+          message: 'Impresso com sucesso via porta: $printerName',
           elapsedMs: stopwatch.elapsedMilliseconds,
         );
       } catch (e) {
-        debugPrint('[PrinterDriver] Falha ao escrever direto em $printerName -> caindo para PowerShell: $e');
+        debugPrint('[PrinterDriver] Falha porta direta -> caindo para Spooler RAW: $e');
       }
     }
 
-    // 2. Fallback para Windows Spooler (Fila de Impressão via PowerShell)
+    // 2. Transmissão RAW para Spooler Windows via script .ps1 (winspool.drv)
     try {
       final tempDir = Directory.systemTemp;
-      final tmpFile = File('${tempDir.path}\\fincore_print_${DateTime.now().millisecondsSinceEpoch}.txt');
-      
-      final cleanText = _stripTagsForSpooler(text, cortarPapel: cortarPapel, abrirGaveta: abrirGaveta);
-      await tmpFile.writeAsString(cleanText, flush: true);
+      final rawBytes = await _compileBytes(
+        text,
+        cortarPapel: cortarPapel,
+        abrirGaveta: abrirGaveta,
+        larguraPapel: larguraPapel,
+      );
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final binFile = File('${tempDir.path}\\fincore_print_$timestamp.bin');
+      await binFile.writeAsBytes(rawBytes, flush: true);
 
+      final ps1File = File('${tempDir.path}\\fincore_print_$timestamp.ps1');
       final escapedPath = printerName.replaceAll("'", "''");
-      
-      // Se for impressora padrão/default, não passa o parâmetro -Name
-      final bool isDefault = printerName.isEmpty ||
-          printerName.toLowerCase() == 'padrao' ||
-          printerName.toLowerCase() == 'padrão' ||
-          printerName.toLowerCase() == 'default' ||
-          printerName.toLowerCase().contains('usb001');
+      final tmpPathEscaped = binFile.path.replaceAll("'", "''");
 
-      final psCmd = isDefault
-          ? "Get-Content -Path '${tmpFile.path}' | Out-Printer"
-          : "Get-Content -Path '${tmpFile.path}' | Out-Printer -Name '$escapedPath'";
+      final psScriptContent = '''
+\$code = @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+
+public class RawPrinterHelper {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public class DOCINFOA {
+        [MarshalAs(UnmanagedType.LPStr)] public string pDocName;
+        [MarshalAs(UnmanagedType.LPStr)] public string pOutputFile;
+        [MarshalAs(UnmanagedType.LPStr)] public string pDataType;
+    }
+    [DllImport("winspool.Drv", EntryPoint = "OpenPrinterA", SetLastError = true, CharSet = CharSet.Ansi)]
+    public static extern bool OpenPrinter([MarshalAs(UnmanagedType.LPStr)] string szPrinter, out IntPtr hPrinter, IntPtr pd);
+    [DllImport("winspool.Drv", EntryPoint = "ClosePrinter", SetLastError = true)]
+    public static extern bool ClosePrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint = "StartDocPrinterA", SetLastError = true, CharSet = CharSet.Ansi)]
+    public static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFOA di);
+    [DllImport("winspool.Drv", EntryPoint = "EndDocPrinter", SetLastError = true)]
+    public static extern bool EndDocPrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint = "StartPagePrinter", SetLastError = true)]
+    public static extern bool StartPagePrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint = "EndPagePrinter", SetLastError = true)]
+    public static extern bool EndPagePrinter(IntPtr hPrinter);
+    [DllImport("winspool.Drv", EntryPoint = "WritePrinter", SetLastError = true)]
+    public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
+
+    public static bool PrintFile(string printerName, string filePath) {
+        if (!File.Exists(filePath)) return false;
+        byte[] bytes = File.ReadAllBytes(filePath);
+        IntPtr hPrinter = IntPtr.Zero;
+        DOCINFOA di = new DOCINFOA { pDocName = "FINCORE FOOD PRINT", pDataType = "RAW" };
+        if (OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) {
+            if (StartDocPrinter(hPrinter, 1, di)) {
+                if (StartPagePrinter(hPrinter)) {
+                    IntPtr pBytes = Marshal.AllocHGlobal(bytes.Length);
+                    Marshal.Copy(bytes, 0, pBytes, bytes.Length);
+                    int dwWritten = 0;
+                    bool res = WritePrinter(hPrinter, pBytes, bytes.Length, out dwWritten);
+                    Marshal.FreeHGlobal(pBytes);
+                    EndPagePrinter(hPrinter);
+                }
+                EndDocPrinter(hPrinter);
+            }
+            ClosePrinter(hPrinter);
+            return true;
+        }
+        return false;
+    }
+}
+"@
+
+if (-not ([System.Management.Automation.PSTypeName]'RawPrinterHelper').Type) {
+    Add-Type -TypeDefinition \$code -Language CSharp
+}
+
+\$target = '$escapedPath'
+\$p = \$null
+if (\$target.Length -gt 0 -and \$target -ne 'padrao' -and \$target -ne 'padrão' -and \$target -ne 'default') {
+    \$p = Get-Printer -Name \$target -ErrorAction SilentlyContinue
+    if (-not \$p) {
+        \$p = Get-Printer | Where-Object { \$_.PortName -eq \$target -or \$_.Name -like ('*' + \$target + '*') } | Select-Object -First 1
+    }
+}
+if (-not \$p) {
+    \$p = Get-Printer | Where-Object { \$_.IsDefault -eq \$true } | Select-Object -First 1
+}
+if (-not \$p) {
+    \$p = Get-Printer | Select-Object -First 1
+}
+
+if (\$p) {
+    \$res = [RawPrinterHelper]::PrintFile(\$p.Name, '$tmpPathEscaped')
+    if (\$res) {
+        Write-Host "SUCCESS:\$(\$p.Name)"
+    } else {
+        Write-Error "Falha ao enviar stream RAW para a impressora '\$(\$p.Name)'"
+        exit 1
+    }
+} else {
+    Write-Error "Nenhuma impressora encontrada no Windows."
+    exit 1
+}
+''';
+      await ps1File.writeAsString(psScriptContent, flush: true);
 
       final result = await Process.run(
         'powershell',
         [
           '-NoProfile',
           '-NonInteractive',
-          '-Command',
-          psCmd,
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          ps1File.path,
         ],
-        runInShell: true,
       );
 
-      // Limpeza do temporário
-      try {
-        await tmpFile.delete();
-      } catch (_) {}
+      try { await binFile.delete(); } catch (_) {}
+      try { await ps1File.delete(); } catch (_) {}
 
       stopwatch.stop();
 
-      if (result.exitCode == 0) {
-        debugPrint('[PrinterDriver] ✅ Impresso via Spooler "$printerName" (${stopwatch.elapsedMilliseconds}ms)');
+      gravarLog(
+        destinatario: printerName,
+        sucesso: result.exitCode == 0 && result.stdout.toString().contains('SUCCESS:'),
+        mensagem: result.exitCode == 0 ? result.stdout.toString().trim() : result.stderr.toString().trim(),
+        tempoMs: stopwatch.elapsedMilliseconds,
+      );
+
+      if (result.exitCode == 0 && result.stdout.toString().contains('SUCCESS:')) {
+        final printedName = result.stdout.toString().substring(result.stdout.toString().indexOf('SUCCESS:') + 8).trim();
+        debugPrint('[PrinterDriver] ✅ Impresso via RAW Spooler "$printedName" (${stopwatch.elapsedMilliseconds}ms)');
         return PrinterResult(
           success: true,
-          message: 'Impresso com sucesso via "$printerName"',
+          message: 'Impresso com sucesso via RAW Spooler ("$printedName")',
           elapsedMs: stopwatch.elapsedMilliseconds,
         );
       } else {
         final err = result.stderr.toString().trim();
-        debugPrint('[PrinterDriver] ❌ Erro Spooler: $err');
+        debugPrint('[PrinterDriver] ❌ Erro Spooler RAW: $err');
         return PrinterResult(
           success: false,
-          message: 'Falha na impressão: $err. Verifique o nome da impressora no Windows.',
+          message: err.isNotEmpty ? err : 'Falha na gravação Spooler RAW. Verifique se a impressora está conectada.',
           elapsedMs: stopwatch.elapsedMilliseconds,
         );
       }
     } catch (e) {
       stopwatch.stop();
+      gravarLog(
+        destinatario: printerName,
+        sucesso: false,
+        mensagem: 'Erro no Spooler RAW: $e',
+        tempoMs: stopwatch.elapsedMilliseconds,
+      );
       return PrinterResult(
         success: false,
-        message: 'Erro ao acessar Spooler: $e',
+        message: 'Erro no Spooler RAW: $e',
         elapsedMs: stopwatch.elapsedMilliseconds,
       );
+    }
+  }
+
+  static void gravarLog({
+    required String destinatario,
+    required bool sucesso,
+    required String mensagem,
+    required int tempoMs,
+  }) {
+    final dateStr = DateTime.now().toString();
+    final line = '[$dateStr] DESTINO: $destinatario | STATUS: ${sucesso ? "SUCESSO" : "FALHA"} | MSG: $mensagem | TEMPO: ${tempoMs}ms\n';
+
+    // 1. Grava no LogService (Central de Logs da Aplicação)
+    try {
+      if (sucesso) {
+        LogService.instance.info(
+          LogModule.printer,
+          'DESTINO: $destinatario | MSG: $mensagem | TEMPO: ${tempoMs}ms',
+          context: {
+            'destinatario': destinatario,
+            'sucesso': true,
+            'mensagem': mensagem,
+            'tempoMs': tempoMs,
+          },
+        );
+      } else {
+        LogService.instance.error(
+          LogModule.printer,
+          'DESTINO: $destinatario | ERRO: $mensagem | TEMPO: ${tempoMs}ms',
+          context: {
+            'destinatario': destinatario,
+            'sucesso': false,
+            'mensagem': mensagem,
+            'tempoMs': tempoMs,
+          },
+        );
+      }
+    } catch (e) {
+      debugPrint('[PrinterDriver] Erro ao registrar log no LogService: $e');
+    }
+
+    // 2. Grava na pasta oficial /LOG/Impressao/
+    try {
+      final now = DateTime.now();
+      final monthStr = now.month.toString().padLeft(2, '0');
+      final dayStr = now.day.toString().padLeft(2, '0');
+      final dateKey = '${now.year}-$monthStr-$dayStr';
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      final impressaoDir = Directory('$exeDir\\LOG\\Impressao');
+      if (!impressaoDir.existsSync()) {
+        impressaoDir.createSync(recursive: true);
+      }
+      final logFile = File('${impressaoDir.path}\\impressao_$dateKey.log');
+      logFile.writeAsStringSync(line, mode: FileMode.append);
+    } catch (e) {
+      debugPrint('[PrinterDriver] Erro ao gravar em LOG/Impressao: $e');
     }
   }
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:brasil_fields/brasil_fields.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
@@ -17,7 +18,6 @@ import 'package:flutter/services.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_text_field.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_page_header.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_section_card.dart';
-import 'package:fincore_food_flutter/src/shared/services/fincore_thermal_printer_service.dart';
 import 'package:fincore_food_flutter/src/shared/services/impressao_service.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/audit_timeline_panel.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/log_explorer_dialog.dart';
@@ -104,10 +104,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   bool _modoDeliveryAtivo = true;
   bool _modoComandasAtivo = false;
   bool _clienteObrigatorioVenda = false;
+  bool _pedidoRetroativoMovimentaEstoque = false;
+  bool _taxaEntregaPorKm = false;
   String _atendimentoPadrao = 'Delivery';
   final _margemSegurancaCtrl = TextEditingController();
-  bool _taxaEntregaPorKm = false;
   final _valorPorKmCtrl = TextEditingController();
+  final _metaDiariaCtrl = TextEditingController();
 
   final List<PixKeyModel> _pixKeys = [];
   final List<PrinterModel> _printers = [];
@@ -170,6 +172,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _inscricaoMunicipalCtrl.dispose();
     _regimeTributarioCtrl.dispose();
     _emailEmpresaCtrl.dispose();
+    _metaDiariaCtrl.dispose();
     super.dispose();
   }
 
@@ -252,6 +255,16 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _modoComandasAtivo = config.modoComandasAtivo;
     _clienteObrigatorioVenda = config.clienteObrigatorioVenda;
     _atendimentoPadrao = config.atendimentoPadrao;
+
+    final prefs = await SharedPreferences.getInstance();
+    final metaSaved = prefs.getDouble('meta_diaria_faturamento') ?? 0.0;
+    if (mounted) {
+      setState(() {
+        _pedidoRetroativoMovimentaEstoque = prefs.getBool('pdv_retroativo_movimentar_estoque') ?? false;
+      });
+    }
+    _metaDiariaCtrl.text = metaSaved > 0 ? metaSaved.toStringAsFixed(2).replaceAll('.', ',') : '';
+
     _taxaServicoCtrl.text = (config.taxaServico * 100).toStringAsFixed(1);
     _margemSegurancaCtrl.text = config.margemSegurancaMinutos.toString();
     _taxaEntregaPorKm = config.taxaEntregaPorKm;
@@ -449,16 +462,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         await _personalizacaoKey.currentState?.salvar();
       }
 
+      final principalPix = _pixKeys.firstWhere(
+        (x) => x.isPrincipal,
+        orElse: () => _pixKeys.isNotEmpty ? _pixKeys.first : PixKeyModel(id: '', favorecido: '', banco: '', tipo: 'CPF', chave: ''),
+      );
+
       final impConfig = FincoreImpressaoConfig(
         nomeEmpresa: _nomeEmpresaCupomCtrl.text.trim().isEmpty ? (_empresa?.nomeFantasia ?? '') : _nomeEmpresaCupomCtrl.text.trim(),
         telefone: _telefoneEmpresaCtrl.text.trim(),
         larguraMm: _larguraBobina == '58mm' ? 58 : 80,
         habilitarQrCodePix: _exibirQrCode,
         habilitarCopiaCola: _exibirCopiaCola,
-        pixChave: _pixKeys.isNotEmpty ? _pixKeys.first.chave : '',
-        pixTipo: _pixKeys.isNotEmpty ? _pixKeys.first.tipo : 'CPF',
-        pixFavorecido: _pixKeys.isNotEmpty ? _pixKeys.first.favorecido : '',
-        pixBanco: _pixKeys.isNotEmpty ? _pixKeys.first.banco : '',
+        pixChave: principalPix.chave,
+        pixTipo: principalPix.tipo,
+        pixFavorecido: principalPix.favorecido,
+        pixBanco: principalPix.banco,
         rodape: _mensagemRodapeCtrl.text,
       );
       await impConfig.salvar();
@@ -496,18 +514,18 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         tema: _selectedTema,
         pixKey: _pixKeys.isEmpty ? null : jsonEncode(_pixKeys.map((x) => x.toJson()).toList()),
         printerConfig: _printers.isEmpty ? null : jsonEncode(_printers.map((x) => x.toJson()).toList()),
-        printerCaixa: _printers.firstWhere((x) => x.departamento == 'Caixa', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Caixa').ip,
-        printerCozinha: _printers.firstWhere((x) => x.departamento == 'Cozinha', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Cozinha').ip,
-        printerBalcao: _printers.firstWhere((x) => x.departamento == 'Balcao', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Balcao').ip,
-        printerExpedicao: _printers.firstWhere((x) => x.departamento == 'Expedicao', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Expedicao').ip,
-        autoPrintCaixa: _printers.any((x) => x.departamento == 'Caixa' && x.autoImpressao),
-        autoPrintCozinha: _printers.any((x) => x.departamento == 'Cozinha' && x.autoImpressao),
-        autoPrintBalcao: _printers.any((x) => x.departamento == 'Balcao' && x.autoImpressao),
-        autoPrintExpedicao: _printers.any((x) => x.departamento == 'Expedicao' && x.autoImpressao),
-        viasCliente: _printers.firstWhere((x) => x.departamento == 'Caixa', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
-        viasCozinha: _printers.firstWhere((x) => x.departamento == 'Cozinha', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
-        viasBalcao: _printers.firstWhere((x) => x.departamento == 'Balcao', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
-        viasExpedicao: _printers.firstWhere((x) => x.departamento == 'Expedicao', orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
+        printerCaixa: _printers.firstWhere((x) => x.departamento == 'Caixa' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Caixa' && x.status).ip,
+        printerCozinha: _printers.firstWhere((x) => x.departamento == 'Cozinha' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Cozinha' && x.status).ip,
+        printerBalcao: _printers.firstWhere((x) => x.departamento == 'Balcao' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Balcao' && x.status).ip,
+        printerExpedicao: _printers.firstWhere((x) => x.departamento == 'Expedicao' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Expedicao' && x.status).ip,
+        autoPrintCaixa: _printers.any((x) => x.departamento == 'Caixa' && x.status && x.autoImpressao),
+        autoPrintCozinha: _printers.any((x) => x.departamento == 'Cozinha' && x.status && x.autoImpressao),
+        autoPrintBalcao: _printers.any((x) => x.departamento == 'Balcao' && x.status && x.autoImpressao),
+        autoPrintExpedicao: _printers.any((x) => x.departamento == 'Expedicao' && x.status && x.autoImpressao),
+        viasCliente: _printers.firstWhere((x) => x.departamento == 'Caixa' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
+        viasCozinha: _printers.firstWhere((x) => x.departamento == 'Cozinha' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
+        viasBalcao: _printers.firstWhere((x) => x.departamento == 'Balcao' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
+        viasExpedicao: _printers.firstWhere((x) => x.departamento == 'Expedicao' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 1, status: false)).vias,
         larguraPapel: _larguraBobina == '58mm' ? 58 : 80,
         cortarPapel: _cortarPapel,
         abrirGaveta: _abrirGaveta,
@@ -531,6 +549,11 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         ),
       );
       await _repo.save(updated);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('pdv_retroativo_movimentar_estoque', _pedidoRetroativoMovimentaEstoque);
+      final metaDouble = double.tryParse(_metaDiariaCtrl.text.replaceAll(',', '.')) ?? 0.0;
+      await prefs.setDouble('meta_diaria_faturamento', metaDouble);
 
       if (_empresa != null) {
         final updatedEmpresa = CoreEmpresa(
@@ -1708,6 +1731,17 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   _onFieldChanged();
                 },
               ),
+              const SizedBox(height: 12),
+              _buildConnectorRow(
+                'Movimentar Estoque em Pedidos Retroativos por Padrão',
+                'Define se novos pedidos criados com data/hora no passado devem realizar baixa automática no estoque ou apenas registrar no histórico e financeiro.',
+                Icons.inventory_2_outlined,
+                _pedidoRetroativoMovimentaEstoque,
+                (v) {
+                  setState(() => _pedidoRetroativoMovimentaEstoque = v);
+                  _onFieldChanged();
+                },
+              ),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -1745,6 +1779,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           hintText: 'Ex: 10',
                           keyboardType: TextInputType.number,
                           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          onChanged: (v) => _onFieldChanged(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const FincoreFieldLabel(label: 'META DIÁRIA DE FATURAMENTO (R\$)'),
+                        FincoreTextField(
+                          controller: _metaDiariaCtrl,
+                          hintText: 'Ex: 5000,00',
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           onChanged: (v) => _onFieldChanged(),
                         ),
                       ],
@@ -1898,7 +1947,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   decoration: BoxDecoration(
                     color: FincoreColors.background,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: FincoreColors.border),
+                    border: Border.all(color: key.isPrincipal ? const Color(0xFFF97316) : FincoreColors.border, width: key.isPrincipal ? 1.5 : 1),
                   ),
                   child: Row(
                     children: [
@@ -1917,11 +1966,29 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              key.favorecido,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            Row(
+                              children: [
+                                Text(
+                                  key.favorecido,
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (key.isPrincipal) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF97316).withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'PRINCIPAL (PDV)',
+                                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFF97316)),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                             Text(
                               "${key.tipo}: ${key.chave} • ${key.banco}",
@@ -1932,6 +1999,25 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           ],
                         ),
                       ),
+                      if (!key.isPrincipal)
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              for (int i = 0; i < _pixKeys.length; i++) {
+                                _pixKeys[i] = PixKeyModel(
+                                  id: _pixKeys[i].id,
+                                  favorecido: _pixKeys[i].favorecido,
+                                  banco: _pixKeys[i].banco,
+                                  tipo: _pixKeys[i].tipo,
+                                  chave: _pixKeys[i].chave,
+                                  isPrincipal: i == index,
+                                );
+                              }
+                              _onFieldChanged();
+                            });
+                          },
+                          child: const Text('Usar no PDV', style: TextStyle(fontSize: 11, color: Color(0xFFF97316))),
+                        ),
                       IconButton(
                         icon: const Icon(Icons.edit_outlined, size: 18, color: FincoreColors.textSecondary),
                         onPressed: () => _mostrarModalPix(key),
@@ -1940,6 +2026,16 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         icon: const Icon(Icons.delete_outline, size: 18, color: FincoreColors.danger),
                         onPressed: () => setState(() {
                           _pixKeys.removeAt(index);
+                          if (_pixKeys.isNotEmpty && !_pixKeys.any((x) => x.isPrincipal)) {
+                            _pixKeys[0] = PixKeyModel(
+                              id: _pixKeys[0].id,
+                              favorecido: _pixKeys[0].favorecido,
+                              banco: _pixKeys[0].banco,
+                              tipo: _pixKeys[0].tipo,
+                              chave: _pixKeys[0].chave,
+                              isPrincipal: true,
+                            );
+                          }
                           _onFieldChanged();
                         }),
                       ),
@@ -1982,6 +2078,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     final favCtrl = TextEditingController(text: pixKey?.favorecido ?? '');
     final bancoCtrl = TextEditingController(text: pixKey?.banco ?? '');
     String tipo = pixKey?.tipo ?? 'CPF';
+    bool ePrincipal = pixKey?.isPrincipal ?? (_pixKeys.isEmpty);
 
     showDialog(
       context: context,
@@ -2031,6 +2128,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     controller: bancoCtrl,
                     hintText: 'Ex: Itaú',
                   ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Switch(
+                        value: ePrincipal,
+                        activeColor: const Color(0xFFF97316),
+                        onChanged: (v) => setModalState(() => ePrincipal = v),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Usar como Chave PIX Principal no PDV',
+                        style: TextStyle(color: FincoreColors.textPrimary, fontSize: 13),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -2043,6 +2155,18 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 onPressed: () {
                   if (chaveCtrl.text.trim().isEmpty || favCtrl.text.trim().isEmpty) return;
                   setState(() {
+                    if (ePrincipal) {
+                      for (int i = 0; i < _pixKeys.length; i++) {
+                        _pixKeys[i] = PixKeyModel(
+                          id: _pixKeys[i].id,
+                          favorecido: _pixKeys[i].favorecido,
+                          banco: _pixKeys[i].banco,
+                          tipo: _pixKeys[i].tipo,
+                          chave: _pixKeys[i].chave,
+                          isPrincipal: false,
+                        );
+                      }
+                    }
                     if (pixKey == null) {
                       _pixKeys.add(PixKeyModel(
                         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -2050,6 +2174,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         banco: bancoCtrl.text.trim(),
                         tipo: tipo,
                         chave: chaveCtrl.text.trim(),
+                        isPrincipal: ePrincipal || _pixKeys.isEmpty,
                       ));
                     } else {
                       final idx = _pixKeys.indexWhere((x) => x.id == pixKey.id);
@@ -2060,6 +2185,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           banco: bancoCtrl.text.trim(),
                           tipo: tipo,
                           chave: chaveCtrl.text.trim(),
+                          isPrincipal: ePrincipal,
                         );
                       }
                     }
@@ -2109,12 +2235,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               itemBuilder: (ctx, index) {
                 final printer = _printers[index];
                 return Container(
-                  height: 64,
+                  height: 68,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
                     color: FincoreColors.background,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: FincoreColors.border),
+                    border: Border.all(color: printer.status ? FincoreColors.border : FincoreColors.border.withValues(alpha: 0.5)),
                   ),
                   child: Row(
                     children: [
@@ -2122,10 +2248,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: FincoreColors.primary.withValues(alpha: 0.15),
+                          color: printer.status ? FincoreColors.primary.withValues(alpha: 0.15) : FincoreColors.textMuted.withValues(alpha: 0.15),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(Icons.print_outlined, size: 16, color: FincoreColors.primary),
+                        child: Icon(Icons.print_outlined, size: 16, color: printer.status ? FincoreColors.primary : FincoreColors.textMuted),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
@@ -2133,21 +2259,72 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              printer.nome,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    printer.nome,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: printer.status ? FincoreColors.textPrimary : FincoreColors.textMuted,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: printer.status ? FincoreColors.success.withValues(alpha: 0.15) : FincoreColors.danger.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    printer.status ? 'ATIVA' : 'DESATIVADA',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: printer.status ? FincoreColors.success : FincoreColors.danger,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
+                            const SizedBox(height: 2),
                             Text(
-                              "${printer.tipo} • IP/Porta: ${printer.ip} • Departamento: ${printer.departamento} • Vias: ${printer.vias}",
-                              style: const TextStyle(fontSize: 11, color: FincoreColors.textSecondary),
+                              "${printer.tipo} • ${printer.tipo == 'USB' ? 'Nome/Porta' : 'IP'}: ${printer.ip.isEmpty ? 'Padrão' : printer.ip} • Depto: ${printer.departamento} • Vias: ${printer.vias}",
+                              style: TextStyle(fontSize: 11, color: printer.status ? FincoreColors.textSecondary : FincoreColors.textMuted),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
                       ),
+                      Tooltip(
+                        message: printer.status ? 'Desativar Impressora' : 'Ativar Impressora',
+                        child: Switch(
+                          value: printer.status,
+                          activeColor: FincoreColors.success,
+                          onChanged: (val) {
+                            setState(() {
+                              _printers[index] = PrinterModel(
+                                id: printer.id,
+                                nome: printer.nome,
+                                tipo: printer.tipo,
+                                departamento: printer.departamento,
+                                ip: printer.ip,
+                                driver: printer.driver,
+                                autoImpressao: printer.autoImpressao,
+                                vias: printer.vias,
+                                status: val,
+                              );
+                              _onFieldChanged();
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                       OutlinedButton.icon(
                         onPressed: () => _testarImpressora(printer),
                         icon: const Icon(Icons.print, size: 14),
@@ -2284,6 +2461,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     String depto = printer?.departamento ?? 'Cozinha';
     String driver = printer?.driver ?? 'ESC/POS';
     bool autoPrint = printer?.autoImpressao ?? true;
+    bool statusAtiva = printer?.status ?? true;
     int vias = printer?.vias ?? 1;
     final formKey = GlobalKey<FormState>();
 
@@ -2318,8 +2496,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                               _buildSimpleDropdown(
                                 value: tipo,
                                 items: const ['Rede', 'USB'],
-                                labels: const ['Rede (TCP/IP)', 'USB Local'],
-                                onChanged: (v) => setModalState(() => tipo = v!),
+                                labels: const ['Rede (TCP/IP)', 'USB Local / Spooler'],
+                                onChanged: (v) {
+                                  setModalState(() {
+                                    final oldTipo = tipo;
+                                    tipo = v!;
+                                    if (oldTipo == 'Rede' && tipo == 'USB') {
+                                      final ipRegex = RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}');
+                                      if (ipRegex.hasMatch(ipCtrl.text.trim()) || ipCtrl.text.trim().isEmpty) {
+                                        ipCtrl.text = 'Padrão';
+                                      }
+                                    } else if (oldTipo == 'USB' && tipo == 'Rede' && (ipCtrl.text == 'Padrão' || ipCtrl.text == 'USB001')) {
+                                      ipCtrl.text = '192.168.1.200';
+                                    }
+                                  });
+                                },
                               ),
                             ],
                           ),
@@ -2342,11 +2533,16 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    const FincoreFieldLabel(label: 'ENDEREÇO IP OU PORTA', isRequired: true),
+                    FincoreFieldLabel(
+                      label: tipo == 'USB'
+                          ? 'NOME NO WINDOWS / PORTA (EX: TM-T20, USB001, COM1 OU PADRÃO)'
+                          : 'ENDEREÇO IP OU PORTA (EX: 192.168.1.200)',
+                      isRequired: true,
+                    ),
                     FincoreTextField(
                       controller: ipCtrl,
-                      hintText: 'Ex: 192.168.1.200 ou COM1',
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Endereço IP ou Porta é obrigatória' : null,
+                      hintText: tipo == 'USB' ? 'Ex: TM-T20, EPSON, USB001 ou Padrão' : 'Ex: 192.168.1.200 ou 192.168.1.201',
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Este campo é obrigatório' : null,
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -2386,6 +2582,25 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                     Row(
                       children: [
                         Switch(
+                          value: statusAtiva,
+                          activeColor: FincoreColors.success,
+                          onChanged: (v) => setModalState(() => statusAtiva = v),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          statusAtiva ? 'Impressora Ativa (Habilitada)' : 'Impressora Desativada (Inativa)',
+                          style: TextStyle(
+                            color: statusAtiva ? FincoreColors.textPrimary : FincoreColors.textMuted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Switch(
                           value: autoPrint,
                           activeColor: FincoreColors.primary,
                           onChanged: (v) => setModalState(() => autoPrint = v),
@@ -2417,7 +2632,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         driver: driver,
                         autoImpressao: autoPrint,
                         vias: vias,
-                        status: true,
+                        status: statusAtiva,
                       ));
                     } else {
                       final idx = _printers.indexWhere((x) => x.id == printer.id);
@@ -2431,7 +2646,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                           driver: driver,
                           autoImpressao: autoPrint,
                           vias: vias,
-                          status: printer.status,
+                          status: statusAtiva,
                         );
                       }
                     }
@@ -2559,12 +2774,15 @@ class PixKeyModel {
   final String banco;
   final String tipo;
   final String chave;
+  final bool isPrincipal;
+
   PixKeyModel({
     required this.id,
     required this.favorecido,
     required this.banco,
     required this.tipo,
     required this.chave,
+    this.isPrincipal = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -2573,6 +2791,7 @@ class PixKeyModel {
     'banco': banco,
     'tipo': tipo,
     'chave': chave,
+    'isPrincipal': isPrincipal,
   };
 
   factory PixKeyModel.fromJson(Map<String, dynamic> json) => PixKeyModel(
@@ -2581,6 +2800,7 @@ class PixKeyModel {
     banco: json['banco'] ?? '',
     tipo: json['tipo'] ?? 'CPF',
     chave: json['chave'] ?? '',
+    isPrincipal: json['isPrincipal'] ?? false,
   );
 }
 
@@ -2665,8 +2885,9 @@ class _TestarImpressoraDialogState extends State<_TestarImpressoraDialog> {
 
     try {
       final useCase = DependencyInjection().get<PrintUseCase>();
+      final targetPath = widget.printer.ip.trim().isEmpty ? 'Padrão' : widget.printer.ip.trim();
       final res = await useCase.testarImpressora(
-        printerPath: widget.printer.ip,
+        printerPath: targetPath,
         via: widget.via,
       );
 
@@ -2824,6 +3045,29 @@ class _TestarImpressoraDialogState extends State<_TestarImpressoraDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (!widget.printer.status) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                decoration: BoxDecoration(
+                  color: FincoreColors.warning.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: FincoreColors.warning.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 18, color: FincoreColors.warning),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Atenção: Esta impressora está DESATIVADA. O teste foi enviado para validação, mas ela não receberá impressões automáticas até ser ativada.',
+                        style: TextStyle(fontSize: 11, color: FincoreColors.textPrimary, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             statusWidget,
             const SizedBox(height: 16),
             const Text(

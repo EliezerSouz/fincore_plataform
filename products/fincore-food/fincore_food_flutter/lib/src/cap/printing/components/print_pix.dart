@@ -35,9 +35,9 @@ class PrintPix {
     final copiaCola = PixGenerator.gerarCopiaCola(
       chave: pixKeyVO.clean,
       favorecido: favorecido.isNotEmpty ? favorecido : 'Estabelecimento',
-      cidade: cidade.isNotEmpty ? cidade : 'Pouso Alegre - MG',
+      cidade: cidade.isNotEmpty ? cidade : 'BR',
       valor: valorPix,
-      mensagem: mensagemRodape.isNotEmpty ? mensagemRodape : 'Salgaderia',
+      mensagem: mensagemRodape.isNotEmpty ? mensagemRodape : 'Pagamento Pix',
     );
 
     lines.add('[CENTER][BOLD_ON]PAGAMENTO VIA PIX[BOLD_OFF]');

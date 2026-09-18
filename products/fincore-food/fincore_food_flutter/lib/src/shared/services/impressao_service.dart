@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
+import 'package:fincore_food_flutter/src/cap/printing/drivers/printer_driver.dart';
 
 // ─── Modelo de configurações de impressão ──────────────────────────────────
 
@@ -440,6 +441,7 @@ class _DialogImpressaoWidget extends StatelessWidget {
 
   Future<void> _imprimir(BuildContext ctx) async {
     Navigator.of(ctx).pop();
+    final sw = Stopwatch()..start();
     try {
       final bytes = await FincorePdfGerador.gerarBytes(dados, config);
       await Printing.layoutPdf(
@@ -449,7 +451,21 @@ class _DialogImpressaoWidget extends StatelessWidget {
             ? PdfPageFormat.roll57
             : PdfPageFormat.roll80,
       );
+      sw.stop();
+      PrinterDriver.gravarLog(
+        destinatario: 'Caixa de Impressão Windows (Spooler PDF)',
+        sucesso: true,
+        mensagem: 'Cupom do Pedido #${dados.numeroPedido} enviado para o Spooler',
+        tempoMs: sw.elapsedMilliseconds,
+      );
     } catch (e) {
+      sw.stop();
+      PrinterDriver.gravarLog(
+        destinatario: 'Caixa de Impressão Windows (Spooler PDF)',
+        sucesso: false,
+        mensagem: 'Falha ao enviar Pedido #${dados.numeroPedido}: $e',
+        tempoMs: sw.elapsedMilliseconds,
+      );
       if (ctx.mounted) {
         ScaffoldMessenger.of(ctx).showSnackBar(
           SnackBar(

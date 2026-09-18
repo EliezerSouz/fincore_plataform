@@ -50,6 +50,16 @@ enum PdvState {
   error
 }
 
+/// Resultado da justificativa de pedido retroativo
+class JustificativaRetroativoResult {
+  final String motivo;
+  final bool movimentarEstoque;
+  const JustificativaRetroativoResult({
+    required this.motivo,
+    required this.movimentarEstoque,
+  });
+}
+
 class DadosCliente {
   final String? id;
   final String? nome;
@@ -827,8 +837,8 @@ class PdvExpressController extends ChangeNotifier {
   }
 
   /// Callback injetado pela View para solicitar justificativa de pedido retroativo.
-  /// Recebe a data retroativa e deve retornar o motivo (String) ou null para cancelar.
-  Future<String?> Function(DateTime dataRetroativa)? onPedidoRetroativo;
+  /// Recebe a data retroativa e deve retornar o resultado (JustificativaRetroativoResult) ou null para cancelar.
+  Future<JustificativaRetroativoResult?> Function(DateTime dataRetroativa)? onPedidoRetroativo;
 
   Future<void> confirmPayment() async {
     if (_isPersistingVenda || _state == PdvState.confirming || _state == PdvState.completed) {
@@ -840,16 +850,16 @@ class PdvExpressController extends ChangeNotifier {
     final dataEntrega = _entrega.dataHora;
     final minutosAtraso = agora.difference(dataEntrega).inMinutes;
 
-    // Se a data de entrega está no passado (mais de 1 min de tolerância) E
-    // não é um pedido imediato (mais de 10 min de atraso real)
+    // Se a data de entrega está no passado (mais de 10 min de atraso real)
     if (minutosAtraso > 10 && onPedidoRetroativo != null) {
-      final motivo = await onPedidoRetroativo!(dataEntrega);
-      if (motivo == null || motivo.trim().isEmpty) {
+      final res = await onPedidoRetroativo!(dataEntrega);
+      if (res == null || res.motivo.trim().isEmpty) {
         // Usuário cancelou ou não informou motivo → bloqueia
         return;
       }
-      // Salva justificativa para ser incluída nas observações
-      _motivoRetroativo = motivo.trim();
+      // Salva justificativa e opção de estoque para o pedido
+      _motivoRetroativo = res.motivo.trim();
+      _movimentarEstoqueRetroativo = res.movimentarEstoque;
     }
 
     final isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
@@ -874,6 +884,7 @@ class PdvExpressController extends ChangeNotifier {
   }
 
   String? _motivoRetroativo;
+  bool? _movimentarEstoqueRetroativo;
 
   Future<String?> _resolveFormaPagamentoId(String methodLabel) async {
     try {
@@ -955,23 +966,30 @@ class PdvExpressController extends ChangeNotifier {
 
       final agora = DateTime.now();
       final dataPrevistaLocal = _entrega.dataHora;
+      final minutosDiferenca = dataPrevistaLocal.difference(agora).inMinutes;
 
-      // Um pedido é agendado se a entrega for em outro dia OU se a hora prevista
-      // for pelo menos 10 min no futuro em relação ao momento atual (entrega programada no mesmo dia)
-      final isOutroDia = dataPrevistaLocal.year != agora.year ||
-          dataPrevistaLocal.month != agora.month ||
-          dataPrevistaLocal.day != agora.day;
-      final minutosAteEntrega = dataPrevistaLocal.difference(agora).inMinutes;
-      final isAgendado = isOutroDia ||
-          (_entrega.prioridade == 'Entrega Programada') ||
-          minutosAteEntrega > 10;
+      // Um pedido é retroativo se a data/hora estiver no passado (mais de 10 min de atraso real)
+      final isRetroativo = minutosDiferenca < -10;
+
+      // Um pedido é agendado APENAS se for no futuro (mais de 10 min no futuro OU data futura) e não for retroativo
+      final isFuturo = minutosDiferenca > 10;
+      final isOutroDiaFuturo = (dataPrevistaLocal.year > agora.year) ||
+          (dataPrevistaLocal.year == agora.year && dataPrevistaLocal.month > agora.month) ||
+          (dataPrevistaLocal.year == agora.year && dataPrevistaLocal.month == agora.month && dataPrevistaLocal.day > agora.day);
+      final isAgendado = !isRetroativo && (isFuturo || isOutroDiaFuturo || _entrega.prioridade == 'Entrega Programada');
 
       // Se há justificativa de retroativo, acrescenta às observações
       final obsBase = _entrega.observacoes ?? '';
+      final infoEstoqueRetroativo = isRetroativo
+          ? ((_movimentarEstoqueRetroativo ?? false) ? 'Estoque: Baixado' : 'Estoque: Não movimentado')
+          : '';
       final obsComRetroativo = _motivoRetroativo != null && _motivoRetroativo!.isNotEmpty
-          ? '${obsBase.isNotEmpty ? '$obsBase\n' : ''}[RETROATIVO] Justificativa: $_motivoRetroativo'
+          ? '${obsBase.isNotEmpty ? '$obsBase\n' : ''}[RETROATIVO] Justificativa: $_motivoRetroativo ($infoEstoqueRetroativo)'
           : obsBase;
+
+      final movimentarEstoque = isRetroativo ? (_movimentarEstoqueRetroativo ?? false) : true;
       _motivoRetroativo = null; // Limpa após uso
+      _movimentarEstoqueRetroativo = null;
 
       final pedido = PedidoDraft(
         id: ordemParaEditar?.pedidoId,
@@ -985,8 +1003,8 @@ class PdvExpressController extends ChangeNotifier {
         trocoParaCentavos: _entrega.trocoParaCentavos,
         itens: draftItens,
         operadorId: activeUser,
-        // dataHoraCriacao sempre registra o momento atual da venda
-        dataHoraCriacao: agora,
+        // Se for retroativo, registra a data e hora selecionada pelo usuário; caso contrário, registra o momento atual
+        dataHoraCriacao: isRetroativo ? dataPrevistaLocal : agora,
         observacoes: obsComRetroativo.isEmpty ? null : obsComRetroativo,
       );
 
@@ -1005,6 +1023,7 @@ class PdvExpressController extends ChangeNotifier {
         dataEntregaPrevista: isAgendado ? _entrega.dataHora : null,
         operadorNome: tenantContext.usuario.nome,
         observacao: _entrega.observacoes,
+        movimentarEstoque: movimentarEstoque,
       ));
 
       try {
@@ -1306,6 +1325,7 @@ class PdvExpressController extends ChangeNotifier {
             createdAt: now,
           ));
         }
+        try { DependencyInjection().get<SyncEngine>().processPendingQueue(); } catch (_) {}
       });
 
       // 6. Restaura o carrinho ao estado da venda anterior

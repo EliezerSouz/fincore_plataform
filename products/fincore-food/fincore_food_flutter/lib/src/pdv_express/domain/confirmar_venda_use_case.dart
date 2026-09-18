@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
+import 'package:fincore_core/fincore_core.dart';
 import '../models/pedido_draft.dart';
 
 /// Resultado imutável da confirmação de venda.
@@ -37,6 +38,7 @@ class ConfirmarVendaInput {
   final DateTime? dataEntregaPrevista;
   final String operadorNome;
   final String? observacao;
+  final bool movimentarEstoque;
 
   const ConfirmarVendaInput({
     required this.pedido,
@@ -52,6 +54,7 @@ class ConfirmarVendaInput {
     this.dataEntregaPrevista,
     required this.operadorNome,
     this.observacao,
+    this.movimentarEstoque = true,
   });
 }
 
@@ -76,6 +79,8 @@ class ConfirmarVendaUseCase {
     final activeTenant = _context.tenantId;
     final activeUser = _context.usuario.id;
     final now = DateTime.now().toUtc();
+    final traceId = CorrelationIdGenerator.generateCorrelationId();
+    final processName = input.isEdit ? 'EDICAO_PEDIDO' : 'CRIACAO_PEDIDO';
 
     final ordemPreparoId = input.ordemPreparoIdExistente ?? _uuid.v4();
     final historicoId = _uuid.v4();
@@ -83,6 +88,18 @@ class ConfirmarVendaUseCase {
     final action = input.isEdit ? 'update' : 'create';
     final histTitle = input.isEdit ? 'Pedido editado' : 'Pedido criado';
     String histDesc = input.isEdit ? 'Itens/Valores atualizados no PDV' : 'Pedido enviado para a cozinha';
+
+    await LogService.instance.logOperational(
+      process: processName,
+      step: 'PREPARACAO',
+      action: 'INICIO',
+      message: 'Pedido ID: $pedidoId | Cliente: ${input.clienteNome ?? "Consumidor"} | Itens: ${input.itens.length} | Total: R\$ ${(input.pedido.valorTotalCentavos / 100).toStringAsFixed(2)} | Pagamento: ${input.paymentMethod}',
+      traceId: traceId,
+      entityType: 'pedido',
+      entityId: pedidoId,
+      tenantId: activeTenant,
+      userId: activeUser,
+    );
 
     final kdsItensJson = jsonEncode(input.itens.map((i) => {
       'produtoId': i.produtoId,
@@ -377,37 +394,41 @@ class ConfirmarVendaUseCase {
         }
       }
 
-      for (final item in input.itens) {
-        final produto = await (_db.select(_db.produtosTable)
-              ..where((t) => t.id.equals(item.produtoId)))
-            .getSingleOrNull();
+      if (input.movimentarEstoque) {
+        for (final item in input.itens) {
+          final produto = await (_db.select(_db.produtosTable)
+                ..where((t) => t.id.equals(item.produtoId)))
+              .getSingleOrNull();
 
-        if (produto == null || !produto.controlaEstoque) continue;
+          if (produto == null || !produto.controlaEstoque) continue;
 
-        if (input.isEntregaAgendada) {
-          await _movimentarEstoque(
-            activeTenant: activeTenant,
-            produtoId: item.produtoId,
-            pedidoId: pedidoId,
-            quantidade: item.quantidade.toInt(),
-            tipo: 'reserva',
-            motivo: 'Reserva para entrega — Pedido #${proxNumero.toString().padLeft(4, '0')}',
-            operadorId: activeUser,
-            now: now,
-            isEntradaReserva: true,
-            dataEntregaPrevista: input.dataEntregaPrevista,
-          );
-        } else {
-          await _movimentarEstoque(
-            activeTenant: activeTenant,
-            produtoId: item.produtoId,
-            pedidoId: pedidoId,
-            quantidade: item.quantidade.toInt(),
-            tipo: 'saida',
-            motivo: 'Venda PDV — Pedido #${proxNumero.toString().padLeft(4, '0')}',
-            operadorId: activeUser,
-            now: now,
-          );
+          if (input.isEntregaAgendada) {
+            await _movimentarEstoque(
+              activeTenant: activeTenant,
+              produtoId: item.produtoId,
+              pedidoId: pedidoId,
+              quantidade: item.quantidade.toInt(),
+              tipo: 'reserva',
+              motivo: 'Reserva para entrega — Pedido #${proxNumero.toString().padLeft(4, '0')}',
+              operadorId: activeUser,
+              now: now,
+              dataHoraMovimentacao: input.pedido.dataHoraCriacao.toLocal(),
+              isEntradaReserva: true,
+              dataEntregaPrevista: input.dataEntregaPrevista,
+            );
+          } else {
+            await _movimentarEstoque(
+              activeTenant: activeTenant,
+              produtoId: item.produtoId,
+              pedidoId: pedidoId,
+              quantidade: item.quantidade.toInt(),
+              tipo: 'saida',
+              motivo: 'Venda PDV — Pedido #${proxNumero.toString().padLeft(4, '0')}',
+              operadorId: activeUser,
+              now: now,
+              dataHoraMovimentacao: input.pedido.dataHoraCriacao.toLocal(),
+            );
+          }
         }
       }
 
@@ -420,7 +441,7 @@ class ConfirmarVendaUseCase {
         valorTotalCentavos: input.pedido.valorTotalCentavos,
         formaPagamentoId: input.pedido.formaPagamentoId,
         paymentMethod: input.paymentMethod,
-        now: now,
+        dataHora: input.pedido.dataHoraCriacao.toLocal(),
       );
 
       // ── 8. Outbox — pedido ──────────────────────────────────────────────
@@ -508,9 +529,9 @@ class ConfirmarVendaUseCase {
           'pedidoId': pedidoId,
           'itensJson': kdsItensJson,
           'status': 'pendente',
-          'prioridade': 'normal',
+          'prioridade': input.isEntregaAgendada ? 'programado' : 'normal',
           'operadorId': activeUser,
-          'criadaEm': now.toIso8601String(),
+          'criadaEm': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
           'tempoEstimadoSegundos': 0,
           'observacoes': observacoesKDS,
           'syncVersion': 1,
@@ -533,7 +554,7 @@ class ConfirmarVendaUseCase {
           'titulo': histTitle,
           'descricao': histDesc,
           'operadorNome': input.operadorNome,
-          'criadaEm': now.toIso8601String(),
+          'criadaEm': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
           'versao': 'v1',
           'syncVersion': 1,
           'createdAt': now.toIso8601String(),
@@ -570,7 +591,7 @@ class ConfirmarVendaUseCase {
               'valorCentavos': input.pedido.valorTotalCentavos,
               'descricao': 'Venda PDV #${proxNumero.toString().padLeft(4, '0')}',
               'operadorId': activeUser,
-              'dataHora': now.toIso8601String(),
+              'dataHora': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
               'syncVersion': 1,
               'createdAt': now.toIso8601String(),
               'updatedAt': now.toIso8601String(),
@@ -581,6 +602,19 @@ class ConfirmarVendaUseCase {
         }
       }
     });
+
+    await LogService.instance.logOperational(
+      process: processName,
+      step: 'FINALIZACAO',
+      action: 'RESULTADO',
+      message: 'Pedido #${proxNumero.toString().padLeft(4, '0')} (ID: $pedidoId) registrado com sucesso | Ordem KDS: $ordemPreparoId',
+      traceId: traceId,
+      entityType: 'pedido',
+      entityId: pedidoId,
+      status: LogStatus.success,
+      tenantId: activeTenant,
+      userId: activeUser,
+    );
 
     return ConfirmarVendaResult(
       pedidoId: pedidoId,
@@ -609,7 +643,7 @@ class ConfirmarVendaUseCase {
     required int valorTotalCentavos,
     required String? formaPagamentoId,
     required String paymentMethod,
-    required DateTime now,
+    required DateTime dataHora,
   }) async {
     final sessao = await (_db.select(_db.sessoesCaixaTable)
           ..where((t) =>
@@ -634,11 +668,11 @@ class ConfirmarVendaUseCase {
         valorCentavos: valorTotalCentavos,
         descricao: Value('Venda PDV #${proxNumero.toString().padLeft(4, '0')}'),
         operadorId: Value(activeUser),
-        dataHora: now,
+        dataHora: dataHora,
         syncVersion: const Value(1),
         syncStatus: SyncStatus.pending,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: DateTime.now().toUtc(),
+        updatedAt: DateTime.now().toUtc(),
         createdBy: activeUser,
         updatedBy: activeUser,
       ),
@@ -655,12 +689,14 @@ class ConfirmarVendaUseCase {
     required String motivo,
     required String operadorId,
     required DateTime now,
+    DateTime? dataHoraMovimentacao,
     bool isEntradaFisica = false,
     bool isEntradaReserva = false,
     bool isSaidaFisica = false,
     bool isSaidaReserva = false,
     DateTime? dataEntregaPrevista,
   }) async {
+    final dtMov = dataHoraMovimentacao ?? now;
     var estoque = await (_db.select(_db.estoqueProdutosTable)
           ..where((t) =>
               t.tenantId.equals(activeTenant) &
@@ -740,7 +776,7 @@ class ConfirmarVendaUseCase {
         quantidadeReservadaDepois: Value(qReservadaDepois),
         motivo: Value(motivo),
         operadorId: Value(operadorId),
-        dataHora: now,
+        dataHora: dtMov,
         dataEntregaPrevista: Value(dataEntregaPrevista),
         syncVersion: const Value(1),
         syncStatus: SyncStatus.pending,
@@ -769,7 +805,7 @@ class ConfirmarVendaUseCase {
         'quantidadeReservadaDepois': qReservadaDepois,
         'motivo': motivo,
         'operadorId': operadorId,
-        'dataHora': now.toIso8601String(),
+        'dataHora': dtMov.toUtc().toIso8601String(),
         if (dataEntregaPrevista != null)
           'dataEntregaPrevista': dataEntregaPrevista.toUtc().toIso8601String(),
         'syncVersion': 1,
@@ -812,15 +848,29 @@ class ConfirmarVendaUseCase {
     required String action,
     required Map<String, dynamic> payload,
   }) async {
-    await _db.into(_db.outboxSync).insert(OutboxSyncCompanion.insert(
-      tenantId: activeTenant,
-      entity: entity,
-      entityId: entityId,
-      action: action,
-      payload: jsonEncode(payload),
-      status: 'pending',
-      version: 1,
-      createdAt: DateTime.now().toUtc(),
-    ));
+    try {
+      final outboxService = DependencyInjection().get<OutboxService>();
+      await outboxService.enqueue(
+        entity: entity,
+        entityId: entityId,
+        action: action.toUpperCase(),
+        payload: payload,
+        version: (payload['syncVersion'] as num?)?.toInt() ?? 1,
+      );
+
+      final syncEngine = DependencyInjection().get<SyncEngine>();
+      syncEngine.processPendingQueue();
+    } catch (_) {
+      await _db.into(_db.outboxSync).insert(OutboxSyncCompanion.insert(
+        tenantId: activeTenant,
+        entity: entity,
+        entityId: entityId,
+        action: action,
+        payload: jsonEncode(payload),
+        status: 'pending',
+        version: 1,
+        createdAt: DateTime.now().toUtc(),
+      ));
+    }
   }
 }

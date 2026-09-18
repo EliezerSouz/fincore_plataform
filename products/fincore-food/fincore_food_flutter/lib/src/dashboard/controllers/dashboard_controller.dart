@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
@@ -8,6 +9,7 @@ import '../data/dashboard_repository.dart';
 import '../domain/dashboard_alerts_service.dart';
 import '../../estoque/controllers/estoque_controller.dart';
 import '../../estoque/controllers/planejamento_controller.dart';
+import '../../shared/data/sync/supabase_sync_service.dart';
 
 /// Recomendação operacional automática da IA/regras do sistema
 class RecomendacaoOperacional {
@@ -34,6 +36,7 @@ class DashboardController extends ChangeNotifier {
   late final EstoqueController _estoqueController;
   late final PlanoProducaoController _planoProducaoController;
   late final DashboardAlertsService _alertsService;
+  StreamSubscription<String>? _syncSub;
 
   DashboardMetrics _metrics = DashboardMetrics.zero();
   List<AlertaOperacional> _alertas = [];
@@ -67,6 +70,12 @@ class DashboardController extends ChangeNotifier {
     // Registra listeners para atualizar o dashboard quando os dados de estoque e planos mudarem
     _estoqueController.addListener(_onControllersChanged);
     _planoProducaoController.addListener(_onControllersChanged);
+
+    // Escuta finalização da sincronização em nuvem (pull/push de pedidos e estoque)
+    try {
+      final syncService = DependencyInjection().get<SupabaseSyncService>();
+      _syncSub = syncService.onDataSynced.listen((_) => loadMetrics());
+    } catch (_) {}
 
     loadModulePreferences();
   }
@@ -223,6 +232,7 @@ class DashboardController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _syncSub?.cancel();
     _estoqueController.removeListener(_onControllersChanged);
     _planoProducaoController.removeListener(_onControllersChanged);
     super.dispose();

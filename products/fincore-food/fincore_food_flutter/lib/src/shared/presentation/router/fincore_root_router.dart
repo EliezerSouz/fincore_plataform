@@ -261,14 +261,9 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
                 usuario: usuarioComRole,
               );
 
-          // Iniciar sync engine mesmo offline (vai tentar quando houver rede)
+          // Iniciar auto-sync do SyncEngine (30s)
           final syncEngine = DependencyInjection().get<SyncEngine>();
           syncEngine.startAutoSync(interval: const Duration(seconds: 30));
-          syncEngine.processPendingQueue().catchError((_) =>
-              const SyncResult(
-                  successCount: 0,
-                  failureCount: 0,
-                  hasPendingAfter: true));
 
           if (mounted) {
             setState(() {
@@ -338,7 +333,7 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
         final isFirstSync = lastSyncStr == null || localProdutos.isEmpty || localPedidos.isEmpty;
         final lastSyncAt = isFirstSync
             ? DateTime.fromMillisecondsSinceEpoch(0)
-            : DateTime.parse(lastSyncStr).subtract(const Duration(minutes: 15));
+            : DateTime.parse(lastSyncStr).subtract(const Duration(seconds: 10));
 
         LogService.instance.info(
           LogModule.sync,

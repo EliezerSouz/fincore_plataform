@@ -48,12 +48,7 @@ class MembroEmpresaRepository extends BaseRepository<CoreMembroEmpresa, String> 
     return results.map(_mapToCore).toList();
   }
 
-  @override
-  Future<void> save(CoreMembroEmpresa entity) async {
-    if (entity.tenantId != activeTenantId) {
-      throw StateError('Violação de Tenancy: tenant diferente');
-    }
-    
+  Future<void> saveLocal(CoreMembroEmpresa entity) async {
     final now = DateTime.now().toUtc();
     final updatedMetadata = entity.metadata.copyWith(
       updatedAt: now,
@@ -78,9 +73,19 @@ class MembroEmpresaRepository extends BaseRepository<CoreMembroEmpresa, String> 
             deletedBy: const Value(null),
           ),
         );
+  }
+
+  @override
+  Future<void> save(CoreMembroEmpresa entity) async {
+    if (entity.tenantId != activeTenantId) {
+      throw StateError('Violação de Tenancy: tenant diferente');
+    }
+    
+    await saveLocal(entity);
 
     // Registra a mutação no Outbox
     final outbox = DependencyInjection().get<OutboxService>();
+    final updatedMetadata = entity.metadata;
     await outbox.enqueue(
       entity: 'membros_empresa',
       entityId: entity.id,

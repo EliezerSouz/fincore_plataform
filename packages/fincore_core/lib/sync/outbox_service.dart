@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../common/domain_primitives.dart';
 import '../context/tenant_context.dart';
 import '../database/fincore_database.dart';
+import 'status_precedence.dart';
 
 class OutboxService {
   final FincoreDatabase db;
@@ -57,9 +58,24 @@ class OutboxService {
         }
       } else {
         // UPSERT substitui o payload e versão da transação anterior (coalescing)
+        // Monotonic Status Precedence: Preserva status superior se existir no payload anterior
+        final payloadMap = Map<String, dynamic>.from(payload);
+        if ((entity.toLowerCase().contains('pedido') || entity.toLowerCase().contains('preparo')) && payloadMap.containsKey('status')) {
+          try {
+            final existingPayloadMap = jsonDecode(existing.payload) as Map<String, dynamic>;
+            if (existingPayloadMap.containsKey('status')) {
+              final existingStatus = existingPayloadMap['status'] as String?;
+              final newStatus = payloadMap['status'] as String?;
+              if (StatusPrecedence.isHigherOrEqual(existingStatus, newStatus)) {
+                payloadMap['status'] = existingStatus;
+              }
+            }
+          } catch (_) {}
+        }
+
         final updated = existing.copyWith(
           action: action,
-          payload: jsonEncode(payload),
+          payload: jsonEncode(payloadMap),
           version: version,
           status: SyncStatus.pending.name,
           attemptsCount: 0,

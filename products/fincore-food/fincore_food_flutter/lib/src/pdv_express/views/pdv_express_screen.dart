@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fincore_core/common/kds_models.dart';
 import '../controllers/pdv_express_controller.dart';
 import 'widgets/pix_payment_modal.dart';
@@ -72,9 +73,14 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
   }
 
   /// Diálogo de justificativa para pedidos com data/hora retroativa
-  Future<String?> _solicitarJustificativaRetroativo(DateTime dataRetroativa) async {
+  Future<JustificativaRetroativoResult?> _solicitarJustificativaRetroativo(DateTime dataRetroativa) async {
+    final prefs = await SharedPreferences.getInstance();
+    final defaultMovimentarEstoque = prefs.getBool('pdv_retroativo_movimentar_estoque') ?? false;
+
     final motivoCtrl = TextEditingController();
     String? motivoSelecionado;
+    bool movimentarEstoque = defaultMovimentarEstoque;
+
     final dataStr = '${dataRetroativa.day.toString().padLeft(2,'0')}/'
         '${dataRetroativa.month.toString().padLeft(2,'0')} '
         '${dataRetroativa.hour.toString().padLeft(2,'0')}:'
@@ -88,7 +94,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       'Reprocessamento de pedido cancelado',
     ];
 
-    return showDialog<String>(
+    return showDialog<JustificativaRetroativoResult>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
@@ -207,6 +213,54 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                     ),
                   ),
                 ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.background,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: FincoreColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.inventory_2_outlined, color: FincoreColors.textSecondary, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Movimentar estoque',
+                              style: TextStyle(
+                                color: FincoreColors.textPrimary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              movimentarEstoque
+                                  ? 'Dará baixa nos itens deste pedido'
+                                  : 'Não alterará o saldo atual de estoque',
+                              style: const TextStyle(
+                                color: FincoreColors.textMuted,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: movimentarEstoque,
+                        activeColor: const Color(0xFFF59E0B),
+                        onChanged: (val) {
+                          setDialogState(() {
+                            movimentarEstoque = val;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -229,7 +283,13 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                   );
                   return;
                 }
-                Navigator.pop(ctx, txt);
+                Navigator.pop(
+                  ctx,
+                  JustificativaRetroativoResult(
+                    motivo: txt,
+                    movimentarEstoque: movimentarEstoque,
+                  ),
+                );
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFF59E0B),

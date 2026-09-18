@@ -38,7 +38,7 @@ void main() {
     expect(opContent, contains('Mensagem informativa'));
 
     final syncContent = await syncFile.readAsString();
-    expect(syncContent, contains('[SINCRONISMO'));
+    expect(syncContent, contains('[SINCRONIZACAO'));
     expect(syncContent, contains('Falha catastrófica no sync'));
 
     final errorContent = await errorFile.readAsString();

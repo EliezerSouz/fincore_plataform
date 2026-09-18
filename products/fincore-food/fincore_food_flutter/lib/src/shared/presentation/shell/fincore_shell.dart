@@ -896,7 +896,7 @@ class _FincoreShellState extends State<FincoreShell>
             ),
           ),
           Text(
-            'v1.1.0 (Build 2)',
+            'v1.2.2',
             style: TextStyle(
               color: FincoreColors.textMuted,
               fontSize: 9,
@@ -1044,7 +1044,7 @@ class _FincoreShellState extends State<FincoreShell>
                           ),
                         ),
                         child: Text(
-                          'v1.1.0',
+                          'v1.2.2',
                           style: TextStyle(
                             color: FincoreColors.primary,
                             fontSize: 9,

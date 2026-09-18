@@ -30,9 +30,7 @@ class UsuarioRepository extends BaseRepository<CoreUsuario, String> {
     return rows.map(_mapToDomain).toList();
   }
 
-  @override
-  Future<void> save(CoreUsuario usuario) async {
-    // Grava o avatarUrl contendo o JSON encodado da role e hash da senha
+  Future<void> saveLocal(CoreUsuario usuario) async {
     final entry = UsuariosTableCompanion.insert(
       id: usuario.id,
       tenantId: Value(usuario.tenantId),
@@ -48,6 +46,9 @@ class UsuarioRepository extends BaseRepository<CoreUsuario, String> {
 
     await db.into(db.usuariosTable).insertOnConflictUpdate(entry);
   }
+
+  @override
+  Future<void> save(CoreUsuario usuario) async => saveLocal(usuario);
 
   Future<void> saveWithSync(CoreUsuario usuario) async {
     await save(usuario);

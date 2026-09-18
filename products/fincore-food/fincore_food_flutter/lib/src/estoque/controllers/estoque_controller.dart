@@ -1370,7 +1370,7 @@ class EstoqueController extends ChangeNotifier {
       }
 
       final reservadoMudou = est.quantidadeReservada != reservadoCorreto;
-      final fisicoMudou = !isFromSync && (est.quantidadeAtual != novoFisico);
+      final fisicoMudou = est.quantidadeAtual != novoFisico;
 
       if (reservadoMudou || fisicoMudou) {
         final nextVersion = est.syncVersion + (isFromSync ? 0 : 1);

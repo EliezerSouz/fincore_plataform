@@ -50,13 +50,13 @@ class DatabaseInitializer {
     // 0. Inicializar Serviço de Logs unificado
     // ──────────────────────────────────────────────────────────────
     if (kIsWeb) {
-      LogService.init('');
+      LogService.init('', appVersion: 'v1.2.2');
       await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso (Web).');
     } else if (!isTest) {
       // Pasta LOG criada no mesmo diretório onde o executável (.exe) está rodando
       final exeDir = p.dirname(Platform.resolvedExecutable);
       final logDir = p.join(exeDir, 'LOG');
-      LogService.init(logDir);
+      LogService.init(logDir, appVersion: 'v1.2.2');
       await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso.');
     } else {
       try {
@@ -375,7 +375,7 @@ class DatabaseInitializer {
 
       await FincoreLogger.instance.beginCycle(
         LogModule.startup,
-        'INICIALIZACAO DO SISTEMA FINCORE v1.2.0',
+        'INICIALIZACAO DO SISTEMA FINCORE v1.2.2',
       );
       await LogService.instance.info(LogModule.startup, 'Banco SQLite local inicializado com sucesso (fincore_v3.db)');
       await LogService.instance.info(LogModule.startup, 'Arquitetura local-first ativa (sem Serverpod)');

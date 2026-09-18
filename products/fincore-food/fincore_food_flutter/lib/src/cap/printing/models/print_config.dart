@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Enumeração das vias (destinos) de impressão disponíveis.
 enum PrintVia {
   cliente,
@@ -90,6 +92,42 @@ class PrintConfig {
       // pixCidade foi removida do banco de dados na migração de 14/08/2026.
     }
 
+    String? rawPixKey = config.pixKey;
+    String? parsedPixKey;
+    String? parsedPixTipo;
+    String? parsedPixFavorecido;
+    String? parsedPixBanco;
+
+    if (rawPixKey != null && rawPixKey.trim().isNotEmpty) {
+      final trimmed = rawPixKey.trim();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          final decoded = jsonDecode(trimmed);
+          if (decoded is List && decoded.isNotEmpty) {
+            final principal = decoded.firstWhere(
+              (x) => x is Map<String, dynamic> && (x['isPrincipal'] == true),
+              orElse: () => decoded.first,
+            );
+            if (principal is Map<String, dynamic>) {
+              parsedPixKey = principal['chave']?.toString();
+              parsedPixTipo = principal['tipo']?.toString();
+              parsedPixFavorecido = principal['favorecido']?.toString();
+              parsedPixBanco = principal['banco']?.toString();
+            }
+          } else if (decoded is Map<String, dynamic>) {
+            parsedPixKey = decoded['chave']?.toString();
+            parsedPixTipo = decoded['tipo']?.toString();
+            parsedPixFavorecido = decoded['favorecido']?.toString();
+            parsedPixBanco = decoded['banco']?.toString();
+          }
+        } catch (_) {
+          parsedPixKey = rawPixKey;
+        }
+      } else {
+        parsedPixKey = rawPixKey;
+      }
+    }
+
     String? nomeEmpresaCupom;
     try {
       nomeEmpresaCupom = config.nomeEmpresaCupom;
@@ -137,10 +175,10 @@ class PrintConfig {
       imprimirLogo: config.imprimirLogo,
       imprimirRodape: config.imprimirRodape,
       mensagemRodape: config.mensagemRodape,
-      pixKey: config.pixKey,
-      pixFavorecido: config.pixFavorecido,
-      pixBanco: config.pixBanco,
-      pixTipo: config.pixTipo,
+      pixKey: parsedPixKey ?? config.pixKey,
+      pixFavorecido: parsedPixFavorecido ?? config.pixFavorecido,
+      pixBanco: parsedPixBanco ?? config.pixBanco,
+      pixTipo: parsedPixTipo ?? config.pixTipo ?? 'CPF',
       pixCidade: pCidade,
       nomeEmpresaCupom: nomeEmpresaCupom,
       telefoneEmpresa: telefoneEmpresa,

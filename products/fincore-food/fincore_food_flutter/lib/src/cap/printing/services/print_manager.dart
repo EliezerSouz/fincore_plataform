@@ -54,6 +54,12 @@ class PrintManager {
   }) async {
     final viasParaImprimir = config.viasAutoprint;
     if (viasParaImprimir.isEmpty) {
+      PrinterDriver.gravarLog(
+        destinatario: 'SISTEMA',
+        sucesso: false,
+        mensagem: 'Envio ignorado: Nenhuma via com auto-impressão ativada nas configurações.',
+        tempoMs: 0,
+      );
       return const PrintManagerResult(
         results: {},
         allSuccess: true,
@@ -75,18 +81,22 @@ class PrintManager {
     required PrintConfig config,
   }) async {
     if (!config.isEnabled(via)) {
-      return PrinterResult(
+      final res = PrinterResult(
         success: false,
-        message: 'A via ${via.displayName} está desabilitada nas configurações.',
+        message: 'A via ${via.displayName} está desabilitada nas configurações (vias=0 ou sem impressora).',
       );
+      PrinterDriver.gravarLog(destinatario: via.displayName, sucesso: false, mensagem: res.message, tempoMs: 0);
+      return res;
     }
 
     final printer = config.printer(via);
     if (printer == null || printer.isEmpty) {
-      return const PrinterResult(
+      final res = PrinterResult(
         success: false,
-        message: 'Nenhuma impressora configurada para esta via',
+        message: 'Nenhuma impressora configurada para a via ${via.displayName}',
       );
+      PrinterDriver.gravarLog(destinatario: via.displayName, sucesso: false, mensagem: res.message, tempoMs: 0);
+      return res;
     }
 
     final lines = _templateEngine.render(via: via, data: data, config: config);

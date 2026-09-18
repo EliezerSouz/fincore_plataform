@@ -64,10 +64,14 @@ abstract class SyncableRepository<T> {
   // API pública: sempre usa sync obrigatório
   // ──────────────────────────────────────────────────────────
 
-  Future<T> saveWithSync(T entity) async {
+  Future<T> saveWithSync(T entity, {String? traceId}) async {
+    final effectiveTraceId = traceId ?? CorrelationIdGenerator.generateCorrelationId();
     final id = extractId(entity);
     final oldEntity = await findById(id);
-    final newVersion = extractVersion(entity) + 1;
+    final oldVersion = oldEntity != null ? extractVersion(oldEntity) : 0;
+    final entityVersion = extractVersion(entity);
+    final currentMax = oldVersion > entityVersion ? oldVersion : entityVersion;
+    final newVersion = currentMax + 1;
 
     final isUpdate = oldEntity != null;
     Map<String, dynamic>? diff;
@@ -78,6 +82,9 @@ abstract class SyncableRepository<T> {
       );
     }
 
+    final outboxPayload = toOutboxPayload(entity);
+    outboxPayload['_traceId'] = effectiveTraceId;
+
     await db.transaction(() async {
       // 1. Grava no SQLite local
       await saveLocal(entity);
@@ -87,7 +94,7 @@ abstract class SyncableRepository<T> {
         entity: entityName,
         entityId: extractId(entity),
         action: 'UPSERT',
-        payload: toOutboxPayload(entity),
+        payload: outboxPayload,
         version: newVersion,
       );
 
@@ -117,13 +124,20 @@ abstract class SyncableRepository<T> {
     });
 
     final diffDetails = (isUpdate && diff != null && diff.isNotEmpty)
-        ? ' | Alteracoes: ${jsonEncode(diff)}'
-        : '';
+        ? 'Alterações: ${jsonEncode(diff)}'
+        : null;
 
-    LogService.instance.info(
-      LogModule.database,
-      'MUTACAO [${isUpdate ? "UPDATE" : "CREATE"}] Entidade [$entityName] ID: $id (v$newVersion)$diffDetails',
+    await LogService.instance.logDatabase(
+      step: 'MUTACAO_LOCAL',
+      action: isUpdate ? 'UPDATE' : 'CREATE',
+      entity: entityName,
+      id: id,
+      version: newVersion,
+      oldVersion: oldVersion > 0 ? oldVersion : null,
+      traceId: effectiveTraceId,
+      details: diffDetails,
       tenantId: context.hasContext ? context.tenantId : null,
+      status: LogStatus.success,
     );
 
     // 3. Tenta push imediato (fire-and-forget — não bloqueia a UI)
@@ -133,9 +147,12 @@ abstract class SyncableRepository<T> {
   }
 
   /// Deleta localmente e enfileira no outbox em uma única transação atômica.
-  Future<void> deleteWithSync(String id) async {
+  Future<void> deleteWithSync(String id, {String? traceId}) async {
+    final effectiveTraceId = traceId ?? CorrelationIdGenerator.generateCorrelationId();
     final entity = await findById(id);
     if (entity == null) return;
+    final oldVersion = extractVersion(entity);
+    final newVersion = oldVersion + 1;
 
     await db.transaction(() async {
       // 1. Soft delete local
@@ -146,8 +163,12 @@ abstract class SyncableRepository<T> {
         entity: entityName,
         entityId: id,
         action: 'DELETE',
-        payload: {'id': id, 'tenantId': context.tenantId},
-        version: extractVersion(entity) + 1,
+        payload: {
+          'id': id,
+          'tenantId': context.tenantId,
+          '_traceId': effectiveTraceId,
+        },
+        version: newVersion,
       );
 
       // 3. Registra Auditoria de DELETE
@@ -158,7 +179,7 @@ abstract class SyncableRepository<T> {
           entityId: id,
           userId: context.hasContext ? context.usuario.id : 'system',
           action: 'DELETE',
-          syncVersion: extractVersion(entity) + 1,
+          syncVersion: newVersion,
           deviceInfo: 'App',
           origin: 'Mobile/PDV',
         );
@@ -167,10 +188,17 @@ abstract class SyncableRepository<T> {
       }
     });
 
-    LogService.instance.info(
-      LogModule.database,
-      'Entidade [$entityName] id=$id removida localmente (soft delete)',
-      tenantId: context.tenantId,
+    await LogService.instance.logDatabase(
+      step: 'MUTACAO_LOCAL',
+      action: 'DELETE',
+      entity: entityName,
+      id: id,
+      version: newVersion,
+      oldVersion: oldVersion > 0 ? oldVersion : null,
+      traceId: effectiveTraceId,
+      details: 'Exclusão lógica (soft delete)',
+      tenantId: context.hasContext ? context.tenantId : null,
+      status: LogStatus.success,
     );
 
     _triggerPush();

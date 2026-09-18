@@ -33,6 +33,7 @@ export 'sync/outbox_service.dart';
 export 'sync/sync_engine.dart';
 export 'sync/syncable_repository.dart';
 export 'sync/conflict_resolver.dart';
+export 'sync/status_precedence.dart';
 export 'audit/audit_service.dart';
 export 'src/logging/log_service.dart';
 

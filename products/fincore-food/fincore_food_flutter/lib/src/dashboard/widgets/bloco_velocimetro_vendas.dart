@@ -163,8 +163,21 @@ class _BlocoVelocimetroVendasState extends State<BlocoVelocimetroVendas>
                   ),
                   if (m.metaDiariaCentavos > 0) ...[
                     const SizedBox(height: 8),
-                    Text('Meta: ${FincoreMoneyFormatter.format(m.metaDiariaCentavos)}',
-                        style: const TextStyle(color: FincoreColors.textMuted, fontSize: 11)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('Meta: ${FincoreMoneyFormatter.format(m.metaDiariaCentavos)}',
+                            style: const TextStyle(color: FincoreColors.textMuted, fontSize: 11)),
+                        const SizedBox(width: 4),
+                        InkWell(
+                          onTap: () => _definirMetaModal(context),
+                          child: Padding(
+                            padding: const EdgeInsets.all(2.0),
+                            child: Icon(Icons.edit_outlined, size: 12, color: FincoreColors.primary),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 4),
                     LinearProgressIndicator(
                       value: m.progressoMeta.clamp(0.0, 1.0),

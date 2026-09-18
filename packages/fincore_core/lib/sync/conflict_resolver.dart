@@ -58,10 +58,13 @@ class ConflictResolver {
 
     // ── 1. REGRA SUPREMA: Outbox Pendente ────────────────────────────────
     if (hasOutboxPending) {
-      LogService.instance.info(
-        LogModule.sync,
-        '[CONFLICT_RESOLVER] 🛡️ REJEITADO POR OUTBOX PENDENTE\n'
-        '  Entidade: $entityName\n'
+      LogService.instance.logSync(
+        step: 'CONFLITO',
+        action: 'BLOQUEADO',
+        entity: entityName,
+        id: shortId,
+        status: LogStatus.skipped,
+        message: '[CONFLICT_RESOLVER] 🛡️ REJEITADO POR OUTBOX PENDENTE\n'
         '  ID: $shortId\n'
         '  Versão Servidor: v$serverVersion vs Versão Local: v${localVersion ?? 1}\n'
         '  Motivo: Existe mutação pendente de envio no Outbox local.\n'
@@ -82,10 +85,13 @@ class ConflictResolver {
         // Para Pedidos/Financeiro: Se o registro já existe localmente e a versão local é diferente,
         // exige intervenção ou fusão explícita.
         if (localVersion != null && localVersion != serverVersion) {
-          LogService.instance.warning(
-            LogModule.sync,
-            '[CONFLICT_RESOLVER] ⚠️ CONFLITO EM ENTIDADE CRÍTICA REJEITADO\n'
-            '  Entidade: $entityName\n'
+          LogService.instance.logSync(
+            step: 'CONFLITO',
+            action: 'BLOQUEADO',
+            entity: entityName,
+            id: shortId,
+            status: LogStatus.failed,
+            message: '[CONFLICT_RESOLVER] ⚠️ CONFLITO EM ENTIDADE CRÍTICA REJEITADO\n'
             '  ID: $shortId\n'
             '  Versão Servidor: v$serverVersion vs Versão Local: v$localVersion\n'
             '  Estratégia: rejectAndLock (Documento crítico não pode ser sobrescrito automaticamente)\n'
@@ -101,10 +107,13 @@ class ConflictResolver {
 
       case ConflictStrategy.lww:
         if (localVersion != null && serverVersion < localVersion) {
-          LogService.instance.info(
-            LogModule.sync,
-            '[CONFLICT_RESOLVER] ⏭️ REJEITADO POR VERSÃO OBSOLETA (LWW)\n'
-            '  Entidade: $entityName\n'
+          LogService.instance.logSync(
+            step: 'CONFLITO',
+            action: 'REJEITADO',
+            entity: entityName,
+            id: shortId,
+            status: LogStatus.skipped,
+            message: '[CONFLICT_RESOLVER] ⏭️ REJEITADO POR VERSÃO OBSOLETA (LWW)\n'
             '  ID: $shortId\n'
             '  Versão Servidor: v$serverVersion < Versão Local: v$localVersion\n'
             '  Decisão: Dado do servidor ignorado por ser mais antigo.',
