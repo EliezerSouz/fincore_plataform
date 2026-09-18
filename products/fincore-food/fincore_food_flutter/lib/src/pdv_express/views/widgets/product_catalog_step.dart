@@ -120,6 +120,7 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
         'id': p.id,
         'sku': p.codigo ?? (p.id.length > 5 ? p.id.substring(0, 5) : p.id),
         'name': p.nome,
+        'description': p.descricao ?? '',
         'price': basePrice,
         'category': category.nome,
         'image': p.imagem,
@@ -225,30 +226,75 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
         ),
         const SizedBox(height: 12),
 
-        // Filtro por Categoria (Chips horizontais)
+        // Filtro por Categoria (Dropdown + Chips horizontais)
         if (!_isLoading)
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: _categories.map((cat) {
-                final isSelected = _selectedCategory == cat;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    selected: isSelected,
-                    label: Text(cat),
-                    onSelected: (selected) {
-                      if (selected) {
+          Row(
+            children: [
+              // Dropdown Selecionar Categoria (Ideal para mais de 10 categorias)
+              Container(
+                height: 38,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E24),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: FincoreColors.border),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _categories.contains(_selectedCategory) ? _selectedCategory : 'Todos',
+                    dropdownColor: const Color(0xFF1E1E24),
+                    icon: Icon(Icons.arrow_drop_down, color: FincoreColors.primary),
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    onChanged: (val) {
+                      if (val != null) {
                         setState(() {
-                          _selectedCategory = cat;
+                          _selectedCategory = val;
                           _applyFilters(widget.searchController.text);
                         });
                       }
                     },
+                    items: _categories.map((cat) {
+                      return DropdownMenuItem<String>(
+                        value: cat,
+                        child: Text(cat == 'Todos' ? '📂 Todas Categorias' : '🏷️ $cat'),
+                      );
+                    }).toList(),
                   ),
-                );
-              }).toList(),
-            ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Chips Horizontais para seleção rápida
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _categories.map((cat) {
+                      final isSelected = _selectedCategory == cat;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          selected: isSelected,
+                          label: Text(cat),
+                          selectedColor: FincoreColors.primary,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : Colors.white,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() {
+                                _selectedCategory = cat;
+                                _applyFilters(widget.searchController.text);
+                              });
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
           ),
         const SizedBox(height: 16),
 
@@ -264,117 +310,194 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
                         maxCrossAxisExtent: 220,
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
-                        childAspectRatio: 0.85,
+                        childAspectRatio: 0.82,
                       ),
                       itemBuilder: (context, index) {
                         final product = _filteredProducts[index];
+                        final name = product['name'].toString();
+                        final desc = product['description'].toString();
+                        final sku = product['sku'].toString();
+                        final category = product['category'].toString();
                         final priceStr = product['price'] > 0
                             ? 'R\$ ${((product['price'] as int) / 100).toStringAsFixed(2)}'
                             : 'R\$ 0,00';
 
-                        return Container(
+                        final tooltipMsg = [
+                          name,
+                          if (desc.isNotEmpty) 'Descrição: $desc',
+                          'SKU: $sku | Categoria: $category',
+                          'Preço: $priceStr',
+                        ].join('\n');
+
+                        return Tooltip(
+                          message: tooltipMsg,
+                          padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: FincoreColors.surface,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: FincoreColors.border),
+                            color: const Color(0xFF1E1E28),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: FincoreColors.primary, width: 1.5),
                           ),
-                          child: InkWell(
-                            onTap: () => _abrirDialogQuantidade(context, product),
-                            onLongPress: () {
-                              widget.controller.addItem(
-                                product['id'].toString(),
-                                product['name'].toString(),
-                                product['price'] as int,
-                                1.0,
-                              );
-                            },
-                            borderRadius: BorderRadius.circular(14),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Container Imagem Real do Produto / Fallback
-                                  Expanded(
-                                    child: Builder(
-                                      builder: (context) {
-                                        final imgUrl = product['image'] as String?;
-                                        final hasImg = imgUrl != null && imgUrl.trim().isNotEmpty;
-                                        return Container(
-                                          width: double.infinity,
-                                          clipBehavior: Clip.antiAlias,
-                                          decoration: BoxDecoration(
-                                            color: FincoreColors.background,
-                                            borderRadius: BorderRadius.circular(10),
-                                          ),
-                                          child: hasImg
-                                              ? Image.network(
-                                                  imgUrl,
-                                                  fit: BoxFit.cover,
-                                                  errorBuilder: (ctx, err, stack) => const Center(
-                                                    child: Icon(
-                                                      Icons.fastfood_outlined,
-                                                      color: FincoreColors.textMuted,
-                                                      size: 32,
-                                                    ),
-                                                  ),
-                                                )
-                                              : const Center(
-                                                  child: Icon(
-                                                    Icons.fastfood_outlined,
-                                                    color: FincoreColors.textMuted,
-                                                    size: 32,
-                                                  ),
+                          textStyle: const TextStyle(color: Colors.white, fontSize: 12, height: 1.4),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: FincoreColors.surface,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: FincoreColors.border),
+                            ),
+                            child: InkWell(
+                              onTap: () => _abrirDialogQuantidade(context, product),
+                              onLongPress: () {
+                                widget.controller.addItem(
+                                  product['id'].toString(),
+                                  product['name'].toString(),
+                                  product['price'] as int,
+                                  1.0,
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(14),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Container Imagem Real do Produto / Fallback + Botão de Info
+                                    Expanded(
+                                      child: Stack(
+                                        children: [
+                                          Builder(
+                                            builder: (context) {
+                                              final imgUrl = product['image'] as String?;
+                                              final hasImg = imgUrl != null && imgUrl.trim().isNotEmpty;
+                                              return Container(
+                                                width: double.infinity,
+                                                clipBehavior: Clip.antiAlias,
+                                                decoration: BoxDecoration(
+                                                  color: FincoreColors.background,
+                                                  borderRadius: BorderRadius.circular(10),
                                                 ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  // Nome do Produto
-                                  Text(
-                                    product['name'].toString(),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: FincoreColors.textPrimary,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  // Preço e Botão Adicionar +
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        priceStr,
-                                        style: const TextStyle(
-                                          color: FincoreColors.textPrimary,
-                                          fontSize: 13.5,
-                                          fontWeight: FontWeight.w900,
-                                        ),
+                                                child: hasImg
+                                                    ? Image.network(
+                                                        imgUrl,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder: (ctx, err, stack) => const Center(
+                                                          child: Icon(
+                                                            Icons.fastfood_outlined,
+                                                            color: FincoreColors.textMuted,
+                                                            size: 32,
+                                                          ),
+                                                        ),
+                                                      )
+                                                    : const Center(
+                                                        child: Icon(
+                                                          Icons.fastfood_outlined,
+                                                          color: FincoreColors.textMuted,
+                                                          size: 32,
+                                                        ),
+                                                      ),
+                                              );
+                                            },
+                                          ),
+                                          // Badge de Info com Modal de Detalhes
+                                          if (desc.isNotEmpty)
+                                            Positioned(
+                                              top: 4,
+                                              right: 4,
+                                              child: GestureDetector(
+                                                onTap: () {
+                                                  showDialog(
+                                                    context: context,
+                                                    builder: (ctx) => AlertDialog(
+                                                      backgroundColor: const Color(0xFF1E1E24),
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius: BorderRadius.circular(12),
+                                                        side: const BorderSide(color: FincoreColors.border),
+                                                      ),
+                                                      title: Text(
+                                                        name,
+                                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                                      ),
+                                                      content: Column(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Text('SKU: $sku | Categoria: $category',
+                                                              style: TextStyle(color: FincoreColors.textMuted, fontSize: 12)),
+                                                          const SizedBox(height: 10),
+                                                          Text(desc, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4)),
+                                                          const SizedBox(height: 14),
+                                                          Text('Preço Base: $priceStr',
+                                                              style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold, fontSize: 14)),
+                                                        ],
+                                                      ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () => Navigator.pop(ctx),
+                                                          child: Text('OK', style: TextStyle(color: FincoreColors.primary)),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                },
+                                                child: Container(
+                                                  padding: const EdgeInsets.all(4),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.black.withValues(alpha: 0.6),
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                  child: Icon(Icons.info_outline, size: 16, color: FincoreColors.primary),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
-                                      Container(
-                                        width: 28,
-                                        height: 28,
-                                        decoration: BoxDecoration(
-                                          color: FincoreColors.primary.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(6),
-                                          border: Border.all(
+                                    ),
+                                    const SizedBox(height: 10),
+                                    // Nome do Produto (até 2 linhas com Tooltip ao passar o mouse)
+                                    Text(
+                                      name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: FincoreColors.textPrimary,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.bold,
+                                        height: 1.2,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    // Preço e Botão Adicionar +
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          priceStr,
+                                          style: TextStyle(
                                             color: FincoreColors.primary,
-                                            width: 1.2,
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w900,
                                           ),
                                         ),
-                                        child: Icon(
-                                          Icons.add,
-                                          color: FincoreColors.primary,
-                                          size: 18,
+                                        Container(
+                                          width: 28,
+                                          height: 28,
+                                          decoration: BoxDecoration(
+                                            color: FincoreColors.primary.withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: FincoreColors.primary,
+                                              width: 1.2,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.add,
+                                            color: FincoreColors.primary,
+                                            size: 18,
+                                          ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),

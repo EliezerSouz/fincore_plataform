@@ -10,6 +10,7 @@ import 'widgets/customer_step.dart';
 import 'widgets/product_catalog_step.dart';
 import 'widgets/payment_step.dart';
 import 'widgets/order_summary_panel.dart';
+import 'widgets/confirmacao_agendamento_modal.dart';
 import 'comprovante_pedido_page.dart';
 
 class PdvExpressScreen extends StatefulWidget {
@@ -423,7 +424,15 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     else if (key == LogicalKeyboardKey.f2) {
       _flashKeyLabel('F2');
       _controller.setPassoAtual(1);
-      _searchFocusNode.requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_searchFocusNode.canRequestFocus) {
+          _searchFocusNode.requestFocus();
+          _searchController.selection = TextSelection(
+            baseOffset: 0,
+            extentOffset: _searchController.text.length,
+          );
+        }
+      });
     }
     // F3 — Ir para Pagamento
     else if (key == LogicalKeyboardKey.f3) {
@@ -449,7 +458,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     else if (key == LogicalKeyboardKey.f12) {
       _flashKeyLabel('F12');
       if (_controller.passoAtual == 2 || _controller.state == PdvState.selectingPayment) {
-        _controller.confirmPayment();
+        _processarFinalizacaoVenda();
       } else if (!_controller.podeAvancar()) {
         _triggerShake();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -497,12 +506,21 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     }
   }
 
+  Future<void> _processarFinalizacaoVenda() async {
+    final ok = await ConfirmacaoAgendamentoModal.show(context, _controller);
+    if (ok == true) {
+      await _controller.confirmPayment();
+    } else if (ok == false) {
+      _controller.setPassoAtual(0);
+    }
+  }
+
   void _avancarPasso() {
     if (_controller.podeAvancar()) {
       if (_controller.passoAtual < 2) {
         _controller.setPassoAtual(_controller.passoAtual + 1);
       } else {
-        _controller.confirmPayment();
+        _processarFinalizacaoVenda();
       }
     } else {
       _triggerShake();

@@ -393,15 +393,10 @@ class PdvExpressController extends ChangeNotifier {
       if (configs.isNotEmpty) {
         _empresaConfig = configs.first;
 
-        // HC-001: Cidade lida do endereço estruturado da empresa (empresa.cidade)
-        final cidadeEmpresa = tenantContext.hasContext ? (tenantContext.empresa.cidade ?? '') : '';
-
         if (_empresaConfig!.atendimentoPadrao == 'Mesa/Balcão') {
-          _entrega = _entrega.copyWith(tipo: 'Retirada', taxaEntregaCentavos: 0, cidade: cidadeEmpresa);
+          _entrega = _entrega.copyWith(tipo: 'Retirada', taxaEntregaCentavos: 0);
         } else if (_empresaConfig!.atendimentoPadrao == 'Delivery') {
-          _entrega = _entrega.copyWith(tipo: 'Entrega', cidade: cidadeEmpresa);
-        } else {
-          _entrega = _entrega.copyWith(cidade: cidadeEmpresa);
+          _entrega = _entrega.copyWith(tipo: 'Entrega');
         }
       }
 

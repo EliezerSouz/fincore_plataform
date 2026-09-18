@@ -349,12 +349,15 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
               Autocomplete<Cliente>(
                 initialValue: TextEditingValue(text: _nameCtrl.text),
                 optionsBuilder: (TextEditingValue textEditingValue) {
+                  final sorted = List<Cliente>.from(widget.controller.clientes)
+                    ..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
                   if (textEditingValue.text.isEmpty) {
-                    return const Iterable<Cliente>.empty();
+                    return sorted.take(15);
                   }
-                  return widget.controller.clientes.where((c) {
-                    return c.nome.toLowerCase().contains(textEditingValue.text.toLowerCase()) ||
-                           c.telefone.contains(textEditingValue.text);
+                  final query = textEditingValue.text.toLowerCase();
+                  return sorted.where((c) {
+                    return c.nome.toLowerCase().contains(query) ||
+                           c.telefone.contains(query);
                   });
                 },
                 displayStringForOption: (Cliente c) => c.nome,

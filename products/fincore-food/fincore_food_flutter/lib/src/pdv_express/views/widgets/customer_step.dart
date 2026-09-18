@@ -73,7 +73,7 @@ class _CustomerStepState extends State<CustomerStep> {
     _numeroCtrl.text = entrega.numero;
     _bairroCtrl.text = entrega.bairro;
     _referenciaCtrl.text = entrega.referencia;
-    _cidadeCtrl.text = entrega.cidade.isNotEmpty ? entrega.cidade : 'São Paulo';
+    _cidadeCtrl.text = entrega.cidade;
     _cepCtrl.text = entrega.cep;
     _taxaCtrl.text = entrega.taxaEntregaCentavos > 0
         ? (entrega.taxaEntregaCentavos / 100).toStringAsFixed(2)
@@ -682,7 +682,7 @@ class _CustomerStepState extends State<CustomerStep> {
       _numeroCtrl.text = loc.numero;
       _bairroCtrl.text = loc.bairro;
       _referenciaCtrl.text = loc.referencia;
-      _cidadeCtrl.text = loc.cidade.isNotEmpty ? loc.cidade : 'São Paulo';
+      _cidadeCtrl.text = loc.cidade;
       _cepCtrl.text = loc.cep;
       _taxaCtrl.text = '0,00'; // Valor provisório até buscar a taxa
     });
@@ -747,7 +747,7 @@ class _CustomerStepState extends State<CustomerStep> {
       _numeroCtrl.clear();
       _bairroCtrl.clear();
       _referenciaCtrl.clear();
-      _cidadeCtrl.text = 'São Paulo';
+      _cidadeCtrl.clear();
       _cepCtrl.clear();
       _taxaCtrl.text = '0,00';
       _tempoDeslocamentoMinutos = null;
@@ -768,7 +768,7 @@ class _CustomerStepState extends State<CustomerStep> {
         numero: '',
         bairro: '',
         referencia: '',
-        cidade: 'São Paulo',
+        cidade: '',
         cep: '',
         taxaEntregaCentavos: 0,
         distanciaMetros: null,
@@ -814,11 +814,13 @@ class _CustomerStepState extends State<CustomerStep> {
                       Expanded(
                         child: Autocomplete<Cliente>(
                           optionsBuilder: (TextEditingValue textEditingValue) {
+                            final sorted = List<Cliente>.from(widget.controller.clientes)
+                              ..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
                             if (textEditingValue.text.isEmpty) {
-                              return widget.controller.clientes.take(10);
+                              return sorted.take(15);
                             }
                             final query = textEditingValue.text.toLowerCase();
-                            return widget.controller.clientes.where((c) {
+                            return sorted.where((c) {
                               return c.nome.toLowerCase().contains(query) ||
                                   c.telefone.contains(query);
                             });

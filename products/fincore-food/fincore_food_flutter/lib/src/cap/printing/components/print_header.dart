@@ -38,7 +38,7 @@ class PrintHeader {
     }
     
     lines.add('[CENTER][BOLD_ON]${tipoLogistica.toUpperCase()}[BOLD_OFF]');
-    lines.add('[CENTER][BOLD_ON]AGENDADO PARA: ${PrintDate.format(dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
+    lines.add('[CENTER][BOLD_ON]${PrintDate.format(dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     lines.add('[CENTER][BOLD_ON]PEDIDO #$idExibicao[BOLD_OFF]');
     lines.add(divSingle);
 

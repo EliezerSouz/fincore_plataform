@@ -228,7 +228,7 @@ class PrintTemplateEngine {
     // Info do pedido
     final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
     lines.add('[BOLD_ON]PEDIDO: #$idExibicao[BOLD_OFF]');
-    lines.add('[BOLD_ON]AGENDADO PARA: ${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
+    lines.add('[BOLD_ON]${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     lines.add('TIPO: ${data.tipoLogistica}');
     if ((data.clienteNome ?? '').isNotEmpty) {
       lines.add('CLIENTE: ${data.clienteNome!}');
@@ -306,7 +306,7 @@ class PrintTemplateEngine {
 
     final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
     lines.add('PEDIDO: #$idExibicao');
-    lines.add('[BOLD_ON]AGENDADO PARA: ${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
+    lines.add('[BOLD_ON]${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     if ((data.clienteNome ?? '').isNotEmpty) {
       lines.add('CLIENTE: ${data.clienteNome!}');
     }
