@@ -49,6 +49,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
   final _mensagemFechadoCtrl = TextEditingController(text: 'Estamos fora do horário de atendimento. Faça seu pedido agendado!');
   bool _isSavingHorarios = false;
   String _horariosSaveMessage = '';
+  List<Map<String, dynamic>> _bloqueiosAgendamento = [];
 
   final Map<String, ({bool ativo, String abertura, String fechamento, String nome})> _diasSemana = {
     'dom': (ativo: true, abertura: '08:00', fechamento: '22:00', nome: 'Domingo'),
@@ -372,6 +373,13 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
       if (data.containsKey('mensagemFechado')) {
         _mensagemFechadoCtrl.text = data['mensagemFechado'] as String? ?? '';
       }
+      if (data.containsKey('bloqueios') && data['bloqueios'] is List) {
+        _bloqueiosAgendamento = (data['bloqueios'] as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      } else {
+        _bloqueiosAgendamento = [];
+      }
       if (data.containsKey('dias') && data['dias'] is Map) {
         final diasMap = data['dias'] as Map<String, dynamic>;
         for (final k in _diasSemana.keys) {
@@ -414,6 +422,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
         'prazoMinimoMinutos': prazoMin,
         'mensagemFechado': _mensagemFechadoCtrl.text.trim(),
         'dias': diasJson,
+        'bloqueios': _bloqueiosAgendamento,
       };
       final jsonStr = jsonEncode(payload);
 
@@ -1334,9 +1343,37 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
             ),
           ),
 
+          const SizedBox(height: 20),
+
+          // ─── 4. Bloqueio de Datas e Horários Específicos (Compromissos / Feriados) ───
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const FincoreFieldLabel(label: 'Bloqueio de Datas e Horários Específicos:'),
+              OutlinedButton.icon(
+                onPressed: _abrirModalAdicionarBloqueio,
+                icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                label: const Text('Bloquear Data / Horário', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: FincoreColors.primary,
+                  side: const BorderSide(color: FincoreColors.primary),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '💡 Bloqueie datas ou horários específicos em que você terá compromissos ou folgas e não aceitará pedidos agendados.',
+            style: TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
+          ),
+          const SizedBox(height: 10),
+
+          _buildBloqueiosList(),
+
           const SizedBox(height: 18),
 
-          // ─── 4. Mensagem Quando Fechado ───
+          // ─── 5. Mensagem Quando Fechado ───
           const FincoreFieldLabel(label: 'Mensagem exibida ao cliente quando a loja estiver fechada:'),
           const SizedBox(height: 6),
           FincoreTextField(
@@ -1449,6 +1486,275 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
             if (v != null) onChanged(v);
           },
         ),
+      ),
+    );
+  }
+
+  String _formatDataBr(String dataIso) {
+    if (dataIso.isEmpty) return '';
+    try {
+      final parts = dataIso.split('-');
+      if (parts.length == 3) {
+        return '${parts[2]}/${parts[1]}/${parts[0]}';
+      }
+    } catch (_) {}
+    return dataIso;
+  }
+
+  Widget _buildBloqueiosList() {
+    if (_bloqueiosAgendamento.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: FincoreColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: FincoreColors.border),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.event_available_rounded, color: Color(0xFF16A34A), size: 20),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Nenhum dia ou horário bloqueado. Agendamentos permitidos normalmente conforme a grade semanal.',
+                style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: FincoreColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: FincoreColors.border),
+      ),
+      child: Column(
+        children: _bloqueiosAgendamento.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final b = entry.value;
+          final isLast = idx == _bloqueiosAgendamento.length - 1;
+          final dataBr = _formatDataBr(b['data']?.toString() ?? '');
+          final diaTodo = b['diaTodo'] as bool? ?? true;
+          final inicio = b['inicio']?.toString() ?? '08:00';
+          final fim = b['fim']?.toString() ?? '18:00';
+          final motivo = b['motivo']?.toString() ?? 'Bloqueio de agendamento';
+
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              border: isLast ? null : const Border(bottom: BorderSide(color: FincoreColors.border)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.danger.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.event_busy_rounded, color: FincoreColors.danger, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            dataBr,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: FincoreColors.textPrimary),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: diaTodo ? FincoreColors.danger.withValues(alpha: 0.15) : FincoreColors.primary.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              diaTodo ? 'O Dia Inteiro' : 'Das $inicio às $fim',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: diaTodo ? FincoreColors.danger : FincoreColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (motivo.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          motivo,
+                          style: const TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remover este bloqueio',
+                  icon: const Icon(Icons.delete_outline_rounded, color: FincoreColors.danger, size: 18),
+                  onPressed: () {
+                    setState(() {
+                      _bloqueiosAgendamento.removeAt(idx);
+                    });
+                  },
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Future<void> _abrirModalAdicionarBloqueio() async {
+    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
+    bool diaTodo = true;
+    String horaInicio = '08:00';
+    String horaFim = '18:00';
+    final motivoCtrl = TextEditingController(text: 'Compromisso pessoal');
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          final dataFormatada = '${selectedDate.day.toString().padLeft(2, '0')}/${selectedDate.month.toString().padLeft(2, '0')}/${selectedDate.year}';
+          return AlertDialog(
+            backgroundColor: FincoreColors.surfaceElevated,
+            title: const Row(
+              children: [
+                Icon(Icons.event_busy_rounded, color: FincoreColors.danger, size: 22),
+                SizedBox(width: 10),
+                Text('Bloquear Data / Horário', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: SizedBox(
+              width: 440,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const FincoreFieldLabel(label: 'Data do Bloqueio:'),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                        );
+                        if (picked != null) {
+                          setDialogState(() => selectedDate = picked);
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: FincoreColors.background,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: FincoreColors.border),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.calendar_month_rounded, color: FincoreColors.primary, size: 18),
+                            const SizedBox(width: 10),
+                            Text(
+                              dataFormatada,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: FincoreColors.textPrimary),
+                            ),
+                            const Spacer(),
+                            const Text('Alterar data', style: TextStyle(fontSize: 11.5, color: FincoreColors.primary)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Switch.adaptive(
+                          value: diaTodo,
+                          activeColor: FincoreColors.danger,
+                          onChanged: (v) => setDialogState(() => diaTodo = v),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Bloquear o dia inteiro',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: diaTodo ? FontWeight.bold : FontWeight.normal,
+                            color: FincoreColors.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!diaTodo) ...[
+                      const SizedBox(height: 12),
+                      const FincoreFieldLabel(label: 'Faixa de Horário Bloqueada:'),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Text('Das', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
+                          const SizedBox(width: 8),
+                          _buildTimeDropdown(
+                            currentVal: horaInicio,
+                            onChanged: (v) => setDialogState(() => horaInicio = v),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text('às', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
+                          const SizedBox(width: 8),
+                          _buildTimeDropdown(
+                            currentVal: horaFim,
+                            onChanged: (v) => setDialogState(() => horaFim = v),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    const FincoreFieldLabel(label: 'Motivo / Observação (Exibido se o cliente tentar agendar):'),
+                    const SizedBox(height: 6),
+                    FincoreTextField(
+                      controller: motivoCtrl,
+                      hintText: 'Ex: Compromisso particular, Evento externo, Feriado',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: FincoreColors.primary),
+                onPressed: () {
+                  final isoDate = '${selectedDate.year.toString().padLeft(4, '0')}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}';
+                  setState(() {
+                    _bloqueiosAgendamento.add({
+                      'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                      'data': isoDate,
+                      'diaTodo': diaTodo,
+                      'inicio': horaInicio,
+                      'fim': horaFim,
+                      'motivo': motivoCtrl.text.trim(),
+                    });
+                  });
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text('Adicionar Bloqueio'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

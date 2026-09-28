@@ -210,7 +210,42 @@ function validateOrderSchedule(data, hora) {
     return { valid: false, message: h.mensagemFechado || 'A loja está fechada no momento para novos pedidos.' };
   }
 
-  // 2. Validar Prazo Mínimo de Antecedência (em minutos)
+  // 2. Validar Bloqueios Específicos de Agendamento (Feriados / Compromissos / Datas Bloqueadas)
+  if (Array.isArray(h.bloqueios) && h.bloqueios.length > 0) {
+    const selectedDateStr = data; // 'YYYY-MM-DD'
+    for (const b of h.bloqueios) {
+      if (!b || !b.data) continue;
+      if (b.data === selectedDateStr) {
+        const parts = b.data.split('-');
+        const dataFmt = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : b.data;
+        const motivo = b.motivo ? ` (Motivo: ${b.motivo})` : '';
+
+        const isDiaTodo = b.diaTodo === true || b.dia_todo === true || (!b.inicio && !b.fim);
+        if (isDiaTodo) {
+          return {
+            valid: false,
+            message: `Não estamos aceitando agendamentos para o dia ${dataFmt}${motivo}. Por favor, escolha outra data.`
+          };
+        } else {
+          // Validação de intervalo de horário específico
+          const [bIniH, bIniM] = (b.inicio || '00:00').split(':').map(Number);
+          const [bFimH, bFimM] = (b.fim || '23:59').split(':').map(Number);
+          const blockStartMin = (bIniH || 0) * 60 + (bIniM || 0);
+          const blockEndMin = (bFimH || 0) * 60 + (bFimM || 0);
+          const selectedMin = selectedDateTime.getHours() * 60 + selectedDateTime.getMinutes();
+
+          if (selectedMin >= blockStartMin && selectedMin <= blockEndMin) {
+            return {
+              valid: false,
+              message: `No dia ${dataFmt}, não estamos aceitando agendamentos entre ${b.inicio} e ${b.fim}${motivo}. Por favor, selecione outro horário.`
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Validar Prazo Mínimo de Antecedência (em minutos)
   const prazoMin = parseInt(h.prazoMinimoMinutos || 0, 10);
   if (prazoMin > 0) {
     const diffMs = selectedDateTime.getTime() - agora.getTime();
@@ -226,7 +261,7 @@ function validateOrderSchedule(data, hora) {
     }
   }
 
-  // 3. Validar Dia da Semana e Horário de Funcionamento para o dia agendado
+  // 4. Validar Dia da Semana e Horário de Funcionamento para o dia agendado
   if (h.dias) {
     const dayKeys = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
     const selectedDayKey = dayKeys[selectedDateTime.getDay()];
