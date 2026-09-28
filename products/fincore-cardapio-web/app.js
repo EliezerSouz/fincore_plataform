@@ -212,11 +212,25 @@ function validateOrderSchedule(data, hora) {
 
   // 2. Validar Bloqueios Específicos de Agendamento (Feriados / Compromissos / Datas Bloqueadas)
   if (Array.isArray(h.bloqueios) && h.bloqueios.length > 0) {
-    const selectedDateStr = data; // 'YYYY-MM-DD'
+    const toIsoDate = (val) => {
+      if (!val) return '';
+      const s = String(val).trim().split('T')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+        const [d, m, y] = s.split('/');
+        return `${y}-${m}-${d}`;
+      }
+      return s;
+    };
+
+    const targetDateIso = toIsoDate(data);
+
     for (const b of h.bloqueios) {
       if (!b || !b.data) continue;
-      if (b.data === selectedDateStr) {
-        const parts = b.data.split('-');
+      const blockDateIso = toIsoDate(b.data);
+
+      if (blockDateIso === targetDateIso) {
+        const parts = blockDateIso.split('-');
         const dataFmt = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : b.data;
         const motivo = b.motivo ? ` (Motivo: ${b.motivo})` : '';
 
@@ -1062,14 +1076,16 @@ async function loadEmpresa() {
           qui: { ativo: true, abertura: '08:00', fechamento: '22:00', nome: 'Quinta-feira' },
           sex: { ativo: true, abertura: '08:00', fechamento: '23:00', nome: 'Sexta-feira' },
           sab: { ativo: true, abertura: '08:00', fechamento: '23:00', nome: 'Sábado' }
-        }
+        },
+        bloqueios: []
       };
 
-      if (configData && configData.horariosAtendimento) {
+      const rawHorarios = configData?.horariosAtendimento || configData?.horarios_atendimento;
+      if (rawHorarios) {
         try {
-          const parsedH = typeof configData.horariosAtendimento === 'string'
-            ? JSON.parse(configData.horariosAtendimento)
-            : configData.horariosAtendimento;
+          const parsedH = typeof rawHorarios === 'string'
+            ? JSON.parse(rawHorarios)
+            : rawHorarios;
           if (parsedH.status) state.horariosAtendimento.status = parsedH.status;
           if (parsedH.prazoMinimoMinutos != null) state.horariosAtendimento.prazoMinimoMinutos = Number(parsedH.prazoMinimoMinutos);
           if (parsedH.mensagemFechado) state.horariosAtendimento.mensagemFechado = parsedH.mensagemFechado;
@@ -1082,6 +1098,9 @@ async function loadEmpresa() {
                 };
               }
             });
+          }
+          if (Array.isArray(parsedH.bloqueios)) {
+            state.horariosAtendimento.bloqueios = parsedH.bloqueios;
           }
         } catch (e) {
           console.warn('Erro ao parsear horariosAtendimento:', e);

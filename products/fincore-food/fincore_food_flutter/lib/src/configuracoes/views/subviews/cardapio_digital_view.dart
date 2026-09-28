@@ -435,11 +435,13 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
         await sb.from('empresa_configuracao').upsert({
           'tenantId': tId,
           'horariosAtendimento': jsonStr,
+          'horarios_atendimento': jsonStr,
           'updatedAt': DateTime.now().toIso8601String(),
         }, onConflict: 'tenantId');
       } catch (_) {
         await sb.from('empresa_configuracao').update({
           'horariosAtendimento': jsonStr,
+          'horarios_atendimento': jsonStr,
           'updatedAt': DateTime.now().toIso8601String(),
         }).eq('tenantId', tId);
       }
