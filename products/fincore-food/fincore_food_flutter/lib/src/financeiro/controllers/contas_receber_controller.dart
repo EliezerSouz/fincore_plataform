@@ -84,6 +84,10 @@ class TituloReceber {
       formaPagamentoNome.toLowerCase().contains('prazo') ||
       formaPagamentoNome.toLowerCase().contains('faturad');
 
+  /// Indica se, do ponto de vista do cliente, o valor já foi quitado no ato da compra.
+  /// (PIX, Dinheiro, Cartão de Crédito/Débito são pagos pelo cliente no ato; apenas Nota a Prazo gera dívida pendente do cliente).
+  bool get isPagoPeloCliente => !isNotaPrazo || isRecebido;
+
   /// Valor estimado retido pela operadora da maquininha (MDR)
   int get valorTaxaCentavos => taxaMdrPercentual > 0 ? ((valorTotalCentavos * taxaMdrPercentual) / 100.0).round() : 0;
 
@@ -372,7 +376,6 @@ class ContasReceberController extends ChangeNotifier {
         final fpNomeLower = fpNome.toLowerCase();
 
         // ── Dinheiro: entra no caixa à vista — NÃO gera contas a receber ───────
-        // Verifica por tipo e por todas as variações de nome possíveis
         final isDinheiro = fpTipo == 'dinheiro' ||
             fpNomeLower.contains('dinheiro') ||
             fpNomeLower.contains('espécie') ||
@@ -397,9 +400,7 @@ class ContasReceberController extends ChangeNotifier {
             (forma?.descricao != null &&
              forma!.descricao!.toLowerCase().contains('prazo'));
 
-        // ── PIX: somente entra em Contas a Receber se NÃO houver lançamento ──
-        // de receita gerado pelo caixa (caso em que já foi confirmado/recebido).
-        // Se houver lançamento, aparece como 'recebido'. Sem lançamento = pendente.
+        // ── PIX: Liquidação instantânea no ato da compra (D+0) ───────────────
         final isPix = fpTipo == 'pix' || fpNomeLower.contains('pix');
 
         // Formas que NÃO devem gerar título de contas a receber:
@@ -414,17 +415,15 @@ class ContasReceberController extends ChangeNotifier {
         // Determina se já está quitado/recebido:
         final lancamentos = lancamentosPorPedido[ped.id] ?? [];
 
-        // Para Cartão ou Nota a Prazo: só é recebido via baixa explícita
-        // Para PIX com lançamento de caixa: recebido/confirmado
-        // Para PIX sem lançamento: pendente aguardando confirmação
-        // Para Outros: recebido se houver qualquer receita
-        final temReceita = (isNotaPrazo || isCartao)
-            ? lancamentos.any((l) =>
-                l.tipo == 'receita' &&
-                l.descricao.toLowerCase().contains('baixa'))
-            : isPix
-              ? lancamentos.any((l) => l.tipo == 'receita')
-              : lancamentos.any((l) => l.tipo == 'receita');
+        // Para PIX: Liquidação instantânea D+0. Se o pedido foi realizado e confirmado, já é recebido.
+        // Para Cartão ou Nota a Prazo: quitado via baixa explícita ou lançamento de receita.
+        final temReceita = isPix
+            ? true
+            : (isNotaPrazo || isCartao)
+                ? lancamentos.any((l) =>
+                    l.tipo == 'receita' &&
+                    l.descricao.toLowerCase().contains('baixa'))
+                : lancamentos.any((l) => l.tipo == 'receita');
 
         // Data do Pedido e Data da Entrega
         final dataEntrega = ped.dataHoraEntregaPrevista?.toLocal() ?? ped.dataHoraCriacao.toLocal();
@@ -450,12 +449,12 @@ class ContasReceberController extends ChangeNotifier {
 
         if (temReceita) {
           status = StatusTituloReceber.recebido;
-          final lancamentoReceita = lancamentos.firstWhere(
+          final lancamentoReceita = lancamentos.where(
             (l) => (isNotaPrazo || isCartao)
                 ? (l.tipo == 'receita' && l.descricao.toLowerCase().contains('baixa'))
                 : l.tipo == 'receita',
-          );
-          dataRecebimento = lancamentoReceita.dataHora.toLocal();
+          ).firstOrNull;
+          dataRecebimento = lancamentoReceita?.dataHora.toLocal() ?? ped.dataHoraCriacao.toLocal();
         } else {
           // Pendente: se já passou a data do vencimento, está atrasado
           if (agora.isAfter(dataVencimento)) {

@@ -3348,20 +3348,22 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   }
 
   Widget _buildClienteTituloCard(TituloReceber t, Cliente c, ContasReceberController contasCtrl) {
-    final isRecebido = t.status == StatusTituloReceber.recebido;
-    final isAtrasado = t.status == StatusTituloReceber.atrasado;
+    // Para o cliente, o pagamento só é pendente se for Nota a Prazo (fiado) não quitada.
+    // Cartões, PIX e Dinheiro são quitados pelo cliente no ato da venda.
+    final isPagoPeloCliente = t.isPagoPeloCliente;
+    final isAtrasado = t.isNotaPrazo && t.status == StatusTituloReceber.atrasado;
 
-    final Color statusColor = isRecebido
+    final Color statusColor = isPagoPeloCliente
         ? const Color(0xFF10B981)
         : isAtrasado
             ? const Color(0xFFEF4444)
             : const Color(0xFFF59E0B);
 
-    final String statusLabel = isRecebido
+    final String statusLabel = isPagoPeloCliente
         ? 'PAGO'
         : isAtrasado
-            ? 'ATRASADO'
-            : 'A RECEBER';
+            ? 'ATRASADO (FIADO)'
+            : 'A RECEBER (FIADO)';
 
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
 
@@ -3372,7 +3374,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
         color: FincoreColors.surfaceElevated,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isRecebido ? FincoreColors.border : statusColor.withValues(alpha: 0.4),
+          color: isPagoPeloCliente ? FincoreColors.border : statusColor.withValues(alpha: 0.4),
           width: 1,
         ),
       ),
@@ -3472,20 +3474,24 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
             ],
           ),
           const SizedBox(height: 3),
-          if (isRecebido) ...[
+          if (isPagoPeloCliente) ...[
             Row(
               children: [
                 const Icon(Icons.check_circle_outline_rounded, size: 12, color: Color(0xFF10B981)),
                 const SizedBox(width: 4),
                 Text(
-                  'Pago em: ${dateFormat.format(t.dataRecebimento ?? t.dataEmissao)}',
+                  t.isNotaPrazo
+                      ? 'Quitado em: ${dateFormat.format(t.dataRecebimento ?? t.dataEmissao)}'
+                      : t.isCartao
+                          ? 'Pago no ato · Repasse Adquirente: ${t.isRecebido ? "Liquidado" : "Previsão ${dateFormat.format(t.dataVencimento)}"}'
+                          : 'Pago no ato · ${dateFormat.format(t.dataEmissao)}',
                   style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
                 ),
               ],
             ),
           ] else ...[
             Text(
-              'Vencimento: ${dateFormat.format(t.dataVencimento)}',
+              'Vencimento do Fiado: ${dateFormat.format(t.dataVencimento)}',
               style: TextStyle(
                 fontSize: 11,
                 color: isAtrasado ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
@@ -3493,7 +3499,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
               ),
             ),
           ],
-          if (!isRecebido) ...[
+          if (!isPagoPeloCliente) ...[
             const Divider(height: 14, color: FincoreColors.border),
             Row(
               children: [

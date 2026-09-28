@@ -807,7 +807,7 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
           // Status Pill
           SizedBox(
             width: 120,
-            child: _buildStatusPill(item.status),
+            child: _buildStatusPill(item),
           ),
 
           // Ações
@@ -828,11 +828,11 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
                 ),
                 const SizedBox(width: 6),
 
-                // Botão WhatsApp
-                if (item.clienteTelefone != null && item.clienteTelefone!.isNotEmpty) ...[
+                // Botão WhatsApp (apenas para Nota a Prazo / Fiado pendente de cliente)
+                if (item.isNotaPrazo && (item.isPendente || item.isAtrasado) && item.clienteTelefone != null && item.clienteTelefone!.isNotEmpty) ...[
                   IconButton(
                     icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18, color: Color(0xFF25D366)),
-                    tooltip: 'Cobrar / Avisar WhatsApp',
+                    tooltip: 'Cobrar Fiado via WhatsApp',
                     style: IconButton.styleFrom(
                       backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -873,32 +873,58 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
     );
   }
 
-  Widget _buildStatusPill(StatusTituloReceber status) {
+  Widget _buildStatusPill(TituloReceber item) {
     final Color color;
     final String label;
     final IconData icon;
 
-    switch (status) {
-      case StatusTituloReceber.pendente:
-        color = const Color(0xFFF59E0B);
-        label = 'Pendente';
-        icon = Icons.hourglass_empty_rounded;
-        break;
-      case StatusTituloReceber.recebido:
-        color = const Color(0xFF10B981);
-        label = 'Recebido';
-        icon = Icons.check_circle_rounded;
-        break;
-      case StatusTituloReceber.atrasado:
+    if (item.isRecebido) {
+      color = const Color(0xFF10B981);
+      label = item.isPix ? 'Recebido (PIX)' : 'Recebido';
+      icon = Icons.check_circle_rounded;
+    } else if (item.isCartao) {
+      if (item.isAtrasado) {
         color = const Color(0xFFEF4444);
-        label = 'Atrasado';
+        label = 'Repasse Atrasado';
         icon = Icons.error_outline_rounded;
-        break;
-      case StatusTituloReceber.cancelado:
-        color = FincoreColors.textMuted;
-        label = 'Cancelado';
-        icon = Icons.cancel_outlined;
-        break;
+      } else {
+        color = const Color(0xFF0284C7);
+        label = 'Repasse D+${item.prazoRepasseDias}';
+        icon = Icons.schedule_rounded;
+      }
+    } else if (item.isNotaPrazo) {
+      if (item.isAtrasado) {
+        color = const Color(0xFFEF4444);
+        label = 'Fiado Atrasado';
+        icon = Icons.warning_amber_rounded;
+      } else {
+        color = const Color(0xFFF59E0B);
+        label = 'Fiado a Receber';
+        icon = Icons.hourglass_empty_rounded;
+      }
+    } else {
+      switch (item.status) {
+        case StatusTituloReceber.pendente:
+          color = const Color(0xFFF59E0B);
+          label = 'Pendente';
+          icon = Icons.hourglass_empty_rounded;
+          break;
+        case StatusTituloReceber.recebido:
+          color = const Color(0xFF10B981);
+          label = 'Recebido';
+          icon = Icons.check_circle_rounded;
+          break;
+        case StatusTituloReceber.atrasado:
+          color = const Color(0xFFEF4444);
+          label = 'Atrasado';
+          icon = Icons.error_outline_rounded;
+          break;
+        case StatusTituloReceber.cancelado:
+          color = FincoreColors.textMuted;
+          label = 'Cancelado';
+          icon = Icons.cancel_outlined;
+          break;
+      }
     }
 
     return Container(
