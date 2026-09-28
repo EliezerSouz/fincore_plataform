@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -37,19 +36,15 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
   bool? _isOnline;
   String _statusMessage = 'Aguardando verificação';
 
-  // ─── Identidade Visual ───
-  final _logoUrlCtrl = TextEditingController();
-  String? _logoPreviewUrl;
-  bool _isSavingLogo = false;
-  String _logoSaveMessage = '';
-
-  // ─── Horários de Atendimento & Prazo Mínimo ───
+  // ─── Horários de Atendimento, Prazo & Bloqueios ───
   String _lojaOnlineStatus = 'auto'; // 'auto', 'aberto', 'fechado'
   final _prazoMinimoCtrl = TextEditingController(text: '120');
   final _mensagemFechadoCtrl = TextEditingController(text: 'Estamos fora do horário de atendimento. Faça seu pedido agendado!');
-  bool _isSavingHorarios = false;
-  String _horariosSaveMessage = '';
   List<Map<String, dynamic>> _bloqueiosAgendamento = [];
+
+  // Estado Unificado de Salvamento
+  bool _isSaving = false;
+  String _saveMessage = '';
 
   final Map<String, ({bool ativo, String abertura, String fechamento, String nome})> _diasSemana = {
     'dom': (ativo: true, abertura: '08:00', fechamento: '22:00', nome: 'Domingo'),
@@ -65,14 +60,12 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
   void initState() {
     super.initState();
     _loadConfig();
-    _loadLogoUrl();
     _loadHorarios();
   }
 
   @override
   void dispose() {
     _baseUrlCtrl.dispose();
-    _logoUrlCtrl.dispose();
     _prazoMinimoCtrl.dispose();
     _mensagemFechadoCtrl.dispose();
     super.dispose();
@@ -116,227 +109,12 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
     _checkConnectivity();
   }
 
-  Future<void> _saveBaseUrl(String url) async {
-    final prefs = await SharedPreferences.getInstance();
-    final tId = _tenantId;
-    if (tId.isNotEmpty) {
-      await prefs.setString('cardapio_base_url_$tId', url.trim());
-    }
-    await prefs.setString('cardapio_base_url', url.trim());
-    widget.onChanged?.call();
-    _checkConnectivity();
-  }
-
-  // ─── Logo: leitura e gravação via empresa_configuracao.logoUrl ───
-  Future<void> _loadLogoUrl() async {
-    final tId = _tenantId;
-    final prefs = await SharedPreferences.getInstance();
-    final cachedLogo = (tId.isNotEmpty ? prefs.getString('empresa_logo_url_$tId') : null) ?? prefs.getString('empresa_logo_url');
-    if (cachedLogo != null && cachedLogo.isNotEmpty && mounted) {
-      setState(() {
-        _logoUrlCtrl.text = cachedLogo;
-        _logoPreviewUrl = cachedLogo;
-      });
-    }
-
-    if (tId.isEmpty) return;
-    try {
-      final sb = Supabase.instance.client;
-      final row = await sb
-          .from('empresa_configuracao')
-          .select('logoUrl')
-          .eq('tenantId', tId)
-          .maybeSingle();
-      final url = row?['logoUrl'] as String?;
-      if (mounted && url != null && url.isNotEmpty) {
-        setState(() {
-          _logoUrlCtrl.text = url;
-          _logoPreviewUrl = url;
-        });
-        await prefs.setString('empresa_logo_url_$tId', url);
-        await prefs.setString('empresa_logo_url', url);
-      } else if (mounted && (url == null || url.isEmpty)) {
-        final empRow = await sb.from('empresa').select('logoUrl').eq('id', tId).maybeSingle();
-        final empLogo = empRow?['logoUrl'] as String?;
-        if (empLogo != null && empLogo.isNotEmpty && mounted) {
-          setState(() {
-            _logoUrlCtrl.text = empLogo;
-            _logoPreviewUrl = empLogo;
-          });
-          await prefs.setString('empresa_logo_url_$tId', empLogo);
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _pickLocalLogo() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'svg'],
-        withData: true,
-      );
-
-      if (result == null || result.files.isEmpty) return;
-      final file = result.files.first;
-
-      Uint8List? bytes = file.bytes;
-      if (bytes == null && file.path != null) {
-        final f = File(file.path!);
-        if (await f.exists()) {
-          bytes = await f.readAsBytes();
-        }
-      }
-
-      if (bytes == null || bytes.isEmpty) {
-        if (mounted) {
-          setState(() => _logoSaveMessage = 'Não foi possível ler o arquivo selecionado.');
-        }
-        return;
-      }
-
-      setState(() {
-        _isSavingLogo = true;
-        _logoSaveMessage = 'Processando imagem...';
-      });
-
-      final tId = _tenantId;
-      final ext = (file.extension ?? 'png').toLowerCase();
-      final mimeType = ext == 'png'
-          ? 'image/png'
-          : (ext == 'webp'
-              ? 'image/webp'
-              : (ext == 'svg' ? 'image/svg+xml' : 'image/jpeg'));
-
-      String? finalUrl;
-
-      // 1. Tentar upload para Supabase Storage
-      try {
-        final sb = Supabase.instance.client;
-        final fileName = 'logo_${tId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
-        await sb.storage.from('empresa-logos').uploadBinary(
-              fileName,
-              bytes,
-              fileOptions: FileOptions(contentType: mimeType, upsert: true),
-            );
-        finalUrl = sb.storage.from('empresa-logos').getPublicUrl(fileName);
-      } catch (_) {
-        // Fallback: Armazenar Data URI Base64 direto
-        final b64 = base64Encode(bytes);
-        finalUrl = 'data:$mimeType;base64,$b64';
-      }
-
-      if (finalUrl.isNotEmpty) {
-        _logoUrlCtrl.text = finalUrl;
-        setState(() {
-          _logoPreviewUrl = finalUrl;
-        });
-        await _saveLogoUrl();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isSavingLogo = false;
-          _logoSaveMessage = 'Erro ao selecionar imagem: $e';
-        });
-      }
-    }
-  }
-
-  Widget _buildLogoPreview() {
-    if (_logoPreviewUrl == null || _logoPreviewUrl!.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.store_mall_directory_outlined, size: 40, color: FincoreColors.textMuted),
-            SizedBox(height: 8),
-            Text('Nenhuma logo configurada', style: TextStyle(fontSize: 13, color: FincoreColors.textMuted)),
-            SizedBox(height: 3),
-            Text('Importe uma foto local ou insira uma URL pública', style: TextStyle(fontSize: 11, color: FincoreColors.textMuted)),
-          ],
-        ),
-      );
-    }
-
-    if (_logoPreviewUrl!.startsWith('data:image')) {
-      try {
-        final commaIdx = _logoPreviewUrl!.indexOf(',');
-        if (commaIdx != -1) {
-          final b64Str = _logoPreviewUrl!.substring(commaIdx + 1);
-          final bytes = base64Decode(b64Str);
-          return Image.memory(bytes, fit: BoxFit.contain);
-        }
-      } catch (_) {}
-    }
-
-    return Image.network(
-      _logoPreviewUrl!,
-      fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) => const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.broken_image_outlined, size: 36, color: FincoreColors.textMuted),
-            SizedBox(height: 6),
-            Text('Não foi possível carregar a imagem', style: TextStyle(fontSize: 12, color: FincoreColors.textMuted)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _saveLogoUrl() async {
-    final tId = _tenantId;
-    if (tId.isEmpty) return;
-    final url = _logoUrlCtrl.text.trim();
-    setState(() {
-      _isSavingLogo = true;
-      _logoSaveMessage = '';
-    });
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('empresa_logo_url_$tId', url);
-      await prefs.setString('empresa_logo_url', url);
-
-      final sb = Supabase.instance.client;
-      try {
-        await sb.from('empresa_configuracao').upsert({
-          'tenantId': tId,
-          'logoUrl': url.isEmpty ? null : url,
-          'updatedAt': DateTime.now().toIso8601String(),
-        }, onConflict: 'tenantId');
-      } catch (_) {
-        await sb.from('empresa_configuracao')
-            .update({'logoUrl': url.isEmpty ? null : url, 'updatedAt': DateTime.now().toIso8601String()})
-            .eq('tenantId', tId);
-      }
-
-      try {
-        await sb.from('empresa')
-            .update({'logoUrl': url.isEmpty ? null : url, 'updatedAt': DateTime.now().toIso8601String()})
-            .eq('id', tId);
-      } catch (_) {}
-
-      if (mounted) {
-        setState(() {
-          _logoPreviewUrl = url.isEmpty ? null : url;
-          _logoSaveMessage = url.isEmpty ? 'Logo removida.' : 'Logo salva com sucesso!';
-        });
-        widget.onChanged?.call();
-      }
-    } catch (e) {
-      if (mounted) setState(() => _logoSaveMessage = 'Erro ao salvar: $e');
-    } finally {
-      if (mounted) setState(() => _isSavingLogo = false);
-    }
-  }
-
-  // ─── Horários de Atendimento & Regras de Pedidos Web ───
   Future<void> _loadHorarios() async {
     final tId = _tenantId;
     final prefs = await SharedPreferences.getInstance();
-    final cached = (tId.isNotEmpty ? prefs.getString('cardapio_horarios_$tId') : null) ?? prefs.getString('cardapio_horarios');
+    final cached = (tId.isNotEmpty ? prefs.getString('cardapio_horarios_$tId') : null) ??
+        prefs.getString('cardapio_horarios');
+
     if (cached != null && cached.isNotEmpty) {
       _parseHorariosJson(cached);
     }
@@ -350,13 +128,14 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
           .eq('tenantId', tId)
           .maybeSingle();
 
-      if (row != null && row['horariosAtendimento'] != null) {
-        final jsonStr = row['horariosAtendimento'] is String
-            ? row['horariosAtendimento'] as String
-            : jsonEncode(row['horariosAtendimento']);
-        _parseHorariosJson(jsonStr);
-        await prefs.setString('cardapio_horarios_$tId', jsonStr);
-        await prefs.setString('cardapio_horarios', jsonStr);
+      if (row != null) {
+        final rawH = row['horariosAtendimento'] ?? row['horarios_atendimento'];
+        if (rawH != null) {
+          final jsonStr = rawH is String ? rawH : jsonEncode(rawH);
+          _parseHorariosJson(jsonStr);
+          await prefs.setString('cardapio_horarios_$tId', jsonStr);
+          await prefs.setString('cardapio_horarios', jsonStr);
+        }
       }
     } catch (_) {}
   }
@@ -398,12 +177,13 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
     } catch (_) {}
   }
 
-  Future<void> _saveHorarios() async {
+  /// Salva todas as configurações do cardápio digital (URL, status, prazos, horários e bloqueios)
+  Future<void> _salvarTudo() async {
     final tId = _tenantId;
     if (tId.isEmpty) return;
     setState(() {
-      _isSavingHorarios = true;
-      _horariosSaveMessage = '';
+      _isSaving = true;
+      _saveMessage = '';
     });
 
     try {
@@ -425,10 +205,13 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
         'bloqueios': _bloqueiosAgendamento,
       };
       final jsonStr = jsonEncode(payload);
+      final baseUrl = _baseUrlCtrl.text.trim();
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('cardapio_horarios_$tId', jsonStr);
       await prefs.setString('cardapio_horarios', jsonStr);
+      await prefs.setString('cardapio_base_url_$tId', baseUrl);
+      await prefs.setString('cardapio_base_url', baseUrl);
 
       final sb = Supabase.instance.client;
       try {
@@ -448,14 +231,15 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
 
       if (mounted) {
         setState(() {
-          _horariosSaveMessage = '✅ Horários e regras de pedidos web salvos com sucesso!';
+          _saveMessage = '✅ Configurações do Cardápio Digital salvas com sucesso!';
         });
         widget.onChanged?.call();
+        _checkConnectivity();
       }
     } catch (e) {
-      if (mounted) setState(() => _horariosSaveMessage = 'Erro ao salvar: $e');
+      if (mounted) setState(() => _saveMessage = 'Erro ao salvar configurações: $e');
     } finally {
-      if (mounted) setState(() => _isSavingHorarios = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -474,18 +258,10 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
         );
       }
     });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Horário de ${origem.nome} replicado ${apenasUteis ? "para dias úteis (Seg-Sex)" : "para toda a semana"}!'),
-        backgroundColor: FincoreColors.primary,
-        duration: const Duration(seconds: 2),
-      ),
-    );
   }
 
   Future<void> _checkConnectivity() async {
-    if (_isCheckingStatus) return;
+    if (!mounted) return;
     setState(() {
       _isCheckingStatus = true;
       _statusMessage = 'Verificando conexão...';
@@ -505,7 +281,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
           if (_isOnline == true) {
             _statusMessage = 'Cardápio Online & Operacional (${res.statusCode} OK)';
           } else if (res.statusCode == 401 || res.statusCode == 403) {
-            _statusMessage = 'Servidor requer login/senha (Status ${res.statusCode}). Troque para o preset Vercel.';
+            _statusMessage = 'Servidor requer login/senha (Status ${res.statusCode}).';
           } else {
             _statusMessage = 'Servidor respondeu com status ${res.statusCode}';
           }
@@ -612,10 +388,13 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                   ),
                   textAlign: pw.TextAlign.center,
                 ),
-                pw.SizedBox(height: 16),
+                pw.SizedBox(height: 14),
                 pw.Text(
                   fullUrl,
-                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey500),
+                  style: pw.TextStyle(
+                    fontSize: isA4 ? 9 : 6.5,
+                    color: PdfColors.blueGrey800,
+                  ),
                   textAlign: pw.TextAlign.center,
                 ),
               ],
@@ -759,105 +538,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
 
         const SizedBox(height: 16),
 
-        // ─── CARD: IDENTIDADE VISUAL DO CARDÁPIO DIGITAL ─────────────────────
-        FincoreSectionCard(
-          title: 'Identidade Visual do Cardápio',
-          subtitle: 'Logo exibida no portal de pedidos online desta empresa',
-          icon: Icons.image_outlined,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Preview da logo
-              Container(
-                width: double.infinity,
-                height: 140,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: FincoreColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: FincoreColors.border),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: _buildLogoPreview(),
-              ),
-              const FincoreFieldLabel(label: 'URL da Logo (ou importe uma foto local):'),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    child: FincoreTextField(
-                      controller: _logoUrlCtrl,
-                      hintText: 'https://seu-cdn.com/logo.png ou importe abaixo',
-                      onChanged: (v) {
-                        setState(() => _logoPreviewUrl = v.trim());
-                      },
-                    ),
-                  ),
-                  if (_logoUrlCtrl.text.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    IconButton(
-                      tooltip: 'Limpar logo',
-                      icon: const Icon(Icons.clear_rounded, size: 20),
-                      onPressed: () {
-                        _logoUrlCtrl.clear();
-                        setState(() => _logoPreviewUrl = null);
-                      },
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '💡 Você pode importar uma imagem direto do computador ou inserir uma URL pública da logo.',
-                style: TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _isSavingLogo ? null : _pickLocalLogo,
-                    icon: const Icon(Icons.file_upload_outlined, size: 18),
-                    label: const Text('📁 Importar Foto do Computador'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                  FilledButton.icon(
-                    onPressed: _isSavingLogo ? null : _saveLogoUrl,
-                    icon: _isSavingLogo
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.save_rounded, size: 18),
-                    label: Text(_isSavingLogo ? 'Salvando...' : 'Salvar Logo'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                    ),
-                  ),
-                  if (_logoSaveMessage.isNotEmpty) ...[
-                    Text(
-                      _logoSaveMessage,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _logoSaveMessage.contains('Erro') ? FincoreColors.danger : FincoreColors.success,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // ─── CARD: HORÁRIOS DE ATENDIMENTO & REGRAS DE PEDIDOS WEB ───────
-        _buildHorariosCard(),
-
-        const SizedBox(height: 16),
-
         // ─── 2. CARD: LINK OFICIAL E DOMÍNIO DE ACESSO ─────────────────────
         FincoreSectionCard(
           title: 'Link Oficial e Domínio de Acesso',
@@ -898,7 +578,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                           setState(() {
                             _baseUrlCtrl.text = 'https://fincore-cardapio-web.vercel.app';
                           });
-                          _saveBaseUrl(_baseUrlCtrl.text);
                         },
                         icon: const Icon(Icons.restore_rounded, size: 14),
                         label: const Text('Restaurar Vercel', style: TextStyle(fontSize: 12)),
@@ -911,9 +590,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
               FincoreTextField(
                 controller: _baseUrlCtrl,
                 hintText: 'https://fincore-cardapio-web.vercel.app ou https://cardapio.minhaloja.com.br',
-                onChanged: (val) {
-                  _saveBaseUrl(val);
-                },
+                onChanged: (_) => setState(() {}),
               ),
               const SizedBox(height: 14),
               const FincoreFieldLabel(label: 'Link Público Completo da Empresa:'),
@@ -992,7 +669,12 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
 
         const SizedBox(height: 16),
 
-        // ─── 3. CARD: DISPLAY DE MESA & GERADOR DE QR CODE ───────────────────────
+        // ─── 3. CARD: HORÁRIOS DE ATENDIMENTO & REGRAS DE PEDIDOS WEB ───────
+        _buildHorariosCard(),
+
+        const SizedBox(height: 16),
+
+        // ─── 4. CARD: DISPLAY DE MESA & GERADOR DE QR CODE ───────────────────────
         FincoreSectionCard(
           title: 'Display de Mesa, Balcão & QR Code',
           subtitle: 'Gere materiais impressos para os clientes pedirem diretamente da mesa ou embalagem de delivery',
@@ -1019,6 +701,67 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
             },
           ),
         ),
+
+        const SizedBox(height: 24),
+
+        // ─── 5. BARRA UNIFICADA DE SALVAMENTO ────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
+            boxShadow: const [
+              BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 2)),
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Salvar Alterações do Cardápio Digital',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: FincoreColors.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _saveMessage.isNotEmpty
+                          ? _saveMessage
+                          : 'Grava o link, horários de atendimento, prazo mínimo e bloqueios de data em um único clique.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _saveMessage.contains('Erro')
+                            ? FincoreColors.danger
+                            : (_saveMessage.isNotEmpty ? const Color(0xFF16A34A) : FincoreColors.textSecondary),
+                        fontWeight: _saveMessage.isNotEmpty ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              FilledButton.icon(
+                onPressed: _isSaving ? null : _salvarTudo,
+                icon: _isSaving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.save_rounded, size: 18),
+                label: Text(
+                  _isSaving ? 'Salvando...' : 'Salvar Configurações do Cardápio',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: FincoreColors.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 32),
       ],
     );
   }
@@ -1050,7 +793,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
             style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, color: Color(0xFFF97316), letterSpacing: 1.5),
           ),
           const SizedBox(height: 12),
-          // QR Code renderizado
           Container(
             width: 150,
             height: 150,
@@ -1111,7 +853,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
             ElevatedButton.icon(
               onPressed: () => _printDisplayMesa(false),
               icon: const Icon(Icons.receipt_long_rounded, size: 18),
-              label: const Text('Imprimir Cupom QR Bobina (80mm)'),
+              label: const Text('Imprimir Mini Display Balcão (80mm)'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: FincoreColors.surfaceElevated,
                 foregroundColor: FincoreColors.textPrimary,
@@ -1130,34 +872,34 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
 
   Widget _buildHorariosCard() {
     return FincoreSectionCard(
-      title: 'Dias, Horários & Regras de Atendimento Web',
-      subtitle: 'Controle o status da loja online, horários de funcionamento e prazo mínimo de antecedência',
-      icon: Icons.access_time_filled_rounded,
+      title: 'Horários de Atendimento & Regras de Pedidos Online',
+      subtitle: 'Defina os dias de funcionamento, horário limite de atendimento, prazo mínimo e bloqueio de datas',
+      icon: Icons.access_time_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ─── 1. Status da Loja Online ───
-          const FincoreFieldLabel(label: 'Status da Loja para Pedidos Online:'),
-          const SizedBox(height: 8),
+          // ─── 1. Status Geral da Loja Online ───
+          const FincoreFieldLabel(label: 'Status Geral do Cardápio Online:'),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 10,
             runSpacing: 8,
             children: [
               _buildStatusOption(
                 value: 'auto',
-                icon: Icons.schedule_rounded,
-                label: 'Automático (Conforme Grade)',
+                icon: Icons.auto_mode_rounded,
+                label: 'Automático (Segue os Horários Abaixo)',
                 color: FincoreColors.primary,
               ),
               _buildStatusOption(
                 value: 'aberto',
-                icon: Icons.check_circle_rounded,
-                label: 'Aberto Agora (Forçar)',
+                icon: Icons.check_circle_outline_rounded,
+                label: 'Forçar Aberto (Aceitar Sempre)',
                 color: const Color(0xFF16A34A),
               ),
               _buildStatusOption(
                 value: 'fechado',
-                icon: Icons.pause_circle_filled_rounded,
+                icon: Icons.pause_circle_outline_rounded,
                 label: 'Fechado (Pausar Pedidos)',
                 color: const Color(0xFFEF4444),
               ),
@@ -1182,10 +924,10 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
               const SizedBox(width: 10),
               const Text('minutos', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: FincoreColors.textSecondary)),
               const SizedBox(width: 16),
-              Expanded(
+              const Expanded(
                 child: Text(
                   '💡 Ex: 120 min = 2 horas de antecedência. Pedidos feitos às 08:00 só poderão ser agendados para a partir das 10:00.',
-                  style: const TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
+                  style: TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
                 ),
               ),
             ],
@@ -1257,7 +999,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                   ),
                   child: Row(
                     children: [
-                      // Switch dia ativo
                       SizedBox(
                         width: 140,
                         child: Row(
@@ -1382,37 +1123,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
             controller: _mensagemFechadoCtrl,
             hintText: 'Estamos fora do horário de atendimento. Faça seu pedido para o próximo turno!',
           ),
-
-          const SizedBox(height: 16),
-
-          // Botão Salvar
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              FilledButton.icon(
-                onPressed: _isSavingHorarios ? null : _saveHorarios,
-                icon: _isSavingHorarios
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.save_rounded, size: 18),
-                label: Text(_isSavingHorarios ? 'Salvando...' : 'Salvar Horários & Regras'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-              ),
-              if (_horariosSaveMessage.isNotEmpty) ...[
-                Text(
-                  _horariosSaveMessage,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _horariosSaveMessage.contains('Erro') ? FincoreColors.danger : FincoreColors.success,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ],
-          ),
         ],
       ),
     );
@@ -1461,7 +1171,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
     required String currentVal,
     required ValueChanged<String> onChanged,
   }) {
-    // Horários de 30 em 30 min (00:00 até 23:30)
     final options = List.generate(48, (i) {
       final h = (i ~/ 2).toString().padLeft(2, '0');
       final m = (i % 2 == 0) ? '00' : '30';
@@ -1512,11 +1221,11 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: FincoreColors.border),
         ),
-        child: Row(
+        child: const Row(
           children: [
-            const Icon(Icons.event_available_rounded, color: Color(0xFF16A34A), size: 20),
-            const SizedBox(width: 10),
-            const Expanded(
+            Icon(Icons.event_available_rounded, color: Color(0xFF16A34A), size: 20),
+            SizedBox(width: 10),
+            Expanded(
               child: Text(
                 'Nenhum dia ou horário bloqueado. Agendamentos permitidos normalmente conforme a grade semanal.',
                 style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
