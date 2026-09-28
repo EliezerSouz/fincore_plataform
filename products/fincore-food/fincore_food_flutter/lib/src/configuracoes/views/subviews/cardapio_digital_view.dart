@@ -1356,7 +1356,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                 label: const Text('Bloquear Data / Horário', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: FincoreColors.primary,
-                  side: const BorderSide(color: FincoreColors.primary),
+                  side: BorderSide(color: FincoreColors.primary),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
               ),
@@ -1672,7 +1672,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: FincoreColors.textPrimary),
                             ),
                             const Spacer(),
-                            const Text('Alterar data', style: TextStyle(fontSize: 11.5, color: FincoreColors.primary)),
+                            Text('Alterar data', style: TextStyle(fontSize: 11.5, color: FincoreColors.primary)),
                           ],
                         ),
                       ),
