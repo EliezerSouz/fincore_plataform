@@ -529,10 +529,7 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
     }
 
     // Múltiplas empresas → seleção
-    if (_empresasDisponiveis != null && _empresasDisponiveis!.length > 1) {
-      // Converte Map<String,dynamic> → Empresa para o seletor
-      // O EmpresaSelectorPage recebe List<Empresa> (tipo do Serverpod)
-      // Por ora, usar refreshState direto após seleção via Supabase
+    if (_empresasDisponiveis != null && _empresasDisponiveis!.isNotEmpty && _authUserInfo == null) {
       return _buildEmpresaSelector();
     }
 
@@ -553,18 +550,29 @@ class _FincoreRootRouterState extends State<FincoreRootRouter>
       );
     }
 
-    // Sistema ativo → Shell principal
-    return FincoreShell(onLogout: refreshState);
+    // Sistema ativo → Shell principal com suporte a Logout limpo
+    return FincoreShell(
+      onLogout: () async {
+        await Supabase.instance.client.auth.signOut();
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('fincore_offline_usuario_id');
+        if (mounted) {
+          setState(() {
+            _currentUser = null;
+            _authUserInfo = null;
+            _empresasDisponiveis = null;
+            _onboardingStatus = null;
+            _isLoading = false;
+          });
+        }
+      },
+    );
   }
 
   /// Selector de empresa quando usuário tem múltiplas empresas.
-  /// Converte os dados do Supabase para o formato esperado pelo EmpresaSelectorPage.
   Widget _buildEmpresaSelector() {
-    // Reutiliza o EmpresaSelectorPage com lista vazia e refreshState
-    // O onboarding via Supabase já preencheu o TenantContext
-    // na próxima chamada de refreshState, o seletor desaparece
     return EmpresaSelectorPage(
-      empresas: const [],
+      empresas: _empresasDisponiveis ?? const [],
       onEmpresaSelecionada: refreshState,
     );
   }

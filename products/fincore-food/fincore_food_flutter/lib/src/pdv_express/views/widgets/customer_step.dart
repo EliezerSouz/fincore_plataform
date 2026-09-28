@@ -9,6 +9,8 @@ import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
+import 'package:fincore_core/fincore_core.dart';
+import 'package:fincore_core/repository/cliente_repository.dart';
 import 'package:uuid/uuid.dart';
 import 'package:fincore_food_flutter/src/clientes/views/widgets/cliente_form_dialog.dart';
 import '../../controllers/pdv_express_controller.dart';
@@ -38,6 +40,7 @@ class _CustomerStepState extends State<CustomerStep> {
   final _cidadeCtrl = TextEditingController();
   final _cepCtrl = TextEditingController();
   final _taxaCtrl = TextEditingController();
+  final _taxaServicoCtrl = TextEditingController();
   final _mesaCtrl = TextEditingController();
   final _garcomCtrl = TextEditingController();
   final _dataCtrl = TextEditingController();
@@ -78,6 +81,9 @@ class _CustomerStepState extends State<CustomerStep> {
     _taxaCtrl.text = entrega.taxaEntregaCentavos > 0
         ? (entrega.taxaEntregaCentavos / 100).toStringAsFixed(2)
         : '0,00';
+    _taxaServicoCtrl.text = entrega.taxaServicoCentavos > 0
+        ? (entrega.taxaServicoCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')
+        : '0,00';
     _mesaCtrl.text = entrega.mesa;
     _garcomCtrl.text = entrega.garcom;
 
@@ -101,6 +107,7 @@ class _CustomerStepState extends State<CustomerStep> {
     _cidadeCtrl.addListener(_onEntregaFieldsChanged);
     _cepCtrl.addListener(_onEntregaFieldsChanged);
     _taxaCtrl.addListener(_onEntregaFieldsChanged);
+    _taxaServicoCtrl.addListener(_onTaxaServicoFieldsChanged);
     _rotuloEnderecoCtrl.addListener(_onEntregaFieldsChanged);
   }
 
@@ -115,6 +122,7 @@ class _CustomerStepState extends State<CustomerStep> {
     _cidadeCtrl.dispose();
     _cepCtrl.dispose();
     _taxaCtrl.dispose();
+    _taxaServicoCtrl.dispose();
     _mesaCtrl.dispose();
     _garcomCtrl.dispose();
     _dataCtrl.dispose();
@@ -153,6 +161,16 @@ class _CustomerStepState extends State<CustomerStep> {
     _routeDebounce = Timer(const Duration(milliseconds: 800), () {
       _calcularRotaPreview();
     });
+  }
+
+  void _onTaxaServicoFieldsChanged() {
+    final clean = _taxaServicoCtrl.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.');
+    final taxaReais = double.tryParse(clean) ?? 0.0;
+    widget.controller.updateEntrega(
+      widget.controller.entrega.copyWith(
+        taxaServicoCentavos: (taxaReais * 100).round(),
+      ),
+    );
   }
 
   Future<({double lat, double lon})?> _geocodeAddress(String address) async {
@@ -563,13 +581,14 @@ class _CustomerStepState extends State<CustomerStep> {
     setState(() {
       _selectedCliente = c;
       _nameCtrl.text = c.nome;
-      _phoneCtrl.text = c.telefone;
+      _phoneCtrl.text = c.telefoneFormatado.isNotEmpty ? c.telefoneFormatado : c.telefone;
     });
 
     widget.controller.updateCliente(
       widget.controller.cliente.copyWith(
         id: c.id,
         nome: c.nome,
+        apelido: c.apelido,
         telefone: c.telefone,
       ),
     );
@@ -820,12 +839,16 @@ class _CustomerStepState extends State<CustomerStep> {
                               return sorted.take(15);
                             }
                             final query = textEditingValue.text.toLowerCase();
+                            final qNorm = normalizarTelefone(textEditingValue.text);
                             return sorted.where((c) {
+                              final matchNorm = qNorm.length >= 3 && c.telefoneNormalizado.contains(qNorm);
                               return c.nome.toLowerCase().contains(query) ||
-                                  c.telefone.contains(query);
-                            });
+                                  (c.apelido?.toLowerCase().contains(query) ?? false) ||
+                                  c.telefone.contains(query) ||
+                                  matchNorm;
+                            }).take(15);
                           },
-                          displayStringForOption: (Cliente c) => c.nome,
+                          displayStringForOption: (Cliente c) => c.nomeExibicao,
                           onSelected: _selectClienteFromCombobox,
                           optionsViewBuilder: (context, onSelected, options) {
                             return Align(
@@ -847,6 +870,7 @@ class _CustomerStepState extends State<CustomerStep> {
                                     separatorBuilder: (c, i) => const Divider(height: 1, color: FincoreColors.border),
                                     itemBuilder: (BuildContext context, int index) {
                                       final option = options.elementAt(index);
+                                      final hasApelido = option.apelido != null && option.apelido!.trim().isNotEmpty;
                                       return ListTile(
                                         leading: CircleAvatar(
                                           radius: 16,
@@ -856,9 +880,34 @@ class _CustomerStepState extends State<CustomerStep> {
                                             style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold, fontSize: 12),
                                           ),
                                         ),
-                                        title: Text(option.nome, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                                        subtitle: option.telefone.isNotEmpty
-                                            ? Text('📞 ${option.telefone}', style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 11))
+                                        title: Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                option.nome,
+                                                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            if (hasApelido) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                                decoration: BoxDecoration(
+                                                  color: FincoreColors.primary.withValues(alpha: 0.15),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                  border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
+                                                ),
+                                                child: Text(
+                                                  option.apelido!.trim(),
+                                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.primary),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                        subtitle: option.telefoneFormatado.isNotEmpty
+                                            ? Text('📞 ${option.telefoneFormatado}', style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 11))
                                             : null,
                                         onTap: () => onSelected(option),
                                       );
@@ -891,24 +940,39 @@ class _CustomerStepState extends State<CustomerStep> {
                       Tooltip(
                         message: 'Selecionar Consumidor Final (Venda Rápida de Balcão)',
                         child: OutlinedButton.icon(
-                          onPressed: () {
-                            final cf = Cliente(
-                              id: 'consumidor_final',
-                              tenantId: '00000000-0000-4000-a000-000000000001',
-                              nome: 'Consumidor Final',
-                              telefone: '0000000000',
-                              observacoes: '',
-                              ativo: true,
-                              metadata: SyncMetadata(
-                                version: 1,
-                                createdAt: DateTime.now(),
-                                updatedAt: DateTime.now(),
-                                createdBy: 'system',
-                                updatedBy: 'system',
-                                syncStatus: SyncStatus.synced,
-                              ),
+                          onPressed: () async {
+                            final activeTenantId = TenantContext().hasContext ? TenantContext().tenantId : '00000000-0000-4000-a000-000000000001';
+                            final existente = widget.controller.clientes.cast<Cliente?>().firstWhere(
+                              (c) => c != null && (c.telefone == '00000000000' || c.telefone == '0000000000' || c.nome.toLowerCase().contains('consumidor final')),
+                              orElse: () => null,
                             );
-                            _selectClienteFromCombobox(cf);
+                            if (existente != null) {
+                              _selectClienteFromCombobox(existente);
+                            } else {
+                              try {
+                                final clienteRepo = DependencyInjection().get<ClienteRepository>();
+                                final cf = await clienteRepo.ensureConsumidorFinalForTenant(activeTenantId);
+                                _selectClienteFromCombobox(cf);
+                              } catch (_) {
+                                final cf = Cliente(
+                                  id: '00000000-0000-4000-a000-000000000301',
+                                  tenantId: activeTenantId,
+                                  nome: 'Consumidor Final',
+                                  telefone: '00000000000',
+                                  observacoes: 'Consumidor final genérico (imutável)',
+                                  ativo: true,
+                                  metadata: SyncMetadata(
+                                    version: 1,
+                                    createdAt: DateTime.now().toUtc(),
+                                    updatedAt: DateTime.now().toUtc(),
+                                    createdBy: 'system',
+                                    updatedBy: 'system',
+                                    syncStatus: SyncStatus.pending,
+                                  ),
+                                );
+                                _selectClienteFromCombobox(cf);
+                              }
+                            }
                           },
                           style: OutlinedButton.styleFrom(
                             foregroundColor: FincoreColors.textPrimary,
@@ -960,14 +1024,36 @@ class _CustomerStepState extends State<CustomerStep> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                _selectedCliente!.nome,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      _selectedCliente!.nome,
+                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (_selectedCliente!.apelido != null && _selectedCliente!.apelido!.trim().isNotEmpty) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: FincoreColors.primary.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
+                                      ),
+                                      child: Text(
+                                        _selectedCliente!.apelido!.trim(),
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.primary),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                               if (_selectedCliente!.telefone.isNotEmpty) ...[
                                 const SizedBox(height: 2),
                                 Text(
-                                  _selectedCliente!.telefone,
+                                  _selectedCliente!.telefoneFormatado.isNotEmpty ? _selectedCliente!.telefoneFormatado : _selectedCliente!.telefone,
                                   style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
                                 ),
                               ],
@@ -1697,6 +1783,62 @@ class _CustomerStepState extends State<CustomerStep> {
           ),
           const SizedBox(height: 20),
 
+          // ── Card: SERVIÇO / MÃO DE OBRA ADICIONAL (Fritura no local, deslocamento) ──
+          _buildSectionCard(
+            title: 'SERVIÇO / MÃO DE OBRA ADICIONAL',
+            icon: Icons.soup_kitchen_outlined,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: FincoreColors.background,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: FincoreColors.border),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.handyman_outlined, color: FincoreColors.primary, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text(
+                          'Taxa de Serviço / Mão de Obra (R\$)',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Cobrança adicional para serviços no local do evento (ex: fritura de salgados, equipe, deslocamento)',
+                          style: TextStyle(color: FincoreColors.textMuted, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  SizedBox(
+                    width: 140,
+                    child: TextField(
+                      controller: _taxaServicoCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d,.]'))],
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      decoration: InputDecoration(
+                        prefixText: 'R\$ ',
+                        hintText: '0,00',
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
           // ── Card 3: DATA & HORÁRIO ───────────────────────────────
           if (isEntrega || entrega.tipo == 'Retirada') ...[
             _buildSectionCard(
@@ -1907,7 +2049,7 @@ class _CadastroClienteDialogState extends State<_CadastroClienteDialog> {
         id: id,
         tenantId: activeTenantId,
         nome: _nomeCtrl.text.trim(),
-        telefone: _phoneCtrl.text.trim(),
+        telefone: formatarTelefone(_phoneCtrl.text).isNotEmpty ? formatarTelefone(_phoneCtrl.text) : _phoneCtrl.text.trim(),
         observacoes: '',
         ativo: true,
         metadata: SyncMetadata(
@@ -1988,6 +2130,7 @@ class _CadastroClienteDialogState extends State<_CadastroClienteDialog> {
               TextFormField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
+                inputFormatters: FincoreFormatters.telefone,
                 validator: (v) => v == null || v.trim().isEmpty ? 'Informe o telefone' : null,
                 decoration: const InputDecoration(
                   labelText: 'Telefone *',

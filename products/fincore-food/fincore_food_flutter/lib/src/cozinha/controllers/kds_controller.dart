@@ -88,11 +88,12 @@ class KdsController extends ChangeNotifier {
       final now = DateTime.now().toUtc();
 
       final statusStr = switch (novoStatus) {
-        StatusOrdemPreparo.pendente  => 'confirmado',
-        StatusOrdemPreparo.emPreparo => 'em_preparo',
-        StatusOrdemPreparo.pronto    => 'pronto',
-        StatusOrdemPreparo.entregue  => 'entregue',
-        StatusOrdemPreparo.cancelado => 'cancelado',
+        StatusOrdemPreparo.pendente        => 'confirmado',
+        StatusOrdemPreparo.emPreparo       => 'em_preparo',
+        StatusOrdemPreparo.pronto          => 'pronto',
+        StatusOrdemPreparo.saiuParaEntrega => 'pronto',
+        StatusOrdemPreparo.entregue        => 'entregue',
+        StatusOrdemPreparo.cancelado       => 'cancelado',
       };
 
       // Recupera syncVersion atual para incrementar
@@ -129,6 +130,12 @@ class KdsController extends ChangeNotifier {
             'id': ordem.pedidoId,
             'tenantId': ordem.tenantId,
             'status': statusStr,
+            if (pedidoRow != null) ...{
+              'valorSubtotalCentavos': pedidoRow.valorSubtotalCentavos,
+              'valorTaxaEntregaCentavos': pedidoRow.valorTaxaEntregaCentavos,
+              'valorTaxaServicoCentavos': pedidoRow.valorTaxaServicoCentavos,
+              'valorTotalCentavos': pedidoRow.valorTotalCentavos,
+            },
             'syncVersion': pedidoVersion,
             'updatedAt': now.toIso8601String(),
           },
@@ -137,11 +144,12 @@ class KdsController extends ChangeNotifier {
 
         final kdsItensJson = jsonEncode(ordem.itens.map((i) => i.toJson()).toList());
         final ordemStatusStr = switch (novoStatus) {
-          StatusOrdemPreparo.pendente  => 'pendente',
-          StatusOrdemPreparo.emPreparo => 'em_preparo',
-          StatusOrdemPreparo.pronto    => 'pronto',
-          StatusOrdemPreparo.entregue  => 'entregue',
-          StatusOrdemPreparo.cancelado => 'cancelado',
+          StatusOrdemPreparo.pendente        => 'pendente',
+          StatusOrdemPreparo.emPreparo       => 'em_preparo',
+          StatusOrdemPreparo.pronto          => 'pronto',
+          StatusOrdemPreparo.saiuParaEntrega => 'saiu_para_entrega',
+          StatusOrdemPreparo.entregue        => 'entregue',
+          StatusOrdemPreparo.cancelado       => 'cancelado',
         };
         await outboxService.enqueue(
           entity: 'OrdemPreparo',

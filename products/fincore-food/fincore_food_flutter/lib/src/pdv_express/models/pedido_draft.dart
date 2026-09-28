@@ -9,6 +9,7 @@ class PedidoDraft {
   final String status; // 'Criado'
   final int valorSubtotalCentavos;
   final int valorTaxaEntregaCentavos;
+  final int valorTaxaServicoCentavos;
   final int valorDescontoCentavos;
   final int valorTotalCentavos;
   final String? formaPagamentoId;
@@ -27,6 +28,7 @@ class PedidoDraft {
     this.status = 'Criado',
     required this.valorSubtotalCentavos,
     required this.valorTaxaEntregaCentavos,
+    this.valorTaxaServicoCentavos = 0,
     this.valorDescontoCentavos = 0,
     required this.valorTotalCentavos,
     this.formaPagamentoId,
@@ -47,6 +49,7 @@ class PedidoDraft {
     String? status,
     int? valorSubtotalCentavos,
     int? valorTaxaEntregaCentavos,
+    int? valorTaxaServicoCentavos,
     int? valorDescontoCentavos,
     int? valorTotalCentavos,
     String? Function()? formaPagamentoId,
@@ -65,6 +68,7 @@ class PedidoDraft {
       status: status ?? this.status,
       valorSubtotalCentavos: valorSubtotalCentavos ?? this.valorSubtotalCentavos,
       valorTaxaEntregaCentavos: valorTaxaEntregaCentavos ?? this.valorTaxaEntregaCentavos,
+      valorTaxaServicoCentavos: valorTaxaServicoCentavos ?? this.valorTaxaServicoCentavos,
       valorDescontoCentavos: valorDescontoCentavos ?? this.valorDescontoCentavos,
       valorTotalCentavos: valorTotalCentavos ?? this.valorTotalCentavos,
       formaPagamentoId: formaPagamentoId != null ? formaPagamentoId() : this.formaPagamentoId,

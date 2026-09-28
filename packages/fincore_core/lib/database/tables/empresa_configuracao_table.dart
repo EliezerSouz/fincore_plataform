@@ -57,6 +57,10 @@ class EmpresaConfiguracaoTable extends Table with IdentityColumns, AuditColumns,
   BoolColumn get taxaEntregaPorKm => boolean().nullable().withDefault(const Constant(false))();
   IntColumn get valorPorKmCentavos => integer().nullable().withDefault(const Constant(0))();
 
+  // ─── ALERTAS GLOBAIS E PROJEÇÃO DE ESTOQUE ───────────────────────
+  IntColumn get intervaloAlertaPendentesSegundos => integer().nullable().withDefault(const Constant(60))();
+  IntColumn get janelaProjecaoEstoqueDias => integer().nullable().withDefault(const Constant(14))();
+
   @override
   Set<Column> get primaryKey => {id};
 }

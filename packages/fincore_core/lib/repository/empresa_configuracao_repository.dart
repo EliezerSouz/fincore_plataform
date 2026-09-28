@@ -74,6 +74,8 @@ class EmpresaConfiguracaoRepository
         'margemSegurancaMinutos': entity.margemSegurancaMinutos,
         'taxaEntregaPorKm': entity.taxaEntregaPorKm,
         'valorPorKmCentavos': entity.valorPorKmCentavos,
+        'intervaloAlertaPendentesSegundos': entity.intervaloAlertaPendentesSegundos,
+        'janelaProjecaoEstoqueDias': entity.janelaProjecaoEstoqueDias,
         // Sync metadata
         'syncVersion': entity.metadata.version,
         'createdAt': entity.metadata.createdAt.toIso8601String(),
@@ -84,19 +86,28 @@ class EmpresaConfiguracaoRepository
 
   @override
   Future<CoreEmpresaConfiguracao?> findById(String id) async {
-    final row = await (db.select(db.empresaConfiguracaoTable)
+    var row = await (db.select(db.empresaConfiguracaoTable)
           ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenantId)))
         .getSingleOrNull();
+    if (row == null) {
+      row = await (db.select(db.empresaConfiguracaoTable)
+            ..where((t) => t.id.equals(id)))
+          .getSingleOrNull();
+    }
+    if (row == null) {
+      final all = await db.select(db.empresaConfiguracaoTable).get();
+      row = all.firstOrNull;
+    }
     if (row == null) return null;
-    final entity = _mapToEntity(row);
+    var entity = _mapToEntity(row);
     try {
       final raw = await db.customSelect(
         'SELECT modo_delivery_ativo, cliente_obrigatorio_venda, atendimento_padrao FROM empresa_configuracao_table WHERE id = ?',
-        variables: [Variable.withString(id)],
+        variables: [Variable.withString(row.id)],
       ).getSingleOrNull();
       if (raw != null) {
         final data = raw.data;
-        return entity.copyWith(
+        entity = entity.copyWith(
           modoDeliveryAtivo: data['modo_delivery_ativo'] == 1 || data['modo_delivery_ativo'] == true,
           clienteObrigatorioVenda: data['cliente_obrigatorio_venda'] == 1 || data['cliente_obrigatorio_venda'] == true,
           atendimentoPadrao: data['atendimento_padrao'] as String? ?? 'Mesa/Balcão',
@@ -108,9 +119,12 @@ class EmpresaConfiguracaoRepository
 
   @override
   Future<List<CoreEmpresaConfiguracao>> findAll() async {
-    final rows = await (db.select(db.empresaConfiguracaoTable)
+    var rows = await (db.select(db.empresaConfiguracaoTable)
           ..where((t) => t.tenantId.equals(activeTenantId)))
         .get();
+    if (rows.isEmpty) {
+      rows = await db.select(db.empresaConfiguracaoTable).get();
+    }
     final list = <CoreEmpresaConfiguracao>[];
     for (final row in rows) {
       var entity = _mapToEntity(row);
@@ -181,6 +195,8 @@ class EmpresaConfiguracaoRepository
             margemSegurancaMinutos: Value(entity.margemSegurancaMinutos),
             taxaEntregaPorKm: Value(entity.taxaEntregaPorKm),
             valorPorKmCentavos: Value(entity.valorPorKmCentavos),
+            intervaloAlertaPendentesSegundos: Value(entity.intervaloAlertaPendentesSegundos),
+            janelaProjecaoEstoqueDias: Value(entity.janelaProjecaoEstoqueDias),
             // Sync
             syncVersion: Value(entity.metadata.version + 1),
             createdAt: entity.metadata.createdAt,
@@ -252,6 +268,8 @@ class EmpresaConfiguracaoRepository
       margemSegurancaMinutos: data.margemSegurancaMinutos ?? 10,
       taxaEntregaPorKm: data.taxaEntregaPorKm ?? false,
       valorPorKmCentavos: data.valorPorKmCentavos ?? 0,
+      intervaloAlertaPendentesSegundos: data.intervaloAlertaPendentesSegundos ?? 60,
+      janelaProjecaoEstoqueDias: data.janelaProjecaoEstoqueDias ?? 14,
       metadata: SyncMetadata(
         version: data.syncVersion,
         createdAt: data.createdAt,

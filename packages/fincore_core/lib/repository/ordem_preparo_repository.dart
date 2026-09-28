@@ -21,7 +21,10 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
   Future<OrdemPreparo?> findById(String id) async {
     final activeTenant = activeTenantId;
     final row = await (db.select(db.ordensPreparoTable)
-          ..where((t) => t.id.equals(id) & t.tenantId.equals(activeTenant)))
+          ..where((t) =>
+              t.id.equals(id) &
+              t.tenantId.equals(activeTenant) &
+              t.deletedAt.isNull().equals(true)))
         .getSingleOrNull();
 
     if (row == null) return null;
@@ -32,7 +35,9 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
   Future<List<OrdemPreparo>> findAll() async {
     final activeTenant = activeTenantId;
     final rows = await (db.select(db.ordensPreparoTable)
-          ..where((t) => t.tenantId.equals(activeTenant)))
+          ..where((t) =>
+              t.tenantId.equals(activeTenant) &
+              t.deletedAt.isNull().equals(true)))
         .get();
 
     return rows.map(_mapToDomain).toList();
@@ -48,6 +53,9 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
         return StatusOrdemPreparo.emPreparo;
       case 'pronto':
         return StatusOrdemPreparo.pronto;
+      case 'saiu_para_entrega':
+      case 'saiuparaentrega':
+        return StatusOrdemPreparo.saiuParaEntrega;
       case 'entregue':
         return StatusOrdemPreparo.entregue;
       case 'cancelado':
@@ -68,6 +76,8 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
         return 'em_preparo';
       case StatusOrdemPreparo.pronto:
         return 'pronto';
+      case StatusOrdemPreparo.saiuParaEntrega:
+        return 'saiu_para_entrega';
       case StatusOrdemPreparo.entregue:
         return 'entregue';
       case StatusOrdemPreparo.cancelado:
@@ -87,7 +97,9 @@ class OrdemPreparoRepository extends BaseRepository<OrdemPreparo, String> {
 
     final rows = await (db.select(db.ordensPreparoTable)
           ..where((t) =>
-              t.tenantId.equals(activeTenant) & t.status.isIn(statusAtivos))
+              t.tenantId.equals(activeTenant) &
+              t.status.isIn(statusAtivos) &
+              t.deletedAt.isNull().equals(true))
           ..orderBy([
             // VIP/Urgente primeiro, depois por ordem de criacao
             (t) => OrderingTerm(

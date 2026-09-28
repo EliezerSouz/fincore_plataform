@@ -18,6 +18,11 @@ echo.
 echo [*] Atualizando dependencias e preparando o ambiente C++...
 call flutter pub get
 
+if exist "f:\Eigent\fincore_platform\tools\pdfium-win-x64.tgz" (
+    echo [*] Injetando binarios nativos do Pdfium para Windows...
+    powershell -Command "New-Item -ItemType Directory -Force -Path 'build\windows\x64\pdfium-src', 'build\windows\x64\pdfium-download\pdfium-download-prefix\src'; Copy-Item -Force 'f:\Eigent\fincore_platform\tools\pdfium-win-x64.tgz' 'build\windows\x64\pdfium-download\pdfium-download-prefix\src\pdfium-win-x64.tgz'; tar -xzf 'f:\Eigent\fincore_platform\tools\pdfium-win-x64.tgz' -C 'build\windows\x64\pdfium-src'" > nul 2>&1
+)
+
 echo.
 echo [*] Compilando executavel Release para Windows...
 call flutter build windows --release

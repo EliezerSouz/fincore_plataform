@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -8,15 +9,23 @@ import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/common/master_data_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
+import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_food_flutter/src/clientes/controllers/clientes_controller.dart';
 import 'package:fincore_food_flutter/src/clientes/views/widgets/cliente_form_dialog.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_text_field.dart';
-import 'package:fincore_food_flutter/src/shared/presentation/validators/fincore_validators.dart';
 import 'package:fincore_food_flutter/src/pdv_express/views/pdv_express_screen.dart';
+import 'package:fincore_food_flutter/src/pedidos/views/pdv_page.dart';
+import 'package:fincore_food_flutter/src/shared/data/sync/supabase_sync_service.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/widgets/whatsapp_dialog.dart';
+import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
+import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
+import 'package:fincore_food_flutter/src/financeiro/controllers/contas_receber_controller.dart';
+import 'package:fincore_food_flutter/src/financeiro/widgets/dialog_baixa_titulo.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/widgets/pedido_mirror_dialog.dart';
 
 /// Tela de Gestão de Clientes do Fincore Food — Split View Premium baseada na Salgaderia
 /// Tabela master Gmail-style no lado esquerdo com resumo/estatísticas de topo,
-/// Gaveta Lateral (Inspector) no lado direito para visualização das abas (Resumo, Pedidos, Endereço),
+/// Gaveta Lateral (Inspector) no lado direito para visualização das abas (Resumo, Pedidos, Endereço, Financeiro),
 /// e Formulário de Edição/Criação exibido em Modal Centralizado (tela no meio).
 class ClientesPage extends StatefulWidget {
   final int initialTab;
@@ -30,9 +39,9 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   late final ClientesController _controller;
   late TabController _tabController;
   late final VoidCallback _controllerListener;
+  StreamSubscription<String>? _syncSub;
 
   bool _isInspectorOpen = false;
-  bool _isEditing = false;
 
   // Variáveis da Aba Regiões de Entrega
   late int _selectedTab; // 0 = Clientes, 1 = Regiões de Entrega
@@ -56,28 +65,13 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   bool _isEditingRegiao = false;
   bool _isInspectorRegiaoOpen = false;
 
-  // Form Key & Controllers
-  final _clienteFormKey = GlobalKey<FormState>();
   final _buscaController = TextEditingController();
-  final _nomeCtrl = TextEditingController();
-  final _apelidoCtrl = TextEditingController();
-  final _telefoneCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _documentoCtrl = TextEditingController();
-  final _preferenciaEntregaCtrl = TextEditingController();
-  final _limiteCreditoCtrl = TextEditingController();
-  final _obsCtrl = TextEditingController();
-
-  DateTime? _dataNascimento;
-  bool _ativo = true;
-  bool _aceitaWhatsapp = true;
-  bool _aceitaMarketing = false;
 
   @override
   void initState() {
     super.initState();
     _selectedTab = widget.initialTab;
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _controller = DependencyInjection().get<ClientesController>();
     _controllerListener = _onControllerChanged;
     _controller.addListener(_controllerListener);
@@ -86,10 +80,22 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
         _controller.loadData();
       }
     });
+
+    final syncService = DependencyInjection().tryGet<SupabaseSyncService>();
+    if (syncService != null) {
+      _syncSub = syncService.onDataSynced.listen((entity) {
+        if (entity == 'cliente' || entity == 'clientes' || entity.isEmpty) {
+          if (mounted) {
+            _controller.loadData();
+          }
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
+    _syncSub?.cancel();
     try {
       _controller.removeListener(_controllerListener);
     } catch (_) {}
@@ -97,14 +103,6 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
       _tabController.dispose();
     } catch (_) {}
     _buscaController.dispose();
-    _nomeCtrl.dispose();
-    _apelidoCtrl.dispose();
-    _telefoneCtrl.dispose();
-    _emailCtrl.dispose();
-    _documentoCtrl.dispose();
-    _preferenciaEntregaCtrl.dispose();
-    _limiteCreditoCtrl.dispose();
-    _obsCtrl.dispose();
 
     _regBuscaController.dispose();
     _regNomeCtrl.dispose();
@@ -129,7 +127,6 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
     if (cliente == null) {
       setState(() {
         _isInspectorOpen = false;
-        _isEditing = false;
       });
       _controller.selectCliente(null);
       return;
@@ -137,47 +134,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
 
     setState(() {
       _isInspectorOpen = true;
-      _isEditing = false;
-      _loadClientIntoForm(cliente);
     });
     _controller.selectCliente(cliente);
-  }
-
-  void _loadClientIntoForm(Cliente client) {
-    _nomeCtrl.text = client.nome;
-    _apelidoCtrl.text = client.apelido ?? '';
-    _telefoneCtrl.text = client.telefone;
-    _emailCtrl.text = client.email ?? '';
-    _documentoCtrl.text = client.documento ?? '';
-    _preferenciaEntregaCtrl.text = client.preferenciaEntrega ?? '';
-
-    if (client.limiteCredito != null) {
-      final double val = client.limiteCredito! / 100.0;
-      _limiteCreditoCtrl.text = val.toStringAsFixed(2).replaceAll('.', ',');
-    } else {
-      _limiteCreditoCtrl.clear();
-    }
-
-    _obsCtrl.text = client.observacoes;
-    _dataNascimento = client.dataNascimento;
-    _ativo = client.ativo;
-    _aceitaWhatsapp = client.aceitaWhatsapp;
-    _aceitaMarketing = client.aceitaMarketing;
-  }
-
-  void _clearForm() {
-    _nomeCtrl.clear();
-    _apelidoCtrl.clear();
-    _telefoneCtrl.clear();
-    _emailCtrl.clear();
-    _documentoCtrl.clear();
-    _preferenciaEntregaCtrl.clear();
-    _limiteCreditoCtrl.clear();
-    _obsCtrl.clear();
-    _dataNascimento = null;
-    _ativo = true;
-    _aceitaWhatsapp = true;
-    _aceitaMarketing = false;
   }
 
   void _openCreateMode() async {
@@ -188,52 +146,78 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
     }
   }
 
-  Future<void> _salvarCliente() async {
-    if (!_clienteFormKey.currentState!.validate()) return;
-
-    final double? parsedCredito = double.tryParse(_limiteCreditoCtrl.text.replaceAll('.', '').replaceAll(',', '.'));
-    final int? limiteCreditoCentavos = parsedCredito != null ? (parsedCredito * 100).round() : null;
-
-    final success = await _controller.salvarCliente(
-      original: _controller.selectedCliente,
-      nome: _nomeCtrl.text,
-      telefone: _telefoneCtrl.text,
-      email: _emailCtrl.text,
-      documento: _documentoCtrl.text,
-      observacoes: _obsCtrl.text,
-      ativo: _ativo,
-      apelido: _apelidoCtrl.text,
-      dataNascimento: _dataNascimento,
-      aceitaWhatsapp: _aceitaWhatsapp,
-      aceitaMarketing: _aceitaMarketing,
-      preferenciaEntrega: _preferenciaEntregaCtrl.text,
-      limiteCredito: limiteCreditoCentavos,
-    );
-
-    if (success && mounted) {
-      setState(() {
-        _isEditing = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cliente salvo com sucesso!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+  void _openEditMode(Cliente c) async {
+    final updated = await ClienteFormDialog.show(context, cliente: c);
+    if (updated != null && mounted) {
+      await _controller.loadData();
+      _selectCliente(updated);
     }
   }
 
-  Future<void> _excluirCliente() async {
-    final client = _controller.selectedCliente;
+
+
+  Future<void> _excluirCliente([Cliente? clienteAlvo]) async {
+    final client = clienteAlvo ?? _controller.selectedCliente;
     if (client == null) return;
+
+    if (_isConsumidorFinal(client)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('O cliente Consumidor Final é protegido pelo sistema e não pode ser excluído.'),
+          backgroundColor: Colors.amber,
+        ),
+      );
+      return;
+    }
+
+    final pedidosCount = _controller.getCountPedidos(client.id);
+
+    if (pedidosCount > 0) {
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: FincoreColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 24),
+              SizedBox(width: 8),
+              Text('Exclusão Bloqueada', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Text(
+            'O cliente "${client.nomeExibicao}" possui $pedidosCount pedido(s) vinculados ao seu histórico.\n\n'
+            'Por questões de integridade contábil, fiscal e relatórios de vendas, cadastros com movimentações não podem ser excluídos.\n\n'
+            'Dica: Caso não deseje mais vender para este cliente, você pode editá-lo e marcar o status como "Inativo".',
+            style: const TextStyle(fontSize: 13, height: 1.4, color: FincoreColors.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Entendi', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: FincoreColors.surface,
-        title: const Text('Excluir Cliente?'),
-        content: const Text(
-          'Este cliente será desativado/removido do sistema. O histórico operacional existente não será afetado.',
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 24),
+            SizedBox(width: 8),
+            Text('Excluir Cadastro?'),
+          ],
+        ),
+        content: Text(
+          'Deseja realmente excluir o cadastro de "${client.nomeExibicao}"?\n\n'
+          'Como este cliente não possui histórico de pedidos ou vendas vinculadas, o registro será removido do sistema.',
+          style: const TextStyle(fontSize: 13, height: 1.4, color: FincoreColors.textSecondary),
         ),
         actions: [
           TextButton(
@@ -241,9 +225,12 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
             child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textSecondary)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Excluir', style: TextStyle(color: Colors.white)),
+            child: const Text('Confirmar Exclusão'),
           ),
         ],
       ),
@@ -254,9 +241,16 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
       if (success && mounted) {
         _selectCliente(null);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cliente excluído com sucesso!'),
-            backgroundColor: Colors.orange,
+          SnackBar(
+            content: Text('Cliente "${client.nomeExibicao}" excluído com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (mounted && _controller.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_controller.errorMessage!),
+            backgroundColor: Colors.redAccent,
           ),
         );
       }
@@ -490,7 +484,6 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
         setState(() {
           _selectedTab = index;
           _isInspectorOpen = false;
-          _isEditing = false;
           _selectedRegiao = null;
           _isInspectorRegiaoOpen = false;
           _isEditingRegiao = false;
@@ -657,39 +650,93 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
     }
   }
 
-  Widget _buildSyncIndicator(SyncStatus status) {
+  Future<void> _iniciarNovoPedidoParaCliente(Cliente c) async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PdvPage(clienteInicial: c),
+      ),
+    );
+    if (result == true && mounted) {
+      _controller.loadData();
+    }
+  }
+
+  Future<void> _toggleStatusCliente(Cliente c) async {
+    final ok = await _controller.toggleAtivoCliente(c);
+    if (ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(c.ativo ? 'Cliente "${c.nomeExibicao}" inativado.' : 'Cliente "${c.nomeExibicao}" ativado com sucesso!'),
+          backgroundColor: c.ativo ? Colors.amber[800] : FincoreColors.success,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Widget _buildSyncIndicator(SyncStatus status, [DateTime? lastSyncedAt]) {
     IconData icon;
     Color color;
+    String label;
     String tooltip;
+
+    final dataFormatada = lastSyncedAt != null
+        ? DateFormat('dd/MM HH:mm').format(lastSyncedAt.toLocal())
+        : null;
 
     switch (status) {
       case SyncStatus.synced:
-        icon = Icons.check_circle_outline;
-        color = Colors.green;
-        tooltip = 'Sincronizado com a nuvem';
+        icon = Icons.cloud_done_rounded;
+        color = FincoreColors.success;
+        label = 'Nuvem OK';
+        tooltip = dataFormatada != null
+            ? 'Sincronizado com a nuvem em $dataFormatada'
+            : 'Sincronizado com a nuvem (Supabase)';
         break;
       case SyncStatus.pending:
       case SyncStatus.processing:
       case SyncStatus.retrying:
-        icon = Icons.sync;
+        icon = Icons.sync_rounded;
         color = Colors.orange;
-        tooltip = 'Sincronização pendente';
+        label = 'Pendente';
+        tooltip = 'Alterações locais aguardando envio para a nuvem';
         break;
       case SyncStatus.failed:
       case SyncStatus.conflict:
-        icon = Icons.error_outline;
-        color = Colors.red;
-        tooltip = 'Erro de sincronização';
+        icon = Icons.cloud_off_rounded;
+        color = FincoreColors.danger;
+        label = 'Erro Sync';
+        tooltip = 'Falha ao sincronizar com a nuvem';
         break;
       default:
-        icon = Icons.cloud_queue;
-        color = Colors.grey;
-        tooltip = 'Offline';
+        icon = Icons.cloud_queue_rounded;
+        color = FincoreColors.textMuted;
+        label = 'Offline';
+        tooltip = 'Operando em modo local';
     }
 
     return Tooltip(
       message: tooltip,
-      child: Icon(icon, color: color, size: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 12),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -842,6 +889,100 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // Dropdown de Ordenação (Padrão: A-Z)
+                  Container(
+                    height: 42,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: FincoreColors.border),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _controller.filtroOrdenacao,
+                        dropdownColor: FincoreColors.surfaceOverlay,
+                        icon: Icon(Icons.sort_rounded, size: 18, color: FincoreColors.primary),
+                        style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() {
+                              _controller.updateFiltroOrdenacao(val);
+                            });
+                          }
+                        },
+                        items: [
+                          DropdownMenuItem<String>(
+                            value: 'nome_asc',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.sort_by_alpha_rounded, size: 14, color: FincoreColors.primary),
+                                SizedBox(width: 6),
+                                Text('Ordem: A-Z (Padrão)'),
+                              ],
+                            ),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'nome_desc',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.sort_by_alpha_rounded, size: 14, color: FincoreColors.textMuted),
+                                SizedBox(width: 6),
+                                Text('Ordem: Z-A'),
+                              ],
+                            ),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'recentes',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.access_time_rounded, size: 14, color: FincoreColors.textMuted),
+                                SizedBox(width: 6),
+                                Text('Mais Recentes'),
+                              ],
+                            ),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'antigos',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.history_rounded, size: 14, color: FincoreColors.textMuted),
+                                SizedBox(width: 6),
+                                Text('Mais Antigos'),
+                              ],
+                            ),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'faturamento',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.attach_money_rounded, size: 14, color: Color(0xFF10B981)),
+                                SizedBox(width: 6),
+                                Text('Maior Faturamento'),
+                              ],
+                            ),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'pedidos',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.receipt_long_rounded, size: 14, color: Color(0xFF3B82F6)),
+                                SizedBox(width: 6),
+                                Text('Mais Pedidos'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                   ElevatedButton.icon(
                     onPressed: _openCreateMode,
                     style: ElevatedButton.styleFrom(
@@ -861,9 +1002,9 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
             ],
           ),
           master: _buildTablePanel(),
-          isInspectorOpen: _isInspectorOpen && !_isEditing,
+          isInspectorOpen: _isInspectorOpen,
           inspector: FincoreInspectorPanel(
-            isOpen: _isInspectorOpen && !_isEditing,
+            isOpen: _isInspectorOpen,
             isEditing: false,
             title: '',
             subtitle: '',
@@ -871,71 +1012,6 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
             child: _buildRightPanelContent(),
           ),
         ),
-
-        // Slide-in Right Drawer Modal when _isEditing is true
-        if (_isEditing) ...[
-          // Backdrop overlay
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  _isEditing = false;
-                  if (_controller.selectedCliente == null) {
-                    _isInspectorOpen = false;
-                  }
-                });
-              },
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
-          // Drawer lateral direito
-          Positioned(
-            top: 0,
-            bottom: 0,
-            right: 0,
-            width: 550,
-            child: Container(
-              decoration: const BoxDecoration(
-                color: FincoreColors.surface,
-                borderRadius: BorderRadius.horizontal(left: Radius.circular(16)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black45,
-                    blurRadius: 16,
-                    offset: Offset(-4, 0),
-                  ),
-                ],
-              ),
-              child: Scaffold(
-                backgroundColor: FincoreColors.surface,
-                appBar: AppBar(
-                  backgroundColor: FincoreColors.surfaceElevated,
-                  title: Text(
-                    _controller.selectedCliente == null ? 'Novo Cliente' : 'Editar Cliente',
-                    style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 14, fontWeight: FontWeight.bold),
-                  ),
-                  automaticallyImplyLeading: false,
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.close, color: FincoreColors.textSecondary),
-                      onPressed: () {
-                        setState(() {
-                          _isEditing = false;
-                          if (_controller.selectedCliente == null) {
-                            _isInspectorOpen = false;
-                          }
-                        });
-                      },
-                    ),
-                  ],
-                ),
-                body: _buildDetailsPanel(),
-              ),
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -1691,8 +1767,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                         Expanded(flex: 2, child: Text('TELEFONE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
                         Expanded(flex: 2, child: Text('ÚLT. PEDIDO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
                         Expanded(flex: 1, child: Text('PEDIDOS', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                        Expanded(flex: 2, child: Text('TKT MÉDIO', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
                         Expanded(flex: 2, child: Text('TOTAL', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        Expanded(flex: 2, child: Text('AÇÕES', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
                       ],
                     ),
                   ),
@@ -1700,30 +1776,53 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
 
                   // Linhas da Tabela
                   Expanded(
-                    child: _controller.filteredClientes.isEmpty
+                    child: _controller.visibleClientes.isEmpty
                         ? const Center(
                             child: Text(
-                              'Nenhum cliente cadastrado.',
+                              'Nenhum cliente encontrado.',
                               style: TextStyle(color: FincoreColors.textMuted, fontSize: 13),
                             ),
                           )
                         : ListView.separated(
-                            itemCount: _controller.filteredClientes.length,
+                            itemCount: _controller.visibleClientes.length + (_controller.hasMoreClientes ? 1 : 0),
                             separatorBuilder: (_, __) => const Divider(height: 1, color: FincoreColors.border),
                             itemBuilder: (context, index) {
-                              final c = _controller.filteredClientes[index];
+                              if (index == _controller.visibleClientes.length) {
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                                  color: FincoreColors.surfaceElevated.withValues(alpha: 0.5),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      OutlinedButton.icon(
+                                        onPressed: () => _controller.loadMoreClientes(count: 50),
+                                        icon: Icon(Icons.expand_more_rounded, size: 18, color: FincoreColors.primary),
+                                        label: Text(
+                                          'Carregar mais 50 clientes (${_controller.remainingClientes} restantes)',
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.primary),
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          side: BorderSide(color: FincoreColors.primary.withValues(alpha: 0.4)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+
+                              final c = _controller.visibleClientes[index];
                               final isSelected = c.id == _controller.selectedCliente?.id;
                               final isVip = c.observacoes.toLowerCase().contains('vip') || (c.apelido?.toLowerCase().contains('vip') ?? false);
-
                               final countPedidos = _controller.getCountPedidos(c.id.toString());
                               final totalCentavos = _controller.getTotalGastoCentavos(c.id.toString());
-                              final tktMedioCentavos = _controller.getTicketMedioCentavos(c.id.toString());
+                              final isConsumidor = _isConsumidorFinal(c);
 
                               return InkWell(
                                 onTap: () => _selectCliente(c),
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 150),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                                   decoration: BoxDecoration(
                                     color: isSelected
                                         ? FincoreColors.primary.withValues(alpha: 0.08)
@@ -1734,7 +1833,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                   ),
                                   child: Row(
                                     children: [
-                                      // Nome + VIP
+                                      // Nome + Apelido + VIP + Status Pill
                                       Expanded(
                                         flex: 3,
                                         child: Row(
@@ -1752,6 +1851,23 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
+                                            if (c.apelido != null && c.apelido!.trim().isNotEmpty) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                                decoration: BoxDecoration(
+                                                  color: FincoreColors.primary.withValues(alpha: 0.12),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                  border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.25)),
+                                                ),
+                                                child: Text(
+                                                  c.apelido!.trim(),
+                                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.primary),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
                                             if (isVip) ...[
                                               const SizedBox(width: 6),
                                               Container(
@@ -1761,17 +1877,36 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                                   borderRadius: BorderRadius.circular(4),
                                                   border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
                                                 ),
-                                                child: const Text('⭐ VIP', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.amber)),
+                                                child: const Text(
+                                                  'VIP',
+                                                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.amber),
+                                                ),
                                               ),
                                             ],
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: c.ativo ? FincoreColors.success.withValues(alpha: 0.12) : FincoreColors.textMuted.withValues(alpha: 0.12),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                c.ativo ? 'ATIVO' : 'INATIVO',
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: c.ativo ? FincoreColors.success : FincoreColors.textMuted,
+                                                ),
+                                              ),
+                                            ),
                                           ],
                                         ),
                                       ),
-                                      // Telefone
+                                      // Telefone Formatado
                                       Expanded(
                                         flex: 2,
                                         child: Text(
-                                          c.telefone.isEmpty ? '-' : c.telefone,
+                                          c.telefone.isEmpty ? '--' : c.telefoneFormatado,
                                           style: const TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
                                         ),
                                       ),
@@ -1779,15 +1914,16 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                       Expanded(
                                         flex: 2,
                                         child: Builder(
-                                          builder: (context) {
+                                          builder: (_) {
                                             final ult = _controller.getUltimoPedido(c.id.toString());
                                             if (ult == null) {
                                               return const Text(
-                                                'Sem pedidos',
-                                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textMuted),
+                                                'Nunca comprou',
+                                                style: TextStyle(fontSize: 11, color: FincoreColors.textMuted),
                                               );
                                             }
-                                            final dataStr = DateFormat('dd/MM/yyyy').format(ult.dataHoraCriacao.toLocal());
+                                            final dataRef = ult.dataHoraEntregaPrevista?.toLocal() ?? ult.dataHoraCriacao.toLocal();
+                                            final dataStr = DateFormat('dd/MM/yyyy').format(dataRef);
                                             return Text(
                                               '#${ult.numeroPedido.toString().padLeft(4, '0')} ($dataStr)',
                                               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
@@ -1812,15 +1948,6 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                           ),
                                         ),
                                       ),
-                                      // Ticket Médio
-                                      Expanded(
-                                        flex: 2,
-                                        child: Text(
-                                          dinheiro(tktMedioCentavos),
-                                          textAlign: TextAlign.right,
-                                          style: const TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
-                                        ),
-                                      ),
                                       // Total
                                       Expanded(
                                         flex: 2,
@@ -1830,12 +1957,110 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
                                         ),
                                       ),
+                                      // Ações Rápidas por Linha
+                                      Expanded(
+                                        flex: 2,
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            // 🛍️ Novo Pedido
+                                            IconButton(
+                                              icon: const Icon(Icons.add_shopping_cart_rounded, size: 16),
+                                              color: FincoreColors.primary,
+                                              tooltip: 'Novo Pedido para ${c.nome}',
+                                              padding: const EdgeInsets.all(4),
+                                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                              onPressed: () => _iniciarNovoPedidoParaCliente(c),
+                                            ),
+                                            // 💬 WhatsApp (Badge verde destacado)
+                                            if (c.telefone.isNotEmpty && c.telefone != '00000000000')
+                                              InkWell(
+                                                onTap: () => _abrirWhatsAppModal(c),
+                                                borderRadius: BorderRadius.circular(6),
+                                                child: Tooltip(
+                                                  message: 'Chamar ${c.nome} no WhatsApp',
+                                                  child: Container(
+                                                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                                                    padding: const EdgeInsets.all(5),
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFF25D366).withValues(alpha: 0.15),
+                                                      borderRadius: BorderRadius.circular(6),
+                                                      border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.4)),
+                                                    ),
+                                                    child: const Icon(Icons.chat_bubble_rounded, size: 13, color: Color(0xFF25D366)),
+                                                  ),
+                                                ),
+                                              ),
+                                            const SizedBox(width: 4),
+                                            Container(width: 1, height: 14, color: FincoreColors.border),
+                                            const SizedBox(width: 4),
+                                            // 🔄 Toggle Ativar/Inativar (Interruptor Liga/Desliga distinto)
+                                            if (!isConsumidor)
+                                              IconButton(
+                                                icon: Icon(
+                                                  c.ativo ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                                                  size: 22,
+                                                ),
+                                                color: c.ativo ? FincoreColors.primary : FincoreColors.textMuted,
+                                                tooltip: c.ativo ? 'Cliente Ativo (Clique para Inativar)' : 'Cliente Inativo (Clique para Ativar)',
+                                                padding: const EdgeInsets.all(2),
+                                                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                                onPressed: () => _toggleStatusCliente(c),
+                                              ),
+                                            // ✏️ Editar
+                                            if (!isConsumidor)
+                                              IconButton(
+                                                icon: const Icon(Icons.edit_outlined, size: 16),
+                                                color: FincoreColors.textSecondary,
+                                                tooltip: 'Editar Cadastro',
+                                                padding: const EdgeInsets.all(4),
+                                                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                                onPressed: () => _openEditMode(c),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
                               );
                             },
                           ),
+                  ),
+                  // Rodapé com Contador de Clientes e Paginação
+                  const Divider(height: 1, color: FincoreColors.border),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: FincoreColors.surfaceElevated,
+                    child: Row(
+                      children: [
+                        Text(
+                          'Exibindo ${_controller.visibleClientes.length} de ${_controller.filteredClientes.length} clientes (${_controller.clientes.length} no total)',
+                          style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted, fontWeight: FontWeight.w500),
+                        ),
+                        const Spacer(),
+                        if (_controller.hasMoreClientes)
+                          InkWell(
+                            onTap: () => _controller.loadMoreClientes(count: 50),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '+50 clientes (${_controller.remainingClientes} restantes)',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.primary),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.arrow_forward_ios_rounded, size: 10, color: FincoreColors.primary),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1888,7 +2113,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                         ),
                       ),
                       const SizedBox(width: 6),
-                      _buildSyncIndicator(c.metadata.syncStatus),
+                      _buildSyncIndicator(c.metadata.syncStatus, c.metadata.lastSyncedAt),
                     ],
                   ),
                 ],
@@ -1911,23 +2136,20 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                   const Icon(Icons.phone_outlined, size: 14, color: FincoreColors.textSecondary),
                   const SizedBox(width: 6),
                   Text(
-                    c.telefone.isEmpty ? 'Sem telefone' : c.telefone,
+                    c.telefone.isEmpty ? 'Sem telefone' : c.telefoneFormatado,
                     style: const TextStyle(fontSize: 13, color: FincoreColors.textSecondary),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
 
-              // Botões de Ação Rápida no Painel
+              // Botões de Ação Rápida no Painel (Linha 1: Novo Pedido + WhatsApp)
               Row(
                 children: [
                   Expanded(
+                    flex: 3,
                     child: FilledButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Criação de pedido iniciada (Fluxo PDV).')),
-                        );
-                      },
+                      onPressed: () => _iniciarNovoPedidoParaCliente(c),
                       style: FilledButton.styleFrom(
                         backgroundColor: FincoreColors.primary,
                         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -1936,25 +2158,64 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                       label: const Text('Novo Pedido', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
                     ),
                   ),
-                  if (!_isConsumidorFinal(c)) ...[
+                  if (c.telefone.isNotEmpty && c.telefone != '00000000000') ...[
                     const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        _loadClientIntoForm(c);
-                        setState(() {
-                          _isEditing = true;
-                        });
-                      },
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        side: const BorderSide(color: FincoreColors.border),
+                    Expanded(
+                      flex: 2,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _abrirWhatsAppModal(c),
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.1),
+                          side: const BorderSide(color: Color(0xFF25D366)),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF25D366)),
+                        label: const Text('WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF25D366))),
                       ),
-                      icon: const Icon(Icons.edit_outlined, size: 16, color: FincoreColors.textPrimary),
-                      label: const Text('Editar', style: TextStyle(fontSize: 12, color: FincoreColors.textPrimary)),
                     ),
                   ],
                 ],
               ),
+              if (!_isConsumidorFinal(c)) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openEditMode(c),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          side: const BorderSide(color: FincoreColors.border),
+                        ),
+                        icon: const Icon(Icons.edit_outlined, size: 15, color: FincoreColors.textPrimary),
+                        label: const Text('Editar', style: TextStyle(fontSize: 12, color: FincoreColors.textPrimary)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _toggleStatusCliente(c),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          side: BorderSide(color: c.ativo ? Colors.amber.withValues(alpha: 0.6) : FincoreColors.success.withValues(alpha: 0.6)),
+                        ),
+                        icon: Icon(c.ativo ? Icons.toggle_on_rounded : Icons.toggle_off_rounded, size: 18, color: c.ativo ? FincoreColors.primary : FincoreColors.textMuted),
+                        label: Text(c.ativo ? 'Inativar' : 'Ativar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.ativo ? Colors.amber[800] : FincoreColors.success)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: () => _excluirCliente(c),
+                      tooltip: 'Excluir Cliente',
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.3)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -1972,6 +2233,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
             const Tab(text: 'Resumo'),
             Tab(text: 'Pedidos (${_controller.getCountPedidos(c.id.toString())})'),
             const Tab(text: 'Endereço'),
+            const Tab(text: 'Financeiro'),
           ],
         ),
         const Divider(height: 1, color: FincoreColors.border),
@@ -1983,6 +2245,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
               _buildAbaResumo(c),
               _buildAbaPedidos(c),
               _buildAbaEnderecos(),
+              _buildAbaFinanceiro(c),
             ],
           ),
         ),
@@ -2120,7 +2383,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                   );
                 }
                 final itens = snapshot.data ?? [];
-                final dataStr = DateFormat('dd/MM/yyyy HH:mm').format(pedido.dataHoraCriacao.toLocal());
+                final dataRef = pedido.dataHoraEntregaPrevista?.toLocal() ?? pedido.dataHoraCriacao.toLocal();
+                final dataStr = DateFormat('dd/MM/yyyy HH:mm').format(dataRef);
                 final totalUnidades = itens.fold<double>(0.0, (sum, i) => sum + i.quantidade);
 
                 return Column(
@@ -2377,7 +2641,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final p = clientPedidos[index];
-        final dataStr = DateFormat('dd/MM/yyyy HH:mm').format(p.dataHoraCriacao.toLocal());
+        final dataRef = p.dataHoraEntregaPrevista?.toLocal() ?? p.dataHoraCriacao.toLocal();
+        final dataStr = DateFormat('dd/MM/yyyy HH:mm').format(dataRef);
         final isCancelado = p.status == 'cancelado';
 
         return Material(
@@ -2764,26 +3029,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
     );
   }
 
-  Widget _infoDetailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: FincoreColors.textSecondary),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 2),
-              Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: FincoreColors.textPrimary)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Widget _discreteMetricText(String text) {
     return Text(
@@ -2796,283 +3042,6 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildDetailsPanel() {
-    final isNew = _controller.selectedCliente == null;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Form(
-        key: _clienteFormKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // 1. Dados Pessoais
-            const Text('DADOS DO CLIENTE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.textMuted, letterSpacing: 0.8)),
-            const SizedBox(height: 12),
-            FincoreTextField(
-              controller: _nomeCtrl,
-              hintText: 'Nome completo *',
-              validator: FincoreValidators.required,
-            ),
-            const SizedBox(height: 8),
-            FincoreTextField(
-              controller: _apelidoCtrl,
-              hintText: 'Apelido / Nome Fantasia',
-            ),
-            const SizedBox(height: 8),
-            FincoreTextField(
-              controller: _telefoneCtrl,
-              hintText: 'Telefone comercial *',
-              inputFormatters: FincoreFormatters.telefone,
-              validator: FincoreValidators.required,
-            ),
-            const SizedBox(height: 8),
-            FincoreTextField(
-              controller: _emailCtrl,
-              hintText: 'E-mail do cliente',
-            ),
-            const SizedBox(height: 8),
-            FincoreTextField(
-              controller: _documentoCtrl,
-              hintText: 'CPF ou CNPJ',
-              inputFormatters: FincoreFormatters.cnpjCpf,
-            ),
-            const SizedBox(height: 8),
-
-            // Data de nascimento
-            InkWell(
-              onTap: () async {
-                final date = await showDatePicker(
-                  context: context,
-                  initialDate: _dataNascimento ?? DateTime.now().subtract(const Duration(days: 365 * 18)),
-                  firstDate: DateTime(1900),
-                  lastDate: DateTime.now(),
-                );
-                if (date != null && mounted) {
-                  setState(() {
-                    _dataNascimento = date;
-                  });
-                }
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                decoration: BoxDecoration(
-                  color: FincoreColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: FincoreColors.border),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      _dataNascimento != null ? DateFormat('dd/MM/yyyy').format(_dataNascimento!) : 'Data de Nascimento',
-                      style: TextStyle(
-                        color: _dataNascimento != null ? FincoreColors.textPrimary : FincoreColors.textMuted,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const Icon(Icons.calendar_today_outlined, size: 16, color: FincoreColors.textMuted),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 16),
-            const Divider(color: FincoreColors.border),
-            const SizedBox(height: 14),
-
-            // 2. Opções Comerciais
-            const Text('OPÇÕES COMERCIAIS & COMUNICAÇÃO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.textMuted, letterSpacing: 0.8)),
-            const SizedBox(height: 12),
-
-            FincoreTextField(
-              controller: _preferenciaEntregaCtrl,
-              hintText: 'Preferência de entrega (Ex: Retirada, Delivery...)',
-            ),
-            const SizedBox(height: 8),
-
-            FincoreTextField(
-              controller: _limiteCreditoCtrl,
-              hintText: 'Limite de crédito em reais (R\$)',
-              inputFormatters: FincoreFormatters.real,
-            ),
-            const SizedBox(height: 12),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Aceita contato por WhatsApp?', style: TextStyle(color: FincoreColors.textSecondary, fontSize: 12)),
-                Switch(
-                  value: _aceitaWhatsapp,
-                  activeColor: FincoreColors.primary,
-                  onChanged: (v) => setState(() => _aceitaWhatsapp = v),
-                ),
-              ],
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Aceita receber e-mails de marketing?', style: TextStyle(color: FincoreColors.textSecondary, fontSize: 12)),
-                Switch(
-                  value: _aceitaMarketing,
-                  activeColor: FincoreColors.primary,
-                  onChanged: (v) => setState(() => _aceitaMarketing = v),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-            const Divider(color: FincoreColors.border),
-            const SizedBox(height: 14),
-
-            // 3. Status do Cadastro
-            const Text('STATUS DO CADASTRO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.textMuted, letterSpacing: 0.8)),
-            const SizedBox(height: 10),
-
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _ativo
-                    ? FincoreColors.success.withValues(alpha: 0.08)
-                    : FincoreColors.danger.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: _ativo
-                      ? FincoreColors.success.withValues(alpha: 0.35)
-                      : FincoreColors.danger.withValues(alpha: 0.35),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _ativo
-                          ? FincoreColors.success.withValues(alpha: 0.18)
-                          : FincoreColors.danger.withValues(alpha: 0.18),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      _ativo ? Icons.check_circle_rounded : Icons.block_rounded,
-                      color: _ativo ? FincoreColors.success : FincoreColors.danger,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              _ativo ? 'Cadastro Ativo' : 'Cadastro Inativo',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: _ativo ? FincoreColors.success : FincoreColors.danger,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: _ativo
-                                    ? FincoreColors.success.withValues(alpha: 0.2)
-                                    : FincoreColors.danger.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                _ativo ? 'HABILITADO' : 'DESABILITADO',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  color: _ativo ? FincoreColors.success : FincoreColors.danger,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _ativo
-                              ? 'Cliente habilitado para vendas e atendimento'
-                              : 'Cliente desabilitado para novos pedidos',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: FincoreColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Switch(
-                    value: _ativo,
-                    activeColor: FincoreColors.success,
-                    inactiveThumbColor: FincoreColors.danger,
-                    onChanged: (v) => setState(() => _ativo = v),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 16),
-            const Divider(color: FincoreColors.border),
-            const SizedBox(height: 14),
-
-            // 4. Observações
-            const Text('OBSERVAÇÕES', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.textMuted, letterSpacing: 0.8)),
-            const SizedBox(height: 10),
-            FincoreTextField(
-              controller: _obsCtrl,
-              hintText: 'Anotações sobre restrições alimentares, rotas, etc...',
-              maxLines: 4,
-            ),
-
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _isEditing = false;
-                        if (isNew) {
-                          _isInspectorOpen = false;
-                        } else {
-                          _loadClientIntoForm(_controller.selectedCliente!);
-                        }
-                      });
-                    },
-                    child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textSecondary, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: FincoreColors.primary,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: _controller.isSaving ? null : _salvarCliente,
-                    child: Text(
-                      _controller.isSaving ? 'Salvando...' : 'Salvar Cliente',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   bool _isConsumidorFinal(Cliente? client) {
     if (client == null) return false;
     final nome = client.nome.toLowerCase();
@@ -3080,6 +3049,32 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
         nome.contains('cliente consumidor') ||
         client.telefone == '00000000000' ||
         client.observacoes.toLowerCase().contains('imutável');
+  }
+
+  Future<void> _abrirWhatsAppModal(Cliente c) async {
+    String? enderecoFormatado;
+    final enderecosDoCliente = _controller.enderecos.where((e) => e.clienteId == c.id).toList();
+    if (enderecosDoCliente.isNotEmpty) {
+      final loc = enderecosDoCliente.first;
+      enderecoFormatado = '${loc.logradouro}, ${loc.numero} - ${loc.bairro}, ${loc.cidade}';
+    }
+
+    String? empresaNome;
+    try {
+      if (TenantContext().hasContext) {
+        empresaNome = TenantContext().empresa.nomeFantasia.isNotEmpty
+            ? TenantContext().empresa.nomeFantasia
+            : TenantContext().empresa.razaoSocial;
+      }
+    } catch (_) {}
+
+    await WhatsAppDialog.show(
+      context,
+      rawPhone: c.telefone,
+      clienteNome: c.nome,
+      enderecoCliente: enderecoFormatado,
+      nomeEmpresa: empresaNome,
+    );
   }
 
   Widget _buildInspectorInfoRow(String label, String value, {bool isHighlight = false}) {
@@ -3100,6 +3095,512 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
           ),
         ],
       ),
+    );
+  }
+
+  // ─── Aba Financeiro do Cliente ─────────────────────────────────────────────
+
+  Widget _buildAbaFinanceiro(Cliente c) {
+    final contasCtrl = DependencyInjection().tryGet<ContasReceberController>() ?? ContasReceberController();
+    bool apenasNotasPrazo = true;
+
+    return StatefulBuilder(
+      builder: (context, setAbaState) {
+        return FutureBuilder<void>(
+          future: contasCtrl.carregar(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting && contasCtrl.titulos.isEmpty) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final todosTitulos = contasCtrl.getTitulosPorCliente(c.id, clienteNome: c.nome);
+
+            if (todosTitulos.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.account_balance_wallet_outlined, size: 40, color: FincoreColors.textMuted.withValues(alpha: 0.5)),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Nenhuma movimentação financeira encontrada para este cliente.',
+                      style: TextStyle(color: FincoreColors.textMuted, fontSize: 13),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final titulosExibidos = apenasNotasPrazo
+                ? todosTitulos.where((t) => t.isNotaPrazo).toList()
+                : todosTitulos;
+
+            // O saldo devedor pendente do cliente compreende APENAS pendências em Nota a Prazo (fiado/faturado).
+            final totalAReceberCentavos = todosTitulos
+                .where((t) => t.isNotaPrazo && t.status != StatusTituloReceber.recebido && t.status != StatusTituloReceber.cancelado)
+                .fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
+
+            final totalRecebidoCentavos = todosTitulos
+                .where((t) => t.status == StatusTituloReceber.recebido || !t.isNotaPrazo)
+                .fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
+
+            final totalAtrasadoCentavos = todosTitulos
+                .where((t) => t.isNotaPrazo && t.status == StatusTituloReceber.atrasado)
+                .fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
+
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // Seletor de Filtro de Modalidade (Nota a Prazo vs Completo)
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.surfaceElevated,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: FincoreColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => setAbaState(() => apenasNotasPrazo = true),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: apenasNotasPrazo ? FincoreColors.primary : Colors.transparent,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.receipt_long_rounded, size: 14, color: apenasNotasPrazo ? Colors.white : FincoreColors.textMuted),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Apenas Nota a Prazo (Fiado)',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: apenasNotasPrazo ? Colors.white : FincoreColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => setAbaState(() => apenasNotasPrazo = false),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: !apenasNotasPrazo ? FincoreColors.primary : Colors.transparent,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.history_rounded, size: 14, color: !apenasNotasPrazo ? Colors.white : FincoreColors.textMuted),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Todo o Histórico (${todosTitulos.length})',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: !apenasNotasPrazo ? Colors.white : FincoreColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Resumo de KPIs do Cliente
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: totalAReceberCentavos > 0
+                              ? const Color(0xFFF59E0B).withValues(alpha: 0.12)
+                              : FincoreColors.surfaceElevated,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: totalAReceberCentavos > 0
+                                ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
+                                : FincoreColors.border,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'A RECEBER / PENDENTE',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFFD97706),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              dinheiro(totalAReceberCentavos),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFFD97706),
+                              ),
+                            ),
+                            if (totalAtrasadoCentavos > 0) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                '${dinheiro(totalAtrasadoCentavos)} vencido',
+                                style: const TextStyle(fontSize: 10, color: Color(0xFFEF4444), fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'TOTAL QUITADO / PAGO',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF059669),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              dinheiro(totalRecebidoCentavos),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF059669),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${todosTitulos.where((t) => t.status == StatusTituloReceber.recebido).length} pedido(s) pagos',
+                              style: const TextStyle(fontSize: 10, color: FincoreColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      apenasNotasPrazo
+                          ? 'Pendências em Nota a Prazo (${titulosExibidos.length})'
+                          : 'Títulos e Pagamentos (${titulosExibidos.length})',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: FincoreColors.textPrimary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                if (titulosExibidos.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'Nenhum título em Nota a Prazo encontrado para este cliente.',
+                      style: TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+                    ),
+                  )
+                else
+                  ...titulosExibidos.map((t) => _buildClienteTituloCard(t, c, contasCtrl)),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildClienteTituloCard(TituloReceber t, Cliente c, ContasReceberController contasCtrl) {
+    final isRecebido = t.status == StatusTituloReceber.recebido;
+    final isAtrasado = t.status == StatusTituloReceber.atrasado;
+
+    final Color statusColor = isRecebido
+        ? const Color(0xFF10B981)
+        : isAtrasado
+            ? const Color(0xFFEF4444)
+            : const Color(0xFFF59E0B);
+
+    final String statusLabel = isRecebido
+        ? 'PAGO'
+        : isAtrasado
+            ? 'ATRASADO'
+            : 'A RECEBER';
+
+    final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: FincoreColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isRecebido ? FincoreColors.border : statusColor.withValues(alpha: 0.4),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    t.friendlyNumeroPedido,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: FincoreColors.textPrimary),
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: () {
+                      PedidoMirrorDialog.show(
+                        context,
+                        pedidoId: t.pedidoId,
+                        numeroPedido: t.numeroPedido,
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: FincoreColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.visibility_outlined, size: 12, color: FincoreColors.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Ver Pedido',
+                            style: TextStyle(
+                              color: FincoreColors.primary,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  statusLabel,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: statusColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.payment_outlined, size: 14, color: FincoreColors.textSecondary),
+              const SizedBox(width: 4),
+              Text(
+                t.formaPagamentoNome,
+                style: const TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
+              ),
+              const Spacer(),
+              Text(
+                dinheiro(t.valorTotalCentavos),
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: FincoreColors.textPrimary),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Pedido: ${dateFormat.format(t.dataEmissao)}',
+                style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted),
+              ),
+              Text(
+                'Entrega: ${dateFormat.format(t.dataEntrega)}',
+                style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          if (isRecebido) ...[
+            Row(
+              children: [
+                const Icon(Icons.check_circle_outline_rounded, size: 12, color: Color(0xFF10B981)),
+                const SizedBox(width: 4),
+                Text(
+                  'Pago em: ${dateFormat.format(t.dataRecebimento ?? t.dataEmissao)}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ] else ...[
+            Text(
+              'Vencimento: ${dateFormat.format(t.dataVencimento)}',
+              style: TextStyle(
+                fontSize: 11,
+                color: isAtrasado ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+                fontWeight: isAtrasado ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+          if (!isRecebido) ...[
+            const Divider(height: 14, color: FincoreColors.border),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final ok = await DialogBaixaTitulo.show(
+                        context,
+                        item: t,
+                        controller: contasCtrl,
+                      );
+                      if (ok && mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            backgroundColor: FincoreColors.success,
+                            content: Text('Baixa confirmada com sucesso!'),
+                          ),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.price_check_rounded, size: 16),
+                    label: const Text('Dar Baixa', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                if (c.telefone.isNotEmpty && c.telefone != '00000000000') ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => _abrirWhatsAppCobrancaTitulo(t, c),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF25D366),
+                      side: const BorderSide(color: Color(0xFF25D366)),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
+                    label: const Text('Cobrar', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _abrirWhatsAppCobrancaTitulo(TituloReceber t, Cliente c) async {
+    final tel = t.clienteTelefone ?? c.telefone;
+    if (tel.isEmpty || tel == '00000000000') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Telefone não informado para este cliente.')),
+      );
+      return;
+    }
+
+    String? empresaNome;
+    try {
+      if (TenantContext().hasContext) {
+        empresaNome = TenantContext().empresa.nomeFantasia.isNotEmpty
+            ? TenantContext().empresa.nomeFantasia
+            : TenantContext().empresa.razaoSocial;
+      }
+    } catch (_) {}
+
+    PixWhatsAppInfo? pixInfo;
+    if (t.isPix && t.pixChave != null && t.pixChave!.isNotEmpty) {
+      try {
+        final db = DependencyInjection().get<FincoreDatabase>();
+        final config = await (db.select(db.empresaConfiguracaoTable)).getSingleOrNull();
+        final copiaECola = PixGenerator.gerarCopiaCola(
+          chave: t.pixChave!,
+          favorecido: (config?.pixFavorecido != null && config!.pixFavorecido!.isNotEmpty)
+              ? config.pixFavorecido!
+              : (empresaNome ?? 'FINCORE'),
+          cidade: 'Sorocaba',
+          valor: t.valorTotalCentavos / 100,
+          tipoChave: t.pixTipoChave,
+        );
+        pixInfo = PixWhatsAppInfo(
+          chaveDisplay: t.pixChave!,
+          tipoChave: t.pixTipoChave ?? 'PIX',
+          copiaECola: copiaECola,
+        );
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    await WhatsAppDialog.show(
+      context,
+      rawPhone: tel,
+      clienteNome: c.nome,
+      initialMessage: WhatsAppService.gerarTextoLembretePagamento(
+        nomeCliente: c.nome,
+        numeroPedidoOuId: t.friendlyNumeroPedido,
+        valor: t.valorTotalCentavos / 100,
+        nomeEmpresa: empresaNome,
+      ),
+      pixInfo: pixInfo,
+      numeroPedido: t.friendlyNumeroPedido,
+      nomeEmpresa: empresaNome,
     );
   }
 }

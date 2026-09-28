@@ -118,6 +118,9 @@ class DadosImpressaoPedido {
   final int totalCentavos;
   final String formaPagamento;
   final String? observacoes;
+  final String? pixChave;
+  final String? pixTipo;
+  final String? pixBanco;
 
   const DadosImpressaoPedido({
     required this.numeroPedido,
@@ -132,6 +135,9 @@ class DadosImpressaoPedido {
     required this.totalCentavos,
     required this.formaPagamento,
     this.observacoes,
+    this.pixChave,
+    this.pixTipo,
+    this.pixBanco,
   });
 }
 
@@ -349,14 +355,22 @@ class FincorePdfGerador {
               pw.Text(dados.formaPagamento.toUpperCase(), style: defaultStyle),
 
               // Bloco PIX com QR Code e Copia e Cola idêntico ao Salgaderia
-              if (dados.formaPagamento.toLowerCase().contains('pix') && cfg.pixChave.isNotEmpty) ...[
+              if (dados.formaPagamento.toLowerCase().contains('pix') && 
+                  ((dados.pixChave != null && dados.pixChave!.isNotEmpty) || cfg.pixChave.isNotEmpty)) ...[
                 () {
+                  final effectivePixKey = (dados.pixChave != null && dados.pixChave!.isNotEmpty) ? dados.pixChave! : cfg.pixChave;
+                  final effectivePixTipo = (dados.pixTipo != null && dados.pixTipo!.isNotEmpty) ? dados.pixTipo! : cfg.pixTipo;
+                  final effectiveFavorecido = (dados.pixBanco != null && dados.pixBanco!.isNotEmpty) 
+                      ? dados.pixBanco! 
+                      : (cfg.pixFavorecido.isNotEmpty ? cfg.pixFavorecido : 'Estabelecimento');
+
                   final copiaCola = PixGenerator.gerarCopiaCola(
-                    chave: cfg.pixChave,
-                    favorecido: cfg.pixFavorecido.isNotEmpty ? cfg.pixFavorecido : 'Estabelecimento',
+                    chave: effectivePixKey,
+                    favorecido: effectiveFavorecido,
                     cidade: 'Sorocaba',
                     valor: dados.totalCentavos / 100.0,
                     mensagem: 'Salgaderia',
+                    tipoChave: effectivePixTipo,
                   );
 
                   return pw.Column(
@@ -366,10 +380,12 @@ class FincorePdfGerador {
                       pw.Divider(borderStyle: pw.BorderStyle.dashed),
                       pw.Center(child: pw.Text('PAGAMENTO VIA PIX', style: boldStyle)),
                       pw.SizedBox(height: 2),
-                      pw.Center(child: pw.Text('Chave: ${cfg.pixChave} (${cfg.pixTipo.toUpperCase()})', style: boldStyle)),
-                      if (cfg.pixFavorecido.isNotEmpty)
-                        pw.Center(child: pw.Text('Favorecido: ${cfg.pixFavorecido}', style: defaultStyle)),
-                      if (cfg.pixBanco.isNotEmpty)
+                      pw.Center(child: pw.Text('Chave: $effectivePixKey (${effectivePixTipo.toUpperCase()})', style: boldStyle)),
+                      if (effectiveFavorecido.isNotEmpty)
+                        pw.Center(child: pw.Text('Favorecido: $effectiveFavorecido', style: defaultStyle)),
+                      if (dados.pixBanco != null && dados.pixBanco!.isNotEmpty)
+                        pw.Center(child: pw.Text('Banco: ${dados.pixBanco}', style: defaultStyle))
+                      else if (cfg.pixBanco.isNotEmpty)
                         pw.Center(child: pw.Text('Banco: ${cfg.pixBanco}', style: defaultStyle)),
                       if (cfg.habilitarQrCodePix) ...[
                         pw.SizedBox(height: 6),

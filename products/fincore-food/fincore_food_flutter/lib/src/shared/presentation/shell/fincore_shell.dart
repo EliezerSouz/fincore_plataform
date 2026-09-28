@@ -21,12 +21,16 @@ import 'package:fincore_food_flutter/src/dashboard/views/dashboard_page.dart';
 import 'package:fincore_food_flutter/src/usuarios/views/usuarios_page.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/connectivity_badge.dart';
 import 'package:fincore_food_flutter/src/financeiro/views/financeiro_page.dart';
+import 'package:fincore_food_flutter/src/financeiro/views/contas_receber_page.dart';
 import 'package:fincore_food_flutter/src/estoque/views/estoque_page.dart';
 import 'package:fincore_food_flutter/src/estoque/views/producao_page.dart';
 import 'package:fincore_food_flutter/src/cozinha/views/kds_screen.dart';
 import 'package:fincore_food_flutter/src/shared/services/permissao_service.dart';
 
 import 'package:fincore_food_flutter/src/shared/presentation/tenant/empresa_switcher_widget.dart';
+
+import 'package:fincore_food_flutter/src/shared/services/global_pedidos_alert_service.dart';
+import 'package:fincore_food_flutter/src/shared/widgets/pedidos_atencao_overlay.dart';
 
 // ─── Modelo de item da sidebar ─────────────────────────────────────────────
 
@@ -164,9 +168,15 @@ class _FincoreShellState extends State<FincoreShell>
       items: [
         _NavItem(
           id: 'financeiro',
-          label: 'Financeiro',
-          icon: Icons.account_balance_wallet_outlined,
-          iconSelected: Icons.account_balance_wallet_rounded,
+          label: 'Controle de Caixa',
+          icon: Icons.point_of_sale_outlined,
+          iconSelected: Icons.point_of_sale_rounded,
+        ),
+        _NavItem(
+          id: 'contas_receber',
+          label: 'Contas a Receber',
+          icon: Icons.receipt_long_outlined,
+          iconSelected: Icons.receipt_long_rounded,
         ),
       ],
     ),
@@ -210,6 +220,7 @@ class _FincoreShellState extends State<FincoreShell>
               case 'locais_entrega':
                 return PermissaoService.podeAcessarCadastros(role);
               case 'financeiro':
+              case 'contas_receber':
                 return PermissaoService.podeAcessarFinanceiro(role);
               case 'estoque':
               case 'producao':
@@ -233,6 +244,23 @@ class _FincoreShellState extends State<FincoreShell>
     FincoreShell._currentState = this;
     _tenantContext = DependencyInjection().get<TenantContext>();
     _loadPrefs();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final alertService = GlobalPedidosAlertService();
+        alertService.registerShellContext(context);
+        alertService.start();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    GlobalPedidosAlertService().stop();
+    if (FincoreShell._currentState == this) {
+      FincoreShell._currentState = null;
+    }
+    super.dispose();
   }
 
   /// Converte a role técnica do banco (ex: 'ADMIN', 'SUPERADMIN') em um
@@ -599,24 +627,42 @@ class _FincoreShellState extends State<FincoreShell>
                                     'Falhas de Transmissão Detectadas',
                                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary),
                                   ),
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: FincoreColors.primary,
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                    ),
-                                    onPressed: () async {
-                                      await outbox.retryFailedEntries();
-                                      try {
-                                        final syncEngine = di.get<SyncEngine>();
-                                        await syncEngine.processPendingQueue();
-                                      } catch (_) {}
-                                      await refreshData();
-                                    },
-                                    icon: const Icon(Icons.replay_rounded, size: 16, color: Colors.white),
-                                    label: const Text(
-                                      'Reenviar Todas as Falhas',
-                                      style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
-                                    ),
+                                  Row(
+                                    children: [
+                                      OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: FincoreColors.danger,
+                                          side: const BorderSide(color: FincoreColors.danger),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                        ),
+                                        onPressed: () async {
+                                          await (db.delete(db.outboxSync)..where((t) => t.status.equals('failed'))).go();
+                                          await refreshData();
+                                        },
+                                        icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                                        label: const Text('Limpar Fila de Falhas', style: TextStyle(fontSize: 12)),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: FincoreColors.primary,
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                        ),
+                                        onPressed: () async {
+                                          await outbox.retryFailedEntries();
+                                          try {
+                                            final syncEngine = di.get<SyncEngine>();
+                                            await syncEngine.processPendingQueue();
+                                          } catch (_) {}
+                                          await refreshData();
+                                        },
+                                        icon: const Icon(Icons.replay_rounded, size: 16, color: Colors.white),
+                                        label: const Text(
+                                          'Reenviar Todas as Falhas',
+                                          style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -817,14 +863,6 @@ class _FincoreShellState extends State<FincoreShell>
     );
   }
 
-  @override
-  void dispose() {
-    if (FincoreShell._currentState == this) {
-      FincoreShell._currentState = null;
-    }
-    super.dispose();
-  }
-
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -912,46 +950,60 @@ class _FincoreShellState extends State<FincoreShell>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _shellBg,
-      body: Row(
+      body: Stack(
         children: [
-          // ── Sidebar ──────────────────────────────────────────────────────
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            width: _sidebarExpanded ? 220 : 64,
-            child: _buildSidebar(),
-          ),
+          Row(
+            children: [
+              // ── Sidebar ──────────────────────────────────────────────────────
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                width: _sidebarExpanded ? 220 : 64,
+                child: _buildSidebar(),
+              ),
 
-          // ── Conteúdo ─────────────────────────────────────────────────────
-          Expanded(
-            child: Column(
-              children: [
-                _buildTopbar(),
-                const SizedBox(height: 1),
-                Expanded(
-                  child: Container(
-                    color: _shellBg,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (child, animation) {
-                        return FadeTransition(
-                          opacity: animation,
-                          child: child,
-                        );
-                      },
-                      child: KeyedSubtree(
-                        key: ValueKey<String>(_selectedTabId),
-                        child: _buildContent(),
+              // ── Conteúdo ─────────────────────────────────────────────────────
+              Expanded(
+                child: Column(
+                  children: [
+                    _buildTopbar(),
+                    const SizedBox(height: 1),
+                    Expanded(
+                      child: Container(
+                        color: _shellBg,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeInCubic,
+                          transitionBuilder: (child, animation) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            );
+                          },
+                          child: KeyedSubtree(
+                            key: ValueKey<String>(_selectedTabId),
+                            child: _buildContent(),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    _buildStatusBar(),
+                  ],
                 ),
-                _buildStatusBar(),
-              ],
-            ),
+              ),
+            ],
+          ),
+          ValueListenableBuilder<PedidosAlertaResumo?>(
+            valueListenable: GlobalPedidosAlertService().alertaOverlayNotifier,
+            builder: (context, resumo, _) {
+              if (resumo == null) return const SizedBox.shrink();
+              return PedidosAtencaoOverlay(
+                resumo: resumo,
+                onDismiss: () => GlobalPedidosAlertService().dismissOverlay(),
+              );
+            },
           ),
         ],
       ),
@@ -1478,6 +1530,8 @@ class _FincoreShellState extends State<FincoreShell>
         return const ProdutosPage();
       case 'financeiro':
         return const FinanceiroPage();
+      case 'contas_receber':
+        return const ContasReceberPage();
       case 'estoque':
         return const EstoquePage();
       case 'producao':
@@ -1555,7 +1609,8 @@ class _FincoreShellState extends State<FincoreShell>
       'categorias' => ('Categorias', 'Gerenciamento de categorias do cardápio'),
       'locais_entrega' => ('Locais de Entrega', 'Bairros e taxas de entrega de pedidos'),
       'produtos' => ('Produtos', 'Cardápio e política de preços'),
-      'financeiro' => ('Financeiro', 'Caixa, receitas e relatórios'),
+      'financeiro' => ('Controle de Caixa', 'Abertura, fechamento e fluxo de caixa diário'),
+      'contas_receber' => ('Contas a Receber', 'Gestão de títulos, pendências e conciliação'),
       'estoque' => ('Estoque', 'Controle de produtos acabados'),
       'producao' => ('Produção', 'Registro de lotes e planejamento preditivo'),
       'usuarios' => ('Usuários & Permissões', 'Gestão de equipe e controle de acesso'),

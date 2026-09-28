@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS public.pedido (
   "clienteTelefoneAvulso" TEXT,
   "valorSubtotalCentavos" INTEGER NOT NULL CHECK ("valorSubtotalCentavos" >= 0),
   "valorTaxaEntregaCentavos" INTEGER NOT NULL DEFAULT 0 CHECK ("valorTaxaEntregaCentavos" >= 0),
+  "valorTaxaServicoCentavos" INTEGER NOT NULL DEFAULT 0 CHECK ("valorTaxaServicoCentavos" >= 0),
   "valorTotalCentavos" INTEGER NOT NULL CHECK ("valorTotalCentavos" >= 0),
   "trocoParaCentavos" INTEGER,
   "formaPagamentoId" UUID,
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS public.pedido (
   "updatedBy" UUID NOT NULL,
   "deletedAt" TIMESTAMPTZ,
   "deletedBy" UUID,
-  CONSTRAINT pedido_total_consistente CHECK ("valorTotalCentavos" = "valorSubtotalCentavos" + "valorTaxaEntregaCentavos"),
+  CONSTRAINT pedido_total_consistente CHECK ("valorTotalCentavos" = "valorSubtotalCentavos" + "valorTaxaEntregaCentavos" + COALESCE("valorTaxaServicoCentavos", 0)),
   CONSTRAINT pedido_numero_tenant_unique UNIQUE ("tenantId", "numeroPedido")
 );
 

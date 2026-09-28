@@ -10,6 +10,8 @@ import 'package:fincore_core/repository/audit_log_repository.dart';
 import 'package:fincore_core/sync/outbox_service.dart';
 import 'package:fincore_core/sync/sync_engine.dart';
 import 'package:uuid/uuid.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../shared/data/sync/supabase_sync_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,6 +194,8 @@ class EstoqueController extends ChangeNotifier {
   bool _loading = false;
   String? _error;
   StreamSubscription? _syncSub;
+  int _janelaProjecaoDias = 14;
+  bool _janelaCustomizada = false;
 
   EstoqueController()
       : _db = DependencyInjection().get<FincoreDatabase>(),
@@ -211,6 +215,19 @@ class EstoqueController extends ChangeNotifier {
 
   List<EstoqueItem> get itens => _itens;
   List<ReservaAgendada> get reservasAgendadas => _reservasAgendadas;
+  int get janelaProjecaoDias => _janelaProjecaoDias;
+
+  void setJanelaProjecaoDias(int dias) {
+    _janelaProjecaoDias = dias;
+    _janelaCustomizada = true;
+    _carregar();
+  }
+
+  /// Recarrega a configuração da empresa a partir do banco de dados (reseta customização manual temporária)
+  Future<void> recarregarConfiguracao() async {
+    _janelaCustomizada = false;
+    await _carregar();
+  }
 
   List<EstoqueItem> get itensCriticos =>
       _itens.where((i) => i.status == EstoqueStatus.critico).toList();
@@ -244,6 +261,23 @@ class EstoqueController extends ChangeNotifier {
 
     try {
       final tenantId = _context.tenantId;
+
+      // Carrega a janela padrão configurada na empresa se o usuário não tiver selecionado manualmente
+      if (!_janelaCustomizada) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final savedDias = prefs.getInt('estoque_janela_projecao_dias');
+          if (savedDias != null && savedDias > 0) {
+            _janelaProjecaoDias = savedDias;
+          } else {
+            final configs = await _db.select(_db.empresaConfiguracaoTable).get();
+            final configRow = configs.where((t) => t.tenantId == tenantId).firstOrNull ?? configs.firstOrNull;
+            if (configRow != null && configRow.janelaProjecaoEstoqueDias != null) {
+              _janelaProjecaoDias = configRow.janelaProjecaoEstoqueDias!;
+            }
+          }
+        } catch (_) {}
+      }
 
       // 0. Auto-healing: Recalcula reservas de pedidos agendados e converte baixas indevidas
       await recalcularReservasEEstoques(isFromSync: isFromSync);
@@ -351,18 +385,37 @@ class EstoqueController extends ChangeNotifier {
       _itens = itens;
 
       // 4. Carrega agenda de reservas futuras baseando-se no fluxo operacional real do KDS
+      final DateTime? limiteJanela = _janelaProjecaoDias > 0
+          ? DateTime.now().add(Duration(days: _janelaProjecaoDias))
+          : null;
+
       final ordensAtivas = await (
         _db.select(_db.ordensPreparoTable)
           ..where((t) =>
               t.tenantId.equals(tenantId) &
               t.status.isIn(['pendente', 'em_preparo']) &
-              t.prioridade.equals('Entrega Programada') &
               t.deletedAt.isNull())
           ..orderBy([(t) => OrderingTerm(expression: t.criadaEm)])
       ).get();
 
       final List<ReservaAgendada> listAgendados = [];
       for (final ord in ordensAtivas) {
+        DateTime? dataEntrega;
+        if (ord.observacoes != null) {
+          final match = RegExp(r'agendado:\s*([0-9]{2}/[0-9]{2}/[0-9]{4}\s+[0-9]{2}:[0-9]{2})')
+              .firstMatch(ord.observacoes!);
+          if (match != null) {
+            try {
+              dataEntrega = DateFormat('dd/MM/yyyy HH:mm').parse(match.group(1)!);
+            } catch (_) {}
+          }
+        }
+        dataEntrega ??= ord.criadaEm.toLocal();
+
+        if (limiteJanela != null && dataEntrega.isAfter(limiteJanela)) {
+          continue;
+        }
+
         try {
           final List<dynamic> rawItens = jsonDecode(ord.itensJson) as List<dynamic>;
           for (final x in rawItens) {
@@ -381,7 +434,7 @@ class EstoqueController extends ChangeNotifier {
               quantidadeAntes: 0,
               quantidadeDepois: 0,
               motivo: 'Reserva para entrega',
-              dataHora: ord.criadaEm,
+              dataHora: dataEntrega,
               createdAt: ord.createdAt,
               updatedAt: ord.updatedAt,
               createdBy: ord.createdBy,
@@ -393,7 +446,7 @@ class EstoqueController extends ChangeNotifier {
             listAgendados.add(ReservaAgendada(
               movimentacao: fakeMov,
               nomeProduto: nomeProd,
-              dataEntrega: ord.criadaEm.toLocal(),
+              dataEntrega: dataEntrega,
               quantidade: qtd,
             ));
           }
@@ -1155,10 +1208,36 @@ class EstoqueController extends ChangeNotifier {
         .where((p) => !statusFinalizados.contains(p.status.toLowerCase().trim()))
         .toList();
 
-    // 2. Soma reservas por produto para TODOS os pedidos pendentes (independente de logística)
-    //    Antes: só contava 'Entrega'. Agora conta qualquer tipo, pois o produto está comprometido.
+    // 2. Soma reservas por produto para pedidos pendentes DENTRO DA JANELA DE PROJEÇÃO
+    //    Pedidos agendados além da janela (ex: 30 a 45 dias) não bloqueiam o estoque do ciclo atual.
+    final DateTime? limiteJanela = _janelaProjecaoDias > 0 ? DateTime.now().add(Duration(days: _janelaProjecaoDias)) : null;
+
     final Map<String, int> reservasPorProduto = {};
     for (final p in pedidosPendentes) {
+      final bool semEstoquePorObs = p.observacoes != null &&
+          (p.observacoes!.contains('Estoque: Não movimentado') ||
+           p.observacoes!.contains('Sem Baixa') ||
+           p.observacoes!.contains('[ISENTO_ESTOQUE]'));
+      if (semEstoquePorObs) continue;
+
+      DateTime? dataEntrega = p.dataHoraEntregaPrevista?.toLocal();
+      if (dataEntrega == null && p.observacoes != null) {
+        final match = RegExp(r'agendado:\s*([0-9]{2}/[0-9]{2}/[0-9]{4}\s+[0-9]{2}:[0-9]{2})')
+            .firstMatch(p.observacoes!);
+        if (match != null) {
+          try {
+            dataEntrega = DateFormat('dd/MM/yyyy HH:mm').parse(match.group(1)!);
+          } catch (_) {}
+        }
+      }
+
+      if (limiteJanela != null && dataEntrega != null) {
+        if (dataEntrega.isAfter(limiteJanela)) {
+          // Pedido com data muito distante da janela de produção do ciclo atual
+          continue;
+        }
+      }
+
       final itens = await (_db.select(_db.itensPedidoTable)
             ..where((t) => t.pedidoId.equals(p.id) & t.deletedAt.isNull().equals(true)))
           .get();
@@ -1213,11 +1292,17 @@ class EstoqueController extends ChangeNotifier {
     final uuid = const Uuid();
 
     for (final p in pedidosEntregues) {
+      final bool semBaixaPorObs = p.observacoes != null &&
+          (p.observacoes!.contains('Estoque: Não movimentado') ||
+           p.observacoes!.contains('Sem Baixa') ||
+           p.observacoes!.contains('[ISENTO_ESTOQUE]'));
+      if (semBaixaPorObs) continue;
+
       final movExpedicao = await (_db.select(_db.movimentacoesEstoqueTable)
             ..where((t) =>
                 t.tenantId.equals(tenantId) &
                 t.pedidoId.equals(p.id) &
-                t.tipo.equals('expedicao') &
+                (t.tipo.equals('expedicao') | t.tipo.equals('isento')) &
                 t.deletedAt.isNull().equals(true)))
           .get();
 

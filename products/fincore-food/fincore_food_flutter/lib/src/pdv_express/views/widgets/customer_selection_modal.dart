@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
+import 'package:fincore_core/common/domain_primitives.dart';
 import '../../controllers/pdv_express_controller.dart';
 
 /// Modal rápido para seleção de Cliente, Canais de Atendimento (Mesa/Balcão vs Delivery)
@@ -69,13 +70,14 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
   }
 
   void _onCustomerSelected(Cliente c) async {
-    _nameCtrl.text = c.nome;
-    _phoneCtrl.text = c.telefone;
+    _nameCtrl.text = c.nomeExibicao;
+    _phoneCtrl.text = c.telefoneFormatado.isNotEmpty ? c.telefoneFormatado : c.telefone;
 
     widget.controller.updateCliente(
       widget.controller.cliente.copyWith(
         id: c.id,
         nome: c.nome,
+        apelido: c.apelido,
         telefone: c.telefone,
       ),
     );
@@ -355,12 +357,16 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
                     return sorted.take(15);
                   }
                   final query = textEditingValue.text.toLowerCase();
+                  final qNorm = normalizarTelefone(textEditingValue.text);
                   return sorted.where((c) {
+                    final matchNorm = qNorm.length >= 3 && c.telefoneNormalizado.contains(qNorm);
                     return c.nome.toLowerCase().contains(query) ||
-                           c.telefone.contains(query);
-                  });
+                           (c.apelido?.toLowerCase().contains(query) ?? false) ||
+                           c.telefone.contains(query) ||
+                           matchNorm;
+                  }).take(15);
                 },
-                displayStringForOption: (Cliente c) => c.nome,
+                displayStringForOption: (Cliente c) => c.nomeExibicao,
                 onSelected: _onCustomerSelected,
                 fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
                   textController.text = _nameCtrl.text;

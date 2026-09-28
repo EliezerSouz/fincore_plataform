@@ -365,6 +365,7 @@ class DashboardRepository {
     final hojePedidosValidos = pedidos30Dias.where((p) =>
         p.dataHoraCriacao.isAfter(startOfDay) &&
         p.dataHoraCriacao.isBefore(endOfDay) &&
+        !p.isUsoInterno &&
         p.status != 'cancelado' &&
         p.status != 'rascunho').toList();
 
@@ -395,6 +396,7 @@ class DashboardRepository {
     // Semana
     final semanaPedidosValidos = pedidos30Dias.where((p) =>
         p.dataHoraCriacao.isAfter(startOf7DaysAgo) &&
+        !p.isUsoInterno &&
         p.status != 'cancelado' &&
         p.status != 'rascunho').toList();
     final semanaCancelados = pedidos30Dias.where((p) =>
@@ -406,6 +408,7 @@ class DashboardRepository {
 
     // Mês
     final mesPedidosValidos = pedidos30Dias.where((p) =>
+        !p.isUsoInterno &&
         p.status != 'cancelado' &&
         p.status != 'rascunho').toList();
     final mesCancelados = pedidos30Dias.where((p) =>
@@ -426,6 +429,7 @@ class DashboardRepository {
       final pedidosDia = pedidos30Dias.where((p) =>
           !p.dataHoraCriacao.isBefore(inicioDia) &&
           !p.dataHoraCriacao.isAfter(fimDia) &&
+          !p.isUsoInterno &&
           p.status != 'cancelado' &&
           p.status != 'rascunho');
       faturamento7Dias[i] = pedidosDia.fold<int>(0, (sum, p) => sum + p.valorTotalCentavos);
@@ -447,6 +451,7 @@ class DashboardRepository {
       final pedidosDia = pedidos30Dias.where((p) =>
           !p.dataHoraCriacao.isBefore(inicioDia) &&
           !p.dataHoraCriacao.isAfter(fimDia) &&
+          !p.isUsoInterno &&
           p.status != 'cancelado' &&
           p.status != 'rascunho');
       faturamento30Dias.add(pedidosDia.fold<int>(0, (sum, p) => sum + p.valorTotalCentavos));

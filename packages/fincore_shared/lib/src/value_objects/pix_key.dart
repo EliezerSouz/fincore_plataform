@@ -87,16 +87,23 @@ class FincorePixKey {
     }
   }
 
-  /// Versão "limpa" da chave para uso em payloads EMV/PIX.
+  /// Versão "limpa" da chave para uso em payloads EMV/PIX conforme o manual do Bacen.
   String get clean {
     switch (tipo) {
       case PixKeyTipo.cpf:
-      case PixKeyTipo.cnpj:
-      case PixKeyTipo.telefone:
         return value.replaceAll(RegExp(r'\D'), '');
+      case PixKeyTipo.cnpj:
+        return value.replaceAll(RegExp(r'\D'), '');
+      case PixKeyTipo.telefone:
+        String digits = value.replaceAll(RegExp(r'\D'), '');
+        if (digits.startsWith('55') && (digits.length == 12 || digits.length == 13)) {
+          digits = digits.substring(2);
+        }
+        return '+55$digits';
       case PixKeyTipo.email:
+        return value.trim().toLowerCase();
       case PixKeyTipo.aleatoria:
-        return value.trim();
+        return value.trim().toLowerCase();
     }
   }
 

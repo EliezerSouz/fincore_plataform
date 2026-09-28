@@ -14,6 +14,7 @@ class PrintData {
   final String formaPagamento;
   final int totalCentavos;
   final int? taxaEntregaCentavos;
+  final int? taxaServicoCentavos;
   final int? descontoCentavos;
   final int? trocoParaCentavos;
   final List<PrintDataItem> itens;
@@ -22,6 +23,9 @@ class PrintData {
   final String? status;
   final String? cidade;
   final String? uf;
+  final String? pixChave;
+  final String? pixTipo;
+  final String? pixBanco;
 
   const PrintData({
     required this.pedidoId,
@@ -36,6 +40,7 @@ class PrintData {
     required this.formaPagamento,
     required this.totalCentavos,
     this.taxaEntregaCentavos,
+    this.taxaServicoCentavos,
     this.descontoCentavos,
     this.trocoParaCentavos,
     required this.itens,
@@ -44,6 +49,9 @@ class PrintData {
     this.status,
     this.cidade,
     this.uf,
+    this.pixChave,
+    this.pixTipo,
+    this.pixBanco,
   });
 
   String get shortId =>

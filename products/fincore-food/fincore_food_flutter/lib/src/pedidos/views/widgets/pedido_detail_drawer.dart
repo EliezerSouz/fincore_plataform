@@ -5,10 +5,15 @@ import 'package:fincore_core/common/kds_models.dart';
 import 'package:intl/intl.dart';
 import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/database/fincore_database.dart';
+import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/entity_detail_drawer.dart';
 import 'package:fincore_food_flutter/src/shared/services/dados_ordem_parser.dart';
 import 'package:fincore_food_flutter/src/pedidos/controllers/central_pedidos_controller.dart';
 import 'package:fincore_food_flutter/src/shared/services/permissao_service.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/widgets/whatsapp_dialog.dart';
+import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
+import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
+import 'package:fincore_food_flutter/src/financeiro/controllers/contas_receber_controller.dart';
 
 /// Drawer de detalhes de um pedido — especialização de [EntityDetailDrawer].
 ///
@@ -59,17 +64,342 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   late List<HistoricoOrdemPreparo> _historico;
   bool _loadingHistorico = true;
   Map<String, int> _itemPrecosEfetivos = {};
+  // WhatsApp: dados carregados assincronamente
+  String? _telefonePedido;
+  String? _nomeClientePedido;
+  // PIX: apenas os campos necessarios da forma de pagamento
+  String? _pixChave;
+  String? _pixTipoChave;
+  bool _formaPagamentoIsPix = false;
+
+  // Status Financeiro (Contas a Receber)
+  bool _isPago = false;
+  bool _isUsoConsumo = false;
+  DateTime? _dataPagamento;
+  bool _loadingFinanceiro = true;
+  bool _baixandoFinanceiro = false;
 
   @override
   void initState() {
     super.initState();
     _historico = [];
     _carregarPrecosEfetivos();
+    _carregarDadosWhatsApp();
+    _carregarStatusFinanceiro();
     if (PermissaoService.podeVerTimeline(widget.userRole)) {
       _carregarHistorico();
     } else {
       _loadingHistorico = false;
     }
+  }
+
+  Future<void> _carregarStatusFinanceiro() async {
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final pedidoRow = await (db.select(db.pedidosTable)
+            ..where((p) => p.id.equals(widget.ordem.pedidoId)))
+          .getSingleOrNull();
+
+      final fpNome = pedidoRow?.formaPagamentoNome?.toLowerCase() ?? '';
+      final isUsoConsumo = (pedidoRow?.isUsoInterno == true) ||
+          fpNome.contains('consumo') ||
+          fpNome.contains('cortesia') ||
+          fpNome.contains('bonifica');
+
+      if (isUsoConsumo) {
+        if (mounted) {
+          setState(() {
+            _isUsoConsumo = true;
+            _isPago = true;
+            _loadingFinanceiro = false;
+          });
+        }
+        return;
+      }
+
+      final lancamento = await (db.select(db.lancamentosFinanceirosTable)
+            ..where((l) =>
+                l.pedidoId.equals(widget.ordem.pedidoId) &
+                l.tipo.equals('receita') &
+                l.deletedAt.isNull())
+            ..limit(1))
+          .getSingleOrNull();
+
+      if (mounted) {
+        setState(() {
+          _isUsoConsumo = false;
+          _isPago = lancamento != null;
+          _dataPagamento = lancamento?.dataHora.toLocal();
+          _loadingFinanceiro = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingFinanceiro = false);
+    }
+  }
+
+  Future<void> _darBaixaFinanceira() async {
+    setState(() => _baixandoFinanceiro = true);
+    try {
+      final ctrl = DependencyInjection().tryGet<ContasReceberController>() ?? ContasReceberController();
+      final ok = await ctrl.darBaixaPorPedidoId(pedidoId: widget.ordem.pedidoId);
+      if (ok && mounted) {
+        await _carregarStatusFinanceiro();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: FincoreColors.success,
+            content: Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                SizedBox(width: 8),
+                Text('Recebimento confirmado e registrado no Caixa!'),
+              ],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: FincoreColors.danger,
+            content: Text('Erro ao registrar recebimento: $e'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _baixandoFinanceiro = false);
+    }
+  }
+
+  Future<void> _estornarBaixaFinanceira() async {
+    final controllerMotivo = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final motivo = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: FincoreColors.surface,
+        title: const Row(
+          children: [
+            Icon(Icons.history_rounded, color: Color(0xFFEF4444)),
+            SizedBox(width: 8),
+            Text('Estornar Pagamento?', style: TextStyle(color: FincoreColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Deseja realmente estornar a baixa do pagamento deste pedido? Esta ação removerá o lançamento financeiro e gerará um histórico.',
+                style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: controllerMotivo,
+                autofocus: true,
+                style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Motivo do Estorno *',
+                  labelStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 13),
+                  hintText: 'Ex: Pagamento duplicado / Cliente desistiu',
+                  hintStyle: TextStyle(color: FincoreColors.textMuted.withOpacity(0.5), fontSize: 12),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  filled: true,
+                  fillColor: FincoreColors.background,
+                ),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Informe o motivo do estorno';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                Navigator.of(ctx).pop(controllerMotivo.text.trim());
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+            child: const Text('Estornar Pagamento', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (motivo == null || motivo.isEmpty) return;
+
+    setState(() => _baixandoFinanceiro = true);
+    try {
+      final ctrl = DependencyInjection().tryGet<ContasReceberController>() ?? ContasReceberController();
+      final ok = await ctrl.estornarBaixaPorPedidoId(
+        pedidoId: widget.ordem.pedidoId,
+        motivoEstorno: motivo,
+      );
+      if (ok && mounted) {
+        await _carregarStatusFinanceiro();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: FincoreColors.warning,
+            content: Row(
+              children: [
+                Icon(Icons.undo_rounded, color: Colors.white, size: 18),
+                SizedBox(width: 8),
+                Text('Baixa financeira estornada com sucesso!'),
+              ],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: FincoreColors.danger,
+            content: Text('Erro ao estornar pagamento: $e'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _baixandoFinanceiro = false);
+    }
+  }
+
+  /// Carrega telefone do cliente e forma de pagamento do pedido para o WhatsApp
+  Future<void> _carregarDadosWhatsApp() async {
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
+      if (pedido == null) return;
+
+      String? tel = pedido.clienteTelefoneAvulso;
+      String? nome = pedido.clienteNomeAvulso ?? widget.parsed.cliente;
+
+      // Se tiver clienteId, busca o cliente cadastrado
+      if (pedido.clienteId != null && (tel == null || tel.isEmpty)) {
+        try {
+          final clienteRow = await (db.select(db.clientesTable)
+                ..where((c) => c.id.equals(pedido.clienteId!) & c.deletedAt.isNull()))
+              .getSingleOrNull();
+          if (clienteRow != null) {
+            tel = clienteRow.telefone;
+            if (clienteRow.nome.isNotEmpty) {
+              nome = clienteRow.nome;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Busca forma de pagamento para verificar se e PIX
+      String? pixChave;
+      String? pixTipoChave;
+      bool isPix = false;
+
+      if (pedido.formaPagamentoId != null) {
+        try {
+          final formaRow = await (db.select(db.formasPagamentoTable)
+                ..where((f) => f.id.equals(pedido.formaPagamentoId!) & f.deletedAt.isNull()))
+              .getSingleOrNull();
+          if (formaRow != null && formaRow.tipo == 'pix') {
+            isPix = true;
+            pixChave = formaRow.pixChave;
+            pixTipoChave = formaRow.pixTipoChave;
+          }
+        } catch (_) {}
+      }
+
+      if (mounted) {
+        setState(() {
+          _telefonePedido = tel;
+          _nomeClientePedido = nome;
+          _formaPagamentoIsPix = isPix;
+          _pixChave = pixChave;
+          _pixTipoChave = pixTipoChave;
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// Abre o WhatsAppDialog com dados do pedido, incluindo card PIX se aplicavel
+  Future<void> _abrirWhatsApp() async {
+    final tel = _telefonePedido ?? widget.parsed.telefone;
+    if (tel.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: FincoreColors.danger,
+            content: Text('Nenhum telefone cadastrado para este cliente.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    final nome = _nomeClientePedido ?? widget.parsed.cliente;
+    final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
+    final numPedido = pedido?.numeroPedido != null
+        ? '#${pedido!.numeroPedido.toString().padLeft(6, '0')}'
+        : widget.ordem.pedidoId.substring(0, 8).toUpperCase();
+
+    // Gera card PIX se a forma de pagamento for PIX e tiver chave cadastrada
+    PixWhatsAppInfo? pixInfo;
+    if (_formaPagamentoIsPix && _pixChave != null && _pixChave!.isNotEmpty) {
+      try {
+        final db = DependencyInjection().get<FincoreDatabase>();
+        final config = await (db.select(db.empresaConfiguracaoTable)).getSingleOrNull();
+        final totalCentavos = widget.controller.totalOrdemCentavos(widget.ordem);
+        final copiaECola = PixGenerator.gerarCopiaCola(
+          chave: _pixChave!,
+          favorecido: (config?.pixFavorecido != null && config!.pixFavorecido!.isNotEmpty)
+              ? config.pixFavorecido!
+              : nome,
+          cidade: 'Sorocaba',
+          valor: totalCentavos / 100,
+          tipoChave: _pixTipoChave,
+        );
+        pixInfo = PixWhatsAppInfo(
+          chaveDisplay: _pixChave!,
+          tipoChave: _pixTipoChave ?? 'PIX',
+          copiaECola: copiaECola,
+        );
+      } catch (_) {}
+    }
+
+    String? empresaNome;
+    try {
+      if (TenantContext().hasContext) {
+        empresaNome = TenantContext().empresa.nomeFantasia.isNotEmpty
+            ? TenantContext().empresa.nomeFantasia
+            : TenantContext().empresa.razaoSocial;
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+    await WhatsAppDialog.show(
+      context,
+      rawPhone: tel,
+      clienteNome: nome,
+      initialMessage: WhatsAppService.gerarTextoContatoKanban(
+        nomeCliente: nome,
+        numeroPedidoOuId: numPedido,
+        nomeEmpresa: empresaNome,
+      ),
+      pixInfo: pixInfo,
+      numeroPedido: numPedido,
+      nomeEmpresa: empresaNome,
+    );
   }
 
   Future<void> _carregarPrecosEfetivos() async {
@@ -320,7 +650,6 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     final totalCentavos = widget.controller.totalOrdemCentavos(widget.ordem);
     final mostraFinanceiro =
         PermissaoService.podeVerFinanceiro(widget.userRole);
-    final isCozinha = widget.userRole?.toUpperCase() == 'COZINHA';
 
     final agendada = widget.parsed.dataAgendada ?? pedido?.dataHoraEntregaPrevista?.toLocal();
     final String dataStr;
@@ -599,6 +928,13 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
           ),
         ),
 
+        // --- Status Financeiro / Contas a Receber ---
+        if (mostraFinanceiro) ...[
+          const SizedBox(height: 16),
+          const DrawerSectionLabel(label: 'Contas a Receber (Financeiro)'),
+          _buildCardFinanceiro(),
+        ],
+
         const SizedBox(height: 16),
 
         // --- Prazo Operacional ---
@@ -683,6 +1019,228 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     );
   }
 
+  Widget _buildCardFinanceiro() {
+    if (_loadingFinanceiro) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+
+    final totalCentavos = widget.controller.totalOrdemCentavos(widget.ordem);
+    final valorFormatado = 'R\$ ${(totalCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')}';
+
+    if (_isUsoConsumo) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: Color(0xFF6366F1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.stars_rounded, color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'USO E CONSUMO INTERNO (ISENTO DE COBRANÇA)',
+                    style: TextStyle(
+                      color: Color(0xFF6366F1),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Venda registrada como Uso/Consumo Interno ou Cortesia. Não gera financeiro a receber no Caixa.',
+                    style: TextStyle(
+                      color: FincoreColors.textSecondary,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_isPago) {
+      final dataStr = _dataPagamento != null
+          ? DateFormat('dd/MM/yyyy · HH:mm').format(_dataPagamento!)
+          : 'Confirmado';
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF10B981).withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF10B981),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.check_rounded, color: Colors.white, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'PAGAMENTO CONFIRMADO / RECEBIDO',
+                        style: TextStyle(
+                          color: Color(0xFF059669),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Recebido em $dataStr · $valorFormatado',
+                        style: const TextStyle(
+                          color: FincoreColors.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _baixandoFinanceiro ? null : _estornarBaixaFinanceira,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFEF4444),
+                    side: const BorderSide(color: Color(0xFFEF4444)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  icon: const Icon(Icons.undo_rounded, size: 14),
+                  label: const Text('Estornar Pagamento', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Pendente / A Receber
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.pending_actions_rounded, color: Color(0xFFD97706), size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'PAGAMENTO PENDENTE (A RECEBER)',
+                      style: TextStyle(
+                        color: Color(0xFFD97706),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Valor em aberto: $valorFormatado',
+                      style: const TextStyle(
+                        color: FincoreColors.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _baixandoFinanceiro ? null : _darBaixaFinanceira,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  icon: _baixandoFinanceiro
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.price_check_rounded, size: 18),
+                  label: Text(
+                    _baixandoFinanceiro ? 'Registrando...' : 'Dar Baixa / Confirmar Recebimento',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _abrirWhatsApp,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF25D366),
+                  side: const BorderSide(color: Color(0xFF25D366)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                label: const Text('Cobrar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   IconData _logisticaIcon(String tipo) {
     final t = tipo.toLowerCase();
     if (t.contains('entrega') || t.contains('delivery')) {
@@ -741,8 +1299,10 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     final podeCancelar = !isCozinha && PermissaoService.podeCancelarPedido(widget.userRole) &&
         widget.ordem.status == StatusOrdemPreparo.pendente;
     final podeImprimir = !isCozinha && PermissaoService.podeImprimir(widget.userRole);
+    final temTelefone = (_telefonePedido ?? widget.parsed.telefone).isNotEmpty;
+    final podeWhatsApp = !isCozinha && temTelefone;
 
-    final hasSecondaryActions = podeEditar || podeCancelar || podeReverter || podeImprimir;
+    final hasSecondaryActions = podeEditar || podeCancelar || podeReverter || podeImprimir || podeWhatsApp;
 
     if (proxStatus == null && !hasSecondaryActions) {
       return const SizedBox.shrink();
@@ -807,6 +1367,13 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
                   icon: Icons.print_outlined,
                   label: 'Imprimir',
                   onTap: widget.onImprimir,
+                ),
+              if (podeWhatsApp)
+                _SecondaryButton(
+                  icon: Icons.chat_rounded,
+                  label: 'WhatsApp',
+                  onTap: _loadingAction ? null : _abrirWhatsApp,
+                  color: const Color(0xFF25D366),
                 ),
               if (podeCancelar && widget.onCancelar != null)
                 _SecondaryButton(
@@ -1031,46 +1598,6 @@ class _PrazoRow extends StatelessWidget {
   }
 }
 
-class _ResumoFinanceiro extends StatelessWidget {
-  final int totalCentavos;
-  const _ResumoFinanceiro({required this.totalCentavos});
-
-  @override
-  Widget build(BuildContext context) {
-    final totalStr =
-        'R\$ ${(totalCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: FincoreColors.background,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: FincoreColors.border),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const Text(
-            'TOTAL',
-            style: TextStyle(
-              color: FincoreColors.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.8,
-            ),
-          ),
-          Text(
-            totalStr,
-            style: const TextStyle(
-              color: FincoreColors.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _TimelineEntry extends StatelessWidget {
   final HistoricoOrdemPreparo log;

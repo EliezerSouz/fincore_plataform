@@ -12,17 +12,37 @@ class ResumoCaixa {
   final SessaoCaixaData? sessaoAtiva;
   final int totalVendasCentavos;
   final int totalDespesasCentavos;
+  final int totalSuprimentosCentavos;
+  final int totalSangriasCentavos;
+  final int fundoTrocoCentavos;
   final int saldoCentavos;
+  final int saldoEsperadoDinheiroCentavos;
+  final int totalConsumoInternoCentavos;
+  final int qtdConsumoInterno;
   final Map<String, int> vendasPorFormaPagamento; // nomeFP → valorCentavos
   final int qtdPedidos;
+  final int qtdVendasAgendadas;
+  final int totalVendasAgendadasCentavos;
+  final int qtdVendasImediatas;
+  final int totalVendasImediatasCentavos;
 
   const ResumoCaixa({
     this.sessaoAtiva,
     this.totalVendasCentavos = 0,
     this.totalDespesasCentavos = 0,
+    this.totalSuprimentosCentavos = 0,
+    this.totalSangriasCentavos = 0,
+    this.fundoTrocoCentavos = 0,
     this.saldoCentavos = 0,
+    this.saldoEsperadoDinheiroCentavos = 0,
+    this.totalConsumoInternoCentavos = 0,
+    this.qtdConsumoInterno = 0,
     this.vendasPorFormaPagamento = const {},
     this.qtdPedidos = 0,
+    this.qtdVendasAgendadas = 0,
+    this.totalVendasAgendadasCentavos = 0,
+    this.qtdVendasImediatas = 0,
+    this.totalVendasImediatasCentavos = 0,
   });
 
   bool get caixaAberto => sessaoAtiva?.status == 'aberta';
@@ -38,6 +58,7 @@ class FinanceiroController extends ChangeNotifier {
   final OutboxService _outbox;
 
   ResumoCaixa _resumo = const ResumoCaixa();
+  List<SessaoCaixaData> _historicoSessoes = [];
   bool _loading = false;
   String? _error;
 
@@ -49,11 +70,12 @@ class FinanceiroController extends ChangeNotifier {
   }
 
   ResumoCaixa get resumo => _resumo;
+  List<SessaoCaixaData> get historicoSessoes => _historicoSessoes;
   bool get loading => _loading;
   String? get error => _error;
 
   // ─────────────────────────────────────────────────────────────────
-  // Carregamento do Resumo do Caixa
+  // Carregamento do Resumo e Histórico de Caixas
   // ─────────────────────────────────────────────────────────────────
 
   Future<void> _carregarResumo() async {
@@ -78,8 +100,18 @@ class FinanceiroController extends ChangeNotifier {
           ..limit(1)
       ).getSingleOrNull();
 
-      // 2. Pedidos do dia confirmados (para montar o resumo mesmo sem sessão de caixa)
-      final pedidosDia = await (
+      // 2. Histórico de sessões passadas (ordenadas pela data de abertura decrescente)
+      _historicoSessoes = await (
+        _db.select(_db.sessoesCaixaTable)
+          ..where((t) =>
+              t.tenantId.equals(tenantId) &
+              t.deletedAt.isNull())
+          ..orderBy([(t) => OrderingTerm(expression: t.dataAbertura, mode: OrderingMode.desc)])
+          ..limit(50)
+      ).get();
+
+      // 3. Todos os pedidos confirmados do dia
+      final todosPedidosDia = await (
         _db.select(_db.pedidosTable)
           ..where((t) =>
               t.tenantId.equals(tenantId) &
@@ -89,7 +121,7 @@ class FinanceiroController extends ChangeNotifier {
               t.deletedAt.isNull())
       ).get();
 
-      // 3. Lançamentos da sessão ativa (se existir)
+      // 4. Lançamentos da sessão ativa (se existir)
       List<LancamentoFinanceiroData> lancamentos = [];
       if (sessaoAtiva != null) {
         lancamentos = await (
@@ -101,35 +133,86 @@ class FinanceiroController extends ChangeNotifier {
         ).get();
       }
 
-      // 4. Consolida as vendas por forma de pagamento
+      // 5. Consolida as vendas por forma de pagamento e distingue vendas agendadas vs imediatas
       final Map<String, int> vendasPorFP = {};
       int totalVendas = 0;
       int totalDespesas = 0;
+      int totalSuprimentos = 0;
+      int totalSangrias = 0;
+      int totalConsumoInterno = 0;
+      int qtdConsumo = 0;
+      int qtdVendasReais = 0;
+      int qtdAgendadas = 0;
+      int totalAgendadas = 0;
+      int qtdImediatas = 0;
+      int totalImediatas = 0;
+      int vendasDinheiroEspecie = 0;
 
-      // Agrupa pedidos por forma de pagamento
-      for (final p in pedidosDia) {
+      for (final p in todosPedidosDia) {
         final fpNome = p.formaPagamentoNome ?? 'Não informado';
+        final isConsumo = p.isUsoInterno ||
+            fpNome.toLowerCase().contains('consumo') ||
+            fpNome.toLowerCase().contains('cortesia') ||
+            fpNome.toLowerCase().contains('bonifica');
+
+        if (isConsumo) {
+          totalConsumoInterno += p.valorTotalCentavos;
+          qtdConsumo++;
+          continue;
+        }
+
         vendasPorFP[fpNome] = (vendasPorFP[fpNome] ?? 0) + p.valorTotalCentavos;
         totalVendas += p.valorTotalCentavos;
-      }
+        qtdVendasReais++;
 
-      // Despesas e sangrias da sessão
-      for (final l in lancamentos) {
-        if (l.tipo == 'despesa' || l.tipo == 'sangria') {
-          totalDespesas += l.valorCentavos;
+        if (fpNome.toLowerCase().contains('dinheiro') || fpNome.toLowerCase().contains('especie')) {
+          vendasDinheiroEspecie += p.valorTotalCentavos;
+        }
+
+        final isAgendado = p.dataHoraEntregaPrevista != null &&
+            p.dataHoraEntregaPrevista!.toUtc().isAfter(fimDia);
+
+        if (isAgendado) {
+          qtdAgendadas++;
+          totalAgendadas += p.valorTotalCentavos;
+        } else {
+          qtdImediatas++;
+          totalImediatas += p.valorTotalCentavos;
         }
       }
 
-      final saldo = totalVendas - totalDespesas +
-          (sessaoAtiva?.valorAberturaCentavos ?? 0);
+      // 6. Processa sangrias, suprimentos e despesas da sessão
+      for (final l in lancamentos) {
+        if (l.tipo == 'despesa') {
+          totalDespesas += l.valorCentavos;
+        } else if (l.tipo == 'sangria') {
+          totalSangrias += l.valorCentavos;
+        } else if (l.tipo == 'suprimento') {
+          totalSuprimentos += l.valorCentavos;
+        }
+      }
+
+      final fundoTroco = sessaoAtiva?.valorAberturaCentavos ?? 0;
+      final saldoGeral = totalVendas - totalDespesas - totalSangrias + totalSuprimentos + fundoTroco;
+      final saldoDinheiro = fundoTroco + vendasDinheiroEspecie + totalSuprimentos - totalSangrias - totalDespesas;
 
       _resumo = ResumoCaixa(
         sessaoAtiva: sessaoAtiva,
         totalVendasCentavos: totalVendas,
         totalDespesasCentavos: totalDespesas,
-        saldoCentavos: saldo,
+        totalSuprimentosCentavos: totalSuprimentos,
+        totalSangriasCentavos: totalSangrias,
+        fundoTrocoCentavos: fundoTroco,
+        saldoCentavos: saldoGeral,
+        saldoEsperadoDinheiroCentavos: saldoDinheiro < 0 ? 0 : saldoDinheiro,
+        totalConsumoInternoCentavos: totalConsumoInterno,
+        qtdConsumoInterno: qtdConsumo,
         vendasPorFormaPagamento: vendasPorFP,
-        qtdPedidos: pedidosDia.length,
+        qtdPedidos: qtdVendasReais,
+        qtdVendasAgendadas: qtdAgendadas,
+        totalVendasAgendadasCentavos: totalAgendadas,
+        qtdVendasImediatas: qtdImediatas,
+        totalVendasImediatasCentavos: totalImediatas,
       );
     } catch (e) {
       _error = 'Erro ao carregar resumo financeiro: $e';
@@ -141,11 +224,53 @@ class FinanceiroController extends ChangeNotifier {
 
   Future<void> refresh() => _carregarResumo();
 
+  /// Carrega os lançamentos de uma sessão específica do histórico
+  Future<List<LancamentoFinanceiroData>> carregarLancamentosSessao(String sessaoId) async {
+    if (!_context.hasContext) return [];
+    final tenantId = _context.tenantId;
+    return await (
+      _db.select(_db.lancamentosFinanceirosTable)
+        ..where((t) =>
+            t.tenantId.equals(tenantId) &
+            t.sessaoCaixaId.equals(sessaoId) &
+            t.deletedAt.isNull())
+        ..orderBy([(t) => OrderingTerm(expression: t.dataHora, mode: OrderingMode.desc)])
+    ).get();
+  }
+
+  /// Carrega os pedidos confirmados pertencentes a uma sessão (ou à sessão ativa)
+  Future<List<PedidoData>> carregarPedidosSessao([String? sessaoId]) async {
+    if (!_context.hasContext) return [];
+    final tenantId = _context.tenantId;
+
+    final targetSessao = sessaoId != null
+        ? await (_db.select(_db.sessoesCaixaTable)..where((s) => s.id.equals(sessaoId))).getSingleOrNull()
+        : _resumo.sessaoAtiva;
+
+    if (targetSessao == null) return [];
+
+    final inicio = targetSessao.dataAbertura;
+    final fim = targetSessao.dataFechamento ?? DateTime.now().toUtc();
+
+    return await (_db.select(_db.pedidosTable)
+          ..where((t) =>
+              t.tenantId.equals(tenantId) &
+              t.status.equals('confirmado') &
+              t.dataHoraCriacao.isBiggerOrEqualValue(inicio) &
+              t.dataHoraCriacao.isSmallerThanValue(fim.add(const Duration(minutes: 5))) &
+              t.deletedAt.isNull())
+          ..orderBy([(t) => OrderingTerm(expression: t.dataHoraCriacao, mode: OrderingMode.desc)]))
+        .get();
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Abrir / Fechar Caixa
   // ─────────────────────────────────────────────────────────────────
 
-  Future<void> abrirCaixa({int valorAberturaCentavos = 0}) async {
+  Future<void> abrirCaixa({
+    int valorAberturaCentavos = 0,
+    String nomeTurno = 'Turno Padrão',
+  }) async {
     if (!_context.hasContext) return;
     if (_resumo.caixaAberto) return;
 
@@ -154,6 +279,8 @@ class FinanceiroController extends ChangeNotifier {
     final operadorNome = _context.usuario.nome;
     final now = DateTime.now().toUtc();
     final id = const Uuid().v4();
+
+    final obsTurno = 'Turno: $nomeTurno';
 
     await _db.into(_db.sessoesCaixaTable).insert(
       SessoesCaixaTableCompanion.insert(
@@ -164,6 +291,7 @@ class FinanceiroController extends ChangeNotifier {
         status: const Value('aberta'),
         dataAbertura: now,
         valorAberturaCentavos: Value(valorAberturaCentavos),
+        observacoes: Value(obsTurno),
         syncVersion: const Value(1),
         syncStatus: SyncStatus.pending,
         createdAt: now,
@@ -185,6 +313,7 @@ class FinanceiroController extends ChangeNotifier {
         status: 'aberta',
         dataAbertura: now,
         valorAberturaCentavos: valorAberturaCentavos,
+        observacoes: obsTurno,
         createdAt: now,
         updatedAt: now,
       ),

@@ -11,17 +11,22 @@ import 'package:fincore_core/repository/empresa_configuracao_repository.dart';
 import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/context/tenant_context.dart';
-import 'package:fincore_core/database/fincore_database.dart';
-import 'package:drift_db_viewer/drift_db_viewer.dart';
 import 'package:fincore_core/repository/empresa_repository.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_text_field.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_page_header.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_section_card.dart';
 import 'package:fincore_food_flutter/src/shared/services/impressao_service.dart';
+import 'package:fincore_food_flutter/src/shared/services/sound_service.dart';
+import 'package:fincore_food_flutter/src/shared/services/global_pedidos_alert_service.dart';
+import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/audit_timeline_panel.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/log_explorer_dialog.dart';
 import 'package:fincore_food_flutter/src/configuracoes/views/subviews/personalizacao_view.dart';
+import 'package:fincore_food_flutter/src/configuracoes/views/subviews/formas_pagamento_view.dart';
+import 'package:fincore_food_flutter/src/configuracoes/views/subviews/cardapio_digital_view.dart';
 import 'package:fincore_food_flutter/src/cap/printing/print_capability.dart';
 
 
@@ -77,6 +82,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _enderecoCidadeCtrl = TextEditingController();
   final _enderecoEstadoCtrl = TextEditingController();
   final _taxaServicoCtrl = TextEditingController();
+  final _cardapioBaseUrlCtrl = TextEditingController(text: 'https://fincore-cardapio-web.vercel.app');
 
   final _razaoSocialCtrl = TextEditingController();
   final _inscricaoEstadualCtrl = TextEditingController();
@@ -84,6 +90,10 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _regimeTributarioCtrl = TextEditingController();
   final _emailEmpresaCtrl = TextEditingController();
   String _tipoPessoa = 'JURIDICA';
+
+  String? _logoUrl;
+  final _logoUrlCtrl = TextEditingController();
+  bool _isUploadingLogo = false;
 
   String _selectedTimezone = 'America/Sao_Paulo';
   String _selectedLocale = 'pt_BR';
@@ -110,6 +120,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   final _margemSegurancaCtrl = TextEditingController();
   final _valorPorKmCtrl = TextEditingController();
   final _metaDiariaCtrl = TextEditingController();
+  final _intervaloAlertaPendentesCtrl = TextEditingController(text: '60');
+  final _janelaProjecaoEstoqueCtrl = TextEditingController(text: '14');
 
   final List<PixKeyModel> _pixKeys = [];
   final List<PrinterModel> _printers = [];
@@ -127,14 +139,16 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   String _larguraBobina = '80mm';
 
   static const _sections = [
-    _SectionItem(icon: Icons.business_outlined, label: 'Empresa'),
+    _SectionItem(icon: Icons.business_outlined, label: 'Dados Gerais'),
+    _SectionItem(icon: Icons.gavel_outlined, label: 'Fiscal'),
     _SectionItem(icon: Icons.settings_outlined, label: 'Operação'),
-    _SectionItem(icon: Icons.receipt_long_outlined, label: 'Fiscal'),
-    _SectionItem(icon: Icons.pix_outlined, label: 'PIX / Pagamentos'),
+    _SectionItem(icon: Icons.restaurant_menu_rounded, label: 'Cardápio Digital'),
+    _SectionItem(icon: Icons.payments_outlined, label: 'Formas de Pagamento'),
     _SectionItem(icon: Icons.print_outlined, label: 'Impressão'),
+    _SectionItem(icon: Icons.volume_up_outlined, label: 'Alertas & Sons'),
     _SectionItem(icon: Icons.security_outlined, label: 'Segurança'),
     _SectionItem(icon: Icons.history_outlined, label: 'Auditoria'),
-    _SectionItem(icon: Icons.palette_outlined, label: 'Aparência'),
+    _SectionItem(icon: Icons.palette_outlined, label: 'Aparência & Marca'),
   ];
 
   @override
@@ -142,6 +156,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     super.initState();
     _repo = DependencyInjection().get<EmpresaConfiguracaoRepository>();
     _empresaRepo = DependencyInjection().get<EmpresaRepository>();
+    SoundService.loadPreferences();
     _loadConfig();
   }
 
@@ -173,6 +188,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     _regimeTributarioCtrl.dispose();
     _emailEmpresaCtrl.dispose();
     _metaDiariaCtrl.dispose();
+    _intervaloAlertaPendentesCtrl.dispose();
+    _janelaProjecaoEstoqueCtrl.dispose();
+    _cardapioBaseUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -258,17 +276,38 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
 
     final prefs = await SharedPreferences.getInstance();
     final metaSaved = prefs.getDouble('meta_diaria_faturamento') ?? 0.0;
+    final savedIntervalo = prefs.getInt('alerta_sonoro_intervalo_segundos');
+    final savedJanela = prefs.getInt('estoque_janela_projecao_dias');
     if (mounted) {
       setState(() {
         _pedidoRetroativoMovimentaEstoque = prefs.getBool('pdv_retroativo_movimentar_estoque') ?? false;
       });
     }
+    final tenantCtx = DependencyInjection().get<TenantContext>();
+    final tenantId = _empresa?.id ?? (tenantCtx.hasContext ? tenantCtx.empresa.id : '');
+    final savedCardapioBaseUrl = (tenantId.isNotEmpty ? prefs.getString('cardapio_base_url_$tenantId') : null) ?? prefs.getString('cardapio_base_url');
+    if (savedCardapioBaseUrl != null && savedCardapioBaseUrl.isNotEmpty) {
+      _cardapioBaseUrlCtrl.text = savedCardapioBaseUrl;
+    }
+
+    final savedLogo = (tenantId.isNotEmpty ? prefs.getString('empresa_logo_url_$tenantId') : null) ??
+        prefs.getString('empresa_logo_url') ??
+        config.logoUrl;
+    if (mounted) {
+      setState(() {
+        _logoUrl = savedLogo;
+        _logoUrlCtrl.text = savedLogo ?? '';
+      });
+    }
+
     _metaDiariaCtrl.text = metaSaved > 0 ? metaSaved.toStringAsFixed(2).replaceAll('.', ',') : '';
 
     _taxaServicoCtrl.text = (config.taxaServico * 100).toStringAsFixed(1);
     _margemSegurancaCtrl.text = config.margemSegurancaMinutos.toString();
     _taxaEntregaPorKm = config.taxaEntregaPorKm;
     _valorPorKmCtrl.text = (config.valorPorKmCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+    _intervaloAlertaPendentesCtrl.text = (savedIntervalo ?? config.intervaloAlertaPendentesSegundos).toString();
+    _janelaProjecaoEstoqueCtrl.text = (savedJanela ?? config.janelaProjecaoEstoqueDias).toString();
 
     _printerCaixaCtrl.text = config.printerCaixa ?? '';
     _printerCozinhaCtrl.text = config.printerCozinha ?? '';
@@ -458,7 +497,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     });
 
     try {
-      if (_selectedSection == 7 || _personalizacaoKey.currentState != null) {
+      if (_selectedSection == 9 || _personalizacaoKey.currentState != null) {
         await _personalizacaoKey.currentState?.salvar();
       }
 
@@ -480,6 +519,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         rodape: _mensagemRodapeCtrl.text,
       );
       await impConfig.salvar();
+      await SoundService.savePreferences();
 
       final tenantCtx = DependencyInjection().get<TenantContext>();
       final targetTenantId = _empresa?.id ?? (tenantCtx.hasContext ? tenantCtx.empresa.id : '00000000-0000-4000-a000-000000000001');
@@ -512,6 +552,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         asaasAtivo: _usarAsaas,
         ifoodAtivo: _usariFood,
         tema: _selectedTema,
+        logoUrl: _logoUrl,
         pixKey: _pixKeys.isEmpty ? null : jsonEncode(_pixKeys.map((x) => x.toJson()).toList()),
         printerConfig: _printers.isEmpty ? null : jsonEncode(_printers.map((x) => x.toJson()).toList()),
         printerCaixa: _printers.firstWhere((x) => x.departamento == 'Caixa' && x.status, orElse: () => PrinterModel(id: '', nome: '', tipo: '', departamento: '', ip: '', driver: '', autoImpressao: false, vias: 0, status: false)).ip.isEmpty ? null : _printers.firstWhere((x) => x.departamento == 'Caixa' && x.status).ip,
@@ -542,6 +583,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         margemSegurancaMinutos: int.tryParse(_margemSegurancaCtrl.text) ?? 10,
         taxaEntregaPorKm: _taxaEntregaPorKm,
         valorPorKmCentavos: ((double.tryParse(_valorPorKmCtrl.text.replaceAll(',', '.')) ?? 0.0) * 100).round(),
+        intervaloAlertaPendentesSegundos: int.tryParse(_intervaloAlertaPendentesCtrl.text) ?? 60,
+        janelaProjecaoEstoqueDias: int.tryParse(_janelaProjecaoEstoqueCtrl.text) ?? 14,
         metadata: baseConfig.metadata.copyWith(
           updatedAt: DateTime.now().toUtc(),
           updatedBy: tenantCtx.hasContext ? tenantCtx.usuario.id : 'system',
@@ -549,11 +592,43 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         ),
       );
       await _repo.save(updated);
+      try {
+        GlobalPedidosAlertService().restartTimer();
+      } catch (_) {}
+      try {
+        final estoqueCtrl = DependencyInjection().tryGet<EstoqueController>();
+        if (estoqueCtrl != null) {
+          await estoqueCtrl.recarregarConfiguracao();
+        }
+      } catch (_) {}
 
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('alerta_sonoro_intervalo_segundos', int.tryParse(_intervaloAlertaPendentesCtrl.text) ?? 60);
+      await prefs.setInt('estoque_janela_projecao_dias', int.tryParse(_janelaProjecaoEstoqueCtrl.text) ?? 14);
       await prefs.setBool('pdv_retroativo_movimentar_estoque', _pedidoRetroativoMovimentaEstoque);
       final metaDouble = double.tryParse(_metaDiariaCtrl.text.replaceAll(',', '.')) ?? 0.0;
       await prefs.setDouble('meta_diaria_faturamento', metaDouble);
+
+      if (_logoUrl != null && _logoUrl!.isNotEmpty) {
+        await prefs.setString('empresa_logo_url_$targetTenantId', _logoUrl!);
+        await prefs.setString('empresa_logo_url', _logoUrl!);
+      } else {
+        await prefs.remove('empresa_logo_url_$targetTenantId');
+        await prefs.remove('empresa_logo_url');
+      }
+
+      try {
+        final sb = Supabase.instance.client;
+        await sb.from('empresa_configuracao').upsert({
+          'tenantId': targetTenantId,
+          'logoUrl': _logoUrl,
+          'updatedAt': DateTime.now().toIso8601String(),
+        }, onConflict: 'tenantId');
+        await sb.from('empresa').update({
+          'logoUrl': _logoUrl,
+          'updatedAt': DateTime.now().toIso8601String(),
+        }).eq('id', targetTenantId);
+      } catch (_) {}
 
       if (_empresa != null) {
         final updatedEmpresa = CoreEmpresa(
@@ -660,15 +735,19 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 const SizedBox(width: 12),
                 _buildSubTab('Operação', Icons.settings_outlined, 2),
                 const SizedBox(width: 12),
-                _buildSubTab('Chaves PIX', Icons.pix_outlined, 3),
+                _buildSubTab('Cardápio Digital', Icons.restaurant_menu_rounded, 3),
                 const SizedBox(width: 12),
-                _buildSubTab('Impressoras', Icons.print_outlined, 4),
+                _buildSubTab('Formas de Pagamento', Icons.payments_outlined, 4),
                 const SizedBox(width: 12),
-                _buildSubTab('Segurança', Icons.security_outlined, 5),
+                _buildSubTab('Impressoras', Icons.print_outlined, 5),
                 const SizedBox(width: 12),
-                _buildSubTab('Auditoria', Icons.history_outlined, 6),
+                _buildSubTab('Alertas & Sons', Icons.volume_up_outlined, 6),
                 const SizedBox(width: 12),
-                _buildSubTab('Aparência & Marca', Icons.palette_outlined, 7),
+                _buildSubTab('Segurança', Icons.security_outlined, 7),
+                const SizedBox(width: 12),
+                _buildSubTab('Auditoria', Icons.history_outlined, 8),
+                const SizedBox(width: 12),
+                _buildSubTab('Aparência & Marca', Icons.palette_outlined, 9),
               ],
             ),
           ),
@@ -702,15 +781,11 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                             context: context,
                             builder: (ctx) => const Dialog(backgroundColor: Colors.transparent, child: LogExplorerDialog()),
                           );
-                        } else if (val == 'db') {
-                          final db = DependencyInjection().get<FincoreDatabase>();
-                          Navigator.of(context).push(MaterialPageRoute(builder: (c) => DriftDbViewer(db)));
                         }
                       },
                       itemBuilder: (ctx) => const [
                         PopupMenuItem(value: 'auditoria', child: Row(children: [Icon(Icons.history, size: 18), SizedBox(width: 8), Text('Auditoria')])),
                         PopupMenuItem(value: 'logs', child: Row(children: [Icon(Icons.analytics_outlined, size: 18), SizedBox(width: 8), Text('Central de Logs')])),
-                        PopupMenuItem(value: 'db', child: Row(children: [Icon(Icons.storage, size: 18), SizedBox(width: 8), Text('Ver DB Local')])),
                       ],
                     ),
                 ],
@@ -800,15 +875,11 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                   context: context,
                   builder: (ctx) => const Dialog(backgroundColor: Colors.transparent, child: LogExplorerDialog()),
                 );
-              } else if (val == 'db') {
-                final db = DependencyInjection().get<FincoreDatabase>();
-                Navigator.of(context).push(MaterialPageRoute(builder: (c) => DriftDbViewer(db)));
               }
             },
             itemBuilder: (ctx) => const [
               PopupMenuItem(value: 'auditoria', child: Row(children: [Icon(Icons.history, size: 18), SizedBox(width: 8), Text('Auditoria')])),
               PopupMenuItem(value: 'logs', child: Row(children: [Icon(Icons.analytics_outlined, size: 18), SizedBox(width: 8), Text('Central de Logs')])),
-              PopupMenuItem(value: 'db', child: Row(children: [Icon(Icons.storage, size: 18), SizedBox(width: 8), Text('Ver DB Local')])),
             ],
           ),
       ],
@@ -822,17 +893,21 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       case 1:
         return (['Empresa', 'Fiscal'], 'Fiscal', 'Regime tributário, inscrições estaduais e municipais.');
       case 2:
-        return (['Empresa', 'Operação'], 'Operação', 'Parâmetros regionais, fuso horário e moeda.');
+        return (['Empresa', 'Operação'], 'Operação', 'Parâmetros de atendimento, fuso horário, projeção de estoque e alarmes.');
       case 3:
-        return (['Pagamentos', 'Chaves PIX'], 'Chaves PIX', 'Cadastro de recebedores e chaves PIX.');
+        return (['Vendas & Delivery', 'Cardápio Digital'], 'Cardápio Digital & Pedidos Online', 'Hub oficial do cardápio web, QR Code para mesas/balcão, link exclusivo e diagnósticos de conectividade.');
       case 4:
-        return (['Infraestrutura', 'Impressoras'], 'Impressoras', 'Configuração dinâmica de impressoras e parâmetros de bobina.');
+        return (['Pagamentos', 'Formas de Pagamento'], 'Formas de Pagamento', 'Gerenciamento de formas de pagamento, contas e chaves PIX, bandeiras e consumo interno.');
       case 5:
-        return (['Infraestrutura', 'Segurança'], 'Segurança', 'Controle de sessões ativas e autenticação.');
+        return (['Infraestrutura', 'Impressoras'], 'Impressoras', 'Configuração dinâmica de impressoras e parâmetros de bobina.');
       case 6:
-        return (['Infraestrutura', 'Auditoria'], 'Auditoria', 'Rastreabilidade de eventos e logs do sistema.');
+        return (['Infraestrutura', 'Alertas & Sons'], 'Alertas Sonoros & Cozinha', 'Estilos de áudio, temporização de alarmes de pedidos atrasados e testes.');
       case 7:
-        return (['Personalização', 'Aparência'], 'Aparência & White-Label', 'Personalização de tema (Claro/Escuro), cor primária da marca, densidade, bordas e marca da empresa.');
+        return (['Infraestrutura', 'Segurança'], 'Segurança', 'Controle de sessões ativas e autenticação.');
+      case 8:
+        return (['Infraestrutura', 'Auditoria'], 'Auditoria', 'Rastreabilidade de eventos e logs do sistema.');
+      case 9:
+        return (['Personalização', 'Aparência'], 'Aparência & Marca', 'Personalização de tema (Claro/Escuro), cor primária da marca, densidade, bordas e marca da empresa.');
       default:
         return (['Configurações'], 'Configurações', 'Configurações do sistema.');
     }
@@ -871,40 +946,54 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               onTap: () => setState(() => _selectedSection = 2),
             ),
             const SizedBox(height: 16),
-            _buildGroupHeader('PAGAMENTOS'),
+            _buildGroupHeader('VENDAS & CANAIS'),
             _buildSideNavItem(
-              icon: Icons.pix_outlined,
-              label: 'Chaves PIX',
+              icon: Icons.restaurant_menu_rounded,
+              label: 'Cardápio Digital',
               isSelected: _selectedSection == 3,
               onTap: () => setState(() => _selectedSection = 3),
+            ),
+            const SizedBox(height: 16),
+            _buildGroupHeader('PAGAMENTOS'),
+            _buildSideNavItem(
+              icon: Icons.payments_outlined,
+              label: 'Formas de Pagamento',
+              isSelected: _selectedSection == 4,
+              onTap: () => setState(() => _selectedSection = 4),
             ),
             const SizedBox(height: 16),
             _buildGroupHeader('INFRAESTRUTURA'),
             _buildSideNavItem(
               icon: Icons.print_outlined,
               label: 'Impressoras',
-              isSelected: _selectedSection == 4,
-              onTap: () => setState(() => _selectedSection = 4),
-            ),
-            _buildSideNavItem(
-              icon: Icons.security_outlined,
-              label: 'Segurança',
               isSelected: _selectedSection == 5,
               onTap: () => setState(() => _selectedSection = 5),
             ),
             _buildSideNavItem(
-              icon: Icons.history_outlined,
-              label: 'Auditoria',
+              icon: Icons.volume_up_outlined,
+              label: 'Alertas & Sons',
               isSelected: _selectedSection == 6,
               onTap: () => setState(() => _selectedSection = 6),
+            ),
+            _buildSideNavItem(
+              icon: Icons.security_outlined,
+              label: 'Segurança',
+              isSelected: _selectedSection == 7,
+              onTap: () => setState(() => _selectedSection = 7),
+            ),
+            _buildSideNavItem(
+              icon: Icons.history_outlined,
+              label: 'Auditoria',
+              isSelected: _selectedSection == 8,
+              onTap: () => setState(() => _selectedSection = 8),
             ),
             const SizedBox(height: 16),
             _buildGroupHeader('PERSONALIZAÇÃO'),
             _buildSideNavItem(
               icon: Icons.palette_outlined,
               label: 'Aparência & Marca',
-              isSelected: _selectedSection == 7,
-              onTap: () => setState(() => _selectedSection = 7),
+              isSelected: _selectedSection == 9,
+              onTap: () => setState(() => _selectedSection = 9),
             ),
           ],
         ),
@@ -1051,11 +1140,24 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       case 0: return _buildSectionEmpresa();
       case 1: return _buildSectionFiscal();
       case 2: return _buildSectionOperacao();
-      case 3: return _buildSectionPix();
-      case 4: return _buildSectionImpressao();
-      case 5: return _buildSectionSeguranca();
-      case 6: return _buildSectionAuditoria();
-      case 7:
+      case 3:
+        return CardapioDigitalView(
+          empresa: _empresa,
+          onChanged: () {
+            if (!_hasUnsavedChanges) setState(() => _hasUnsavedChanges = true);
+          },
+        );
+      case 4:
+        return FormasPagamentoView(
+          onChanged: () {
+            if (!_hasUnsavedChanges) setState(() => _hasUnsavedChanges = true);
+          },
+        );
+      case 5: return _buildSectionImpressao();
+      case 6: return _buildSectionAlertasSonoros();
+      case 7: return _buildSectionSeguranca();
+      case 8: return _buildSectionAuditoria();
+      case 9:
         return PersonalizacaoView(
           key: _personalizacaoKey,
           onChanged: () {
@@ -1064,6 +1166,125 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         );
       default: return const SizedBox();
     }
+  }
+
+  Future<void> _pickLocalLogoEmpresa() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'svg'],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      Uint8List? bytes = file.bytes;
+      if (bytes == null && file.path != null) {
+        final f = File(file.path!);
+        if (await f.exists()) {
+          bytes = await f.readAsBytes();
+        }
+      }
+      if (bytes == null || bytes.isEmpty) return;
+
+      setState(() => _isUploadingLogo = true);
+      final tenantCtx = DependencyInjection().get<TenantContext>();
+      final tId = _empresa?.id ?? (tenantCtx.hasContext ? tenantCtx.empresa.id : 'default');
+      final ext = (file.extension ?? 'png').toLowerCase();
+      final mimeType = ext == 'png'
+          ? 'image/png'
+          : (ext == 'webp'
+              ? 'image/webp'
+              : (ext == 'svg' ? 'image/svg+xml' : 'image/jpeg'));
+
+      String? finalUrl;
+      try {
+        final sb = Supabase.instance.client;
+        final fileName = 'logo_${tId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        await sb.storage.from('empresa-logos').uploadBinary(
+              fileName,
+              bytes,
+              fileOptions: FileOptions(contentType: mimeType, upsert: true),
+            );
+        finalUrl = sb.storage.from('empresa-logos').getPublicUrl(fileName);
+      } catch (_) {
+        final b64 = base64Encode(bytes);
+        finalUrl = 'data:$mimeType;base64,$b64';
+      }
+
+      if (finalUrl != null && finalUrl.isNotEmpty) {
+        final urlToSave = finalUrl;
+        setState(() {
+          _logoUrl = urlToSave;
+          _logoUrlCtrl.text = urlToSave;
+          _hasUnsavedChanges = true;
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('empresa_logo_url_$tId', urlToSave);
+        await prefs.setString('empresa_logo_url', urlToSave);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao selecionar foto: $e'), backgroundColor: FincoreColors.danger),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploadingLogo = false);
+    }
+  }
+
+  Widget _buildLogoPreviewWidget() {
+    if (_logoUrl == null || _logoUrl!.isEmpty) {
+      return Container(
+        width: 80,
+        height: 80,
+        decoration: BoxDecoration(
+          color: FincoreColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: FincoreColors.border),
+        ),
+        child: const Center(
+          child: Icon(Icons.store_mall_directory_outlined, size: 36, color: FincoreColors.textMuted),
+        ),
+      );
+    }
+
+    Widget img;
+    if (_logoUrl!.startsWith('data:image')) {
+      try {
+        final commaIdx = _logoUrl!.indexOf(',');
+        if (commaIdx != -1) {
+          final b64Str = _logoUrl!.substring(commaIdx + 1);
+          final bytes = base64Decode(b64Str);
+          img = Image.memory(bytes, fit: BoxFit.contain);
+        } else {
+          img = const Icon(Icons.broken_image_outlined, size: 36, color: FincoreColors.textMuted);
+        }
+      } catch (_) {
+        img = const Icon(Icons.broken_image_outlined, size: 36, color: FincoreColors.textMuted);
+      }
+    } else {
+      img = Image.network(
+        _logoUrl!,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, size: 36, color: FincoreColors.textMuted),
+      );
+    }
+
+    return Container(
+      width: 80,
+      height: 80,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: FincoreColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.5)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: img,
+      ),
+    );
   }
 
   // ─── DOMÍNIO 1: EMPRESA (Institucional) ────────────────────────────────────
@@ -1077,6 +1298,68 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // ─── CARD 0: LOGO & IDENTIDADE VISUAL ──────────────────────────────────
+        FincoreSectionCard(
+          title: 'Logo da Empresa',
+          subtitle: 'Exibida no Cardápio Digital Web, cabeçalho e pedidos',
+          icon: Icons.image_outlined,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _buildLogoPreviewWidget(),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: _isUploadingLogo ? null : _pickLocalLogoEmpresa,
+                          icon: _isUploadingLogo
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.folder_open, size: 18),
+                          label: Text(_isUploadingLogo ? 'Processando...' : '📁 Importar Foto do Computador'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: FincoreColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                        if (_logoUrl != null && _logoUrl!.isNotEmpty) ...[
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _logoUrl = null;
+                                _logoUrlCtrl.clear();
+                                _hasUnsavedChanges = true;
+                              });
+                            },
+                            icon: const Icon(Icons.delete_outline, size: 16, color: FincoreColors.danger),
+                            label: const Text('Remover Foto', style: TextStyle(color: FincoreColors.danger, fontSize: 12)),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: FincoreColors.danger),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Formatos recomendados: PNG, JPG ou WebP. Sincronização automática com a Vercel e o Cardápio Web.',
+                      style: TextStyle(fontSize: 11, color: FincoreColors.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         // ─── CARD 1: IDENTIFICAÇÃO ───────────────────────────────────────────
         FincoreSectionCard(
           title: 'Identificação',
@@ -1579,6 +1862,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             ),
           ),
         ),
+
       ],
     );
   }
@@ -1840,6 +2124,32 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         ),
         const SizedBox(height: 16),
 
+        // ─── CARD: PROJEÇÃO DE ESTOQUE (DEMANDA OPERACIONAL) ───────────────
+        FincoreSectionCard(
+          title: 'Projeção de Demanda de Estoque',
+          subtitle: 'Janela de dias futuros para cálculo de reservas e planejamento de produção',
+          icon: Icons.date_range_outlined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const FincoreFieldLabel(label: 'JANELA DE PROJEÇÃO DE ESTOQUE (DIAS)'),
+              FincoreTextField(
+                controller: _janelaProjecaoEstoqueCtrl,
+                hintText: 'Ex: 14',
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (v) => _onFieldChanged(),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Pedidos agendados além deste limite de dias não bloquearão reservas no saldo imediato da fábrica.',
+                style: TextStyle(fontSize: 11, color: FincoreColors.textMuted),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
         // ─── CARD 3: CONECTORES DE INTEGRAÇÃO (Modulares) ────────────────────
         FincoreSectionCard(
           title: 'Conectores & Integrações Externas',
@@ -1906,299 +2216,6 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             onChanged: onChanged,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSectionPix() {
-    return FincoreSectionCard(
-      title: 'Chaves PIX Recebedores',
-      subtitle: 'Gerencie as chaves PIX para recebimentos automáticos nas vendas do PDV e Delivery',
-      icon: Icons.pix_outlined,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_pixKeys.isEmpty) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-              decoration: BoxDecoration(
-                color: FincoreColors.background,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: FincoreColors.border),
-              ),
-              child: const Center(
-                child: Text(
-                  'Nenhuma chave PIX cadastrada. Adicione uma para receber no PDV.',
-                  style: TextStyle(color: FincoreColors.textMuted, fontSize: 13),
-                ),
-              ),
-            ),
-          ] else ...[
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _pixKeys.length,
-              separatorBuilder: (c, i) => const SizedBox(height: 12),
-              itemBuilder: (ctx, index) {
-                final key = _pixKeys[index];
-                return Container(
-                  height: 64,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: FincoreColors.background,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: key.isPrincipal ? const Color(0xFFF97316) : FincoreColors.border, width: key.isPrincipal ? 1.5 : 1),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF97316).withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.pix_outlined, size: 16, color: Color(0xFFF97316)),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  key.favorecido,
-                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (key.isPrincipal) ...[
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF97316).withValues(alpha: 0.2),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: const Text(
-                                      'PRINCIPAL (PDV)',
-                                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFF97316)),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                            Text(
-                              "${key.tipo}: ${key.chave} • ${key.banco}",
-                              style: const TextStyle(fontSize: 11, color: FincoreColors.textSecondary),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (!key.isPrincipal)
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              for (int i = 0; i < _pixKeys.length; i++) {
-                                _pixKeys[i] = PixKeyModel(
-                                  id: _pixKeys[i].id,
-                                  favorecido: _pixKeys[i].favorecido,
-                                  banco: _pixKeys[i].banco,
-                                  tipo: _pixKeys[i].tipo,
-                                  chave: _pixKeys[i].chave,
-                                  isPrincipal: i == index,
-                                );
-                              }
-                              _onFieldChanged();
-                            });
-                          },
-                          child: const Text('Usar no PDV', style: TextStyle(fontSize: 11, color: Color(0xFFF97316))),
-                        ),
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 18, color: FincoreColors.textSecondary),
-                        onPressed: () => _mostrarModalPix(key),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 18, color: FincoreColors.danger),
-                        onPressed: () => setState(() {
-                          _pixKeys.removeAt(index);
-                          if (_pixKeys.isNotEmpty && !_pixKeys.any((x) => x.isPrincipal)) {
-                            _pixKeys[0] = PixKeyModel(
-                              id: _pixKeys[0].id,
-                              favorecido: _pixKeys[0].favorecido,
-                              banco: _pixKeys[0].banco,
-                              tipo: _pixKeys[0].tipo,
-                              chave: _pixKeys[0].chave,
-                              isPrincipal: true,
-                            );
-                          }
-                          _onFieldChanged();
-                        }),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ],
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => _mostrarModalPix(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF97316).withValues(alpha: 0.15),
-              shadowColor: Colors.transparent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
-            icon: const Icon(Icons.add, size: 16, color: Color(0xFFF97316)),
-            label: const Text('Adicionar Chave PIX', style: TextStyle(color: Color(0xFFF97316), fontWeight: FontWeight.bold, fontSize: 13)),
-          ),
-          const Divider(height: 32, color: FincoreColors.border),
-          const Text('CONFIGURAÇÕES DE CONCILIAÇÃO & TELA', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textMuted)),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 20,
-            runSpacing: 8,
-            children: [
-              _checkOption('Habilitar QR Code automático no PDV', _exibirQrCode, (v) => setState(() { _exibirQrCode = v!; _onFieldChanged(); })),
-              _checkOption('Habilitar botão Copia e Cola', _exibirCopiaCola, (v) => setState(() { _exibirCopiaCola = v!; _onFieldChanged(); })),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _mostrarModalPix([PixKeyModel? pixKey]) {
-    final chaveCtrl = TextEditingController(text: pixKey?.chave ?? '');
-    final favCtrl = TextEditingController(text: pixKey?.favorecido ?? '');
-    final bancoCtrl = TextEditingController(text: pixKey?.banco ?? '');
-    String tipo = pixKey?.tipo ?? 'CPF';
-    bool ePrincipal = pixKey?.isPrincipal ?? (_pixKeys.isEmpty);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return AlertDialog(
-            backgroundColor: FincoreColors.surface,
-            title: Text(pixKey == null ? 'Nova Chave PIX' : 'Editar Chave PIX', style: const TextStyle(color: FincoreColors.textPrimary)),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const FincoreFieldLabel(label: 'TIPO DA CHAVE'),
-                            _buildSimpleDropdown(
-                              value: tipo,
-                              items: const ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Aleatória'],
-                              labels: const ['CPF', 'CNPJ', 'Telefone', 'E-mail', 'Chave Aleatória'],
-                              onChanged: (v) => setModalState(() => tipo = v!),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const FincoreFieldLabel(label: 'CHAVE PIX', isRequired: true),
-                  FincoreTextField(
-                    controller: chaveCtrl,
-                    hintText: 'Digite a chave PIX',
-                  ),
-                  const SizedBox(height: 12),
-                  const FincoreFieldLabel(label: 'NOME DO FAVORECIDO', isRequired: true),
-                  FincoreTextField(
-                    controller: favCtrl,
-                    hintText: 'Ex: Fincore Alimentos LTDA',
-                  ),
-                  const SizedBox(height: 12),
-                  const FincoreFieldLabel(label: 'BANCO / INSTITUIÇÃO'),
-                  FincoreTextField(
-                    controller: bancoCtrl,
-                    hintText: 'Ex: Itaú',
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Switch(
-                        value: ePrincipal,
-                        activeColor: const Color(0xFFF97316),
-                        onChanged: (v) => setModalState(() => ePrincipal = v),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Usar como Chave PIX Principal no PDV',
-                        style: TextStyle(color: FincoreColors.textPrimary, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textSecondary)),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  if (chaveCtrl.text.trim().isEmpty || favCtrl.text.trim().isEmpty) return;
-                  setState(() {
-                    if (ePrincipal) {
-                      for (int i = 0; i < _pixKeys.length; i++) {
-                        _pixKeys[i] = PixKeyModel(
-                          id: _pixKeys[i].id,
-                          favorecido: _pixKeys[i].favorecido,
-                          banco: _pixKeys[i].banco,
-                          tipo: _pixKeys[i].tipo,
-                          chave: _pixKeys[i].chave,
-                          isPrincipal: false,
-                        );
-                      }
-                    }
-                    if (pixKey == null) {
-                      _pixKeys.add(PixKeyModel(
-                        id: DateTime.now().millisecondsSinceEpoch.toString(),
-                        favorecido: favCtrl.text.trim(),
-                        banco: bancoCtrl.text.trim(),
-                        tipo: tipo,
-                        chave: chaveCtrl.text.trim(),
-                        isPrincipal: ePrincipal || _pixKeys.isEmpty,
-                      ));
-                    } else {
-                      final idx = _pixKeys.indexWhere((x) => x.id == pixKey.id);
-                      if (idx != -1) {
-                        _pixKeys[idx] = PixKeyModel(
-                          id: pixKey.id,
-                          favorecido: favCtrl.text.trim(),
-                          banco: bancoCtrl.text.trim(),
-                          tipo: tipo,
-                          chave: chaveCtrl.text.trim(),
-                          isPrincipal: ePrincipal,
-                        );
-                      }
-                    }
-                    _onFieldChanged();
-                  });
-                  Navigator.of(ctx).pop();
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: FincoreColors.primary),
-                child: Text(pixKey == null ? 'Adicionar' : 'Salvar', style: const TextStyle(color: Colors.white)),
-              ),
-            ],
-          );
-        }
       ),
     );
   }
@@ -2678,7 +2695,154 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     );
   }
 
-  // ─── DOMÍNIO 5: SEGURANÇA ──────────────────────────────────────────────────
+  // ─── DOMÍNIO 5: ALERTAS SONOROS (KDS / COZINHA) ───────────────────────────
+  Widget _buildSectionAlertasSonoros() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FincoreSectionCard(
+          title: 'Alertas Sonoros da Cozinha (KDS)',
+          subtitle: 'Escolha o tom de áudio do alarme e faça testes nos alto-falantes.',
+          icon: Icons.volume_up_outlined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SwitchListTile(
+                value: SoundService.enabled,
+                activeColor: FincoreColors.primary,
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Habilitar Alertas Sonoros da Cozinha',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: FincoreColors.textPrimary),
+                ),
+                subtitle: const Text(
+                  'Emite avisos sonoros automaticamente ao atingir 30min (atenção) ou 15min (urgência) para a entrega.',
+                  style: TextStyle(fontSize: 12, color: FincoreColors.textMuted),
+                ),
+                onChanged: (val) {
+                  setState(() {
+                    SoundService.enabled = val;
+                    _onFieldChanged();
+                  });
+                  if (val) {
+                    SoundService.playAttentionSound();
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              const Divider(color: FincoreColors.border),
+              const SizedBox(height: 16),
+
+              const Text(
+                'Estilo e Timbre do Alerta Sonoro',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Selecione a opção desejada e utilize o botão "Testar" para ouvir cada opção:',
+                style: TextStyle(fontSize: 12, color: FincoreColors.textMuted),
+              ),
+              const SizedBox(height: 16),
+
+              Column(
+                children: SoundStyle.values.map((style) {
+                  final isSelected = SoundService.currentStyle == style;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: isSelected ? FincoreColors.primary.withValues(alpha: 0.08) : FincoreColors.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected ? FincoreColors.primary : FincoreColors.border,
+                        width: isSelected ? 1.8 : 1.0,
+                      ),
+                    ),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      leading: Icon(
+                        isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
+                        color: isSelected ? FincoreColors.primary : FincoreColors.textMuted,
+                      ),
+                      title: Text(
+                        style.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                          color: isSelected ? FincoreColors.primary : FincoreColors.textPrimary,
+                        ),
+                      ),
+                      subtitle: Text(
+                        style.description,
+                        style: const TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
+                      ),
+                      trailing: OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            SoundService.currentStyle = style;
+                            _onFieldChanged();
+                          });
+                          SoundService.playUrgentSound();
+                        },
+                        icon: const Icon(Icons.notifications_active_rounded, size: 14, color: FincoreColors.warning),
+                        label: Text(
+                          isSelected ? 'Testar Agora' : 'Selecionar & Testar',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? FincoreColors.warning : FincoreColors.textSecondary,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: isSelected ? FincoreColors.warning : FincoreColors.border,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                      ),
+                      onTap: () {
+                        setState(() {
+                          SoundService.currentStyle = style;
+                          _onFieldChanged();
+                        });
+                        SoundService.playUrgentSound();
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        FincoreSectionCard(
+          title: 'Temporização & Monitoramento Global',
+          subtitle: 'Frequência do ciclo de varredura e repetição de avisos sonoros para pedidos atrasados',
+          icon: Icons.timer_outlined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const FincoreFieldLabel(label: 'INTERVALO DE REPETIÇÃO DO ALARME SONORO (SEGUNDOS)'),
+              FincoreTextField(
+                controller: _intervaloAlertaPendentesCtrl,
+                hintText: 'Ex: 60',
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (v) => _onFieldChanged(),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Quando houver pedidos em atraso ou não finalizados no sistema, o bipe sonoro e o aviso de atenção serão re-emitidos respeitando este intervalo configurado.',
+                style: TextStyle(fontSize: 12, color: FincoreColors.textMuted),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── DOMÍNIO 6: SEGURANÇA ──────────────────────────────────────────────────
   Widget _buildSectionSeguranca() {
     return FincoreSectionCard(
       title: 'Dispositivos & Sessões Ativas',

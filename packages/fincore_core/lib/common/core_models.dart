@@ -202,6 +202,9 @@ class CoreEmpresaConfiguracao {
   final int margemSegurancaMinutos;
   final bool taxaEntregaPorKm;
   final int valorPorKmCentavos;
+  // ─── ALERTAS GLOBAIS E PROJEÇÃO DE ESTOQUE ─────────────────────────
+  final int intervaloAlertaPendentesSegundos;
+  final int janelaProjecaoEstoqueDias;
 
   const CoreEmpresaConfiguracao({
     required this.id,
@@ -250,6 +253,8 @@ class CoreEmpresaConfiguracao {
     this.margemSegurancaMinutos = 10,
     this.taxaEntregaPorKm = false,
     this.valorPorKmCentavos = 0,
+    this.intervaloAlertaPendentesSegundos = 60,
+    this.janelaProjecaoEstoqueDias = 14,
   });
 
   CoreEmpresaConfiguracao copyWith({
@@ -296,6 +301,8 @@ class CoreEmpresaConfiguracao {
     int? margemSegurancaMinutos,
     bool? taxaEntregaPorKm,
     int? valorPorKmCentavos,
+    int? intervaloAlertaPendentesSegundos,
+    int? janelaProjecaoEstoqueDias,
   }) {
     return CoreEmpresaConfiguracao(
       id: id ?? this.id,
@@ -341,6 +348,8 @@ class CoreEmpresaConfiguracao {
       margemSegurancaMinutos: margemSegurancaMinutos ?? this.margemSegurancaMinutos,
       taxaEntregaPorKm: taxaEntregaPorKm ?? this.taxaEntregaPorKm,
       valorPorKmCentavos: valorPorKmCentavos ?? this.valorPorKmCentavos,
+      intervaloAlertaPendentesSegundos: intervaloAlertaPendentesSegundos ?? this.intervaloAlertaPendentesSegundos,
+      janelaProjecaoEstoqueDias: janelaProjecaoEstoqueDias ?? this.janelaProjecaoEstoqueDias,
     );
   }
 }

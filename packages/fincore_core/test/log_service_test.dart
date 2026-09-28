@@ -29,9 +29,9 @@ void main() {
     final files = logDir.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('.log')).toList();
     expect(files.length, equals(3)); // Operacional, Sincronizacao, Erros (espelho)
 
-    final opFile = files.firstWhere((f) => f.path.contains('Operacional'));
-    final syncFile = files.firstWhere((f) => f.path.contains('Sincronizacao'));
-    final errorFile = files.firstWhere((f) => f.path.contains('Erros'));
+    final opFile = files.firstWhere((f) => f.path.toLowerCase().contains('operacional'));
+    final syncFile = files.firstWhere((f) => f.path.toLowerCase().contains('sync'));
+    final errorFile = files.firstWhere((f) => f.path.toLowerCase().contains('erros'));
 
     final opContent = await opFile.readAsString();
     expect(opContent, contains('[SISTEMA'));

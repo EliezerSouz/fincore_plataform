@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
 import '../common/master_data_models.dart';
 import '../common/domain_primitives.dart';
 import '../context/tenant_context.dart';
@@ -56,10 +57,31 @@ class ClienteRepository extends SyncableRepository<Cliente> {
     return _mapToDomain(row);
   }
 
+  /// Busca um cliente pelo telefone (compara telefones normalizados).
+  Future<Cliente?> findByTelefone(String rawTelefone, {String? excludeId}) async {
+    final telNorm = normalizarTelefone(rawTelefone);
+    if (telNorm.isEmpty || telNorm == '0000000000' || telNorm == '00000000000') {
+      return null;
+    }
+
+    final rows = await (db.select(db.clientesTable)
+          ..where((t) => t.tenantId.equals(activeTenantId) & t.deletedAt.isNull()))
+        .get();
+
+    for (final r in rows) {
+      if (excludeId != null && r.id == excludeId) continue;
+      if (normalizarTelefone(r.telefone) == telNorm) {
+        return _mapToDomain(r);
+      }
+    }
+    return null;
+  }
+
   @override
   Future<List<Cliente>> findAll() async {
     final rows = await (db.select(db.clientesTable)
-          ..where((t) => t.tenantId.equals(activeTenantId) & t.deletedAt.isNull()))
+          ..where((t) => t.tenantId.equals(activeTenantId) & t.deletedAt.isNull())
+          ..orderBy([(t) => OrderingTerm(expression: t.nome.lower(), mode: OrderingMode.asc)]))
         .get();
     return rows.map(_mapToDomain).toList();
   }
@@ -67,6 +89,8 @@ class ClienteRepository extends SyncableRepository<Cliente> {
   Future<List<Cliente>> search(String query) async {
     if (query.trim().isEmpty) return findAll();
     final q = '%${query.trim().toLowerCase()}%';
+    final qNormTel = normalizarTelefone(query);
+
     final rows = await (db.select(db.clientesTable)
           ..where((t) =>
               t.tenantId.equals(activeTenantId) &
@@ -75,9 +99,26 @@ class ClienteRepository extends SyncableRepository<Cliente> {
                t.apelido.lower().like(q) |
                t.telefone.like(q) |
                t.documento.like(q) |
-               t.email.lower().like(q))))
+               t.email.lower().like(q)))
+          ..orderBy([(t) => OrderingTerm(expression: t.nome.lower(), mode: OrderingMode.asc)]))
         .get();
-    return rows.map(_mapToDomain).toList();
+
+    final results = rows.map(_mapToDomain).toList();
+
+    // Se a busca for numérica/telefone e não encontrou exato por like, filtra pela normalização
+    if (qNormTel.isNotEmpty && qNormTel.length >= 4) {
+      final all = await findAll();
+      for (final c in all) {
+        if (!results.any((r) => r.id == c.id)) {
+          if (c.telefoneNormalizado.contains(qNormTel)) {
+            results.add(c);
+          }
+        }
+      }
+      results.sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
+    }
+
+    return results;
   }
 
   @override
@@ -85,12 +126,16 @@ class ClienteRepository extends SyncableRepository<Cliente> {
     if (cliente.tenantId != activeTenantId) {
       throw StateError('Violação de Tenancy ao salvar Cliente');
     }
+    final telSalvar = cliente.telefone.trim().isNotEmpty
+        ? (normalizarTelefone(cliente.telefone).isNotEmpty ? normalizarTelefone(cliente.telefone) : cliente.telefone.trim())
+        : cliente.telefone.trim();
+
     await db.into(db.clientesTable).insertOnConflictUpdate(
           ClientesTableCompanion.insert(
             id: cliente.id,
             tenantId: activeTenantId,
             nome: cliente.nome,
-            telefone: cliente.telefone,
+            telefone: telSalvar,
             email: Value(cliente.email),
             documento: Value(cliente.documento),
             observacoes: cliente.observacoes,
@@ -106,7 +151,7 @@ class ClienteRepository extends SyncableRepository<Cliente> {
             createdBy: cliente.metadata.createdBy,
             updatedBy: cliente.metadata.updatedBy,
             deletedAt: Value(cliente.metadata.deletedAt),
-            syncStatus: SyncStatus.pending,
+            syncStatus: cliente.metadata.syncStatus,
             lastSyncedAt: Value(cliente.metadata.lastSyncedAt),
           ),
         );
@@ -126,6 +171,67 @@ class ClienteRepository extends SyncableRepository<Cliente> {
 
   Future<Cliente> save(Cliente cliente) => saveWithSync(cliente);
   Future<void> delete(String id) => deleteWithSync(id);
+
+  /// Retorna a quantidade de pedidos vinculados ao cliente no banco de dados local.
+  Future<int> countPedidosByClienteId(String clienteId) async {
+    final count = await (db.selectOnly(db.pedidosTable)
+          ..addColumns([db.pedidosTable.id.count()])
+          ..where(db.pedidosTable.tenantId.equals(activeTenantId) &
+                  db.pedidosTable.clienteId.equals(clienteId)))
+        .map((row) => row.read(db.pedidosTable.id.count()) ?? 0)
+        .getSingle();
+    return count;
+  }
+
+  /// Garante a existência do cliente 'Consumidor Final' para um tenant específico.
+  /// Se não existir, cria o registro local e enfileira no Outbox para sincronização ao Supabase.
+  Future<Cliente> ensureConsumidorFinalForTenant(String tenantId) async {
+    final rows = await (db.select(db.clientesTable)
+          ..where((t) =>
+              t.tenantId.equals(tenantId) &
+              t.deletedAt.isNull() &
+              (t.nome.like('%Consumidor Final%') | t.telefone.equals('00000000000'))))
+        .get();
+
+    if (rows.isNotEmpty) {
+      return _mapToDomain(rows.first);
+    }
+
+    final now = DateTime.now().toUtc();
+    final id = tenantId == '00000000-0000-4000-a000-000000000001'
+        ? '00000000-0000-4000-a000-000000000301'
+        : const Uuid().v4();
+
+    final consumidor = Cliente(
+      id: id,
+      tenantId: tenantId,
+      nome: 'Consumidor Final',
+      telefone: '00000000000',
+      email: 'consumidor@fincore.com',
+      documento: '000.000.000-00',
+      observacoes: 'Consumidor final genérico (imutável)',
+      ativo: true,
+      metadata: SyncMetadata(
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: 'system',
+        updatedBy: 'system',
+        syncStatus: SyncStatus.pending,
+      ),
+    );
+
+    await saveLocal(consumidor);
+    await outbox.enqueue(
+      entity: entityName,
+      entityId: id,
+      action: 'create',
+      payload: toOutboxPayload(consumidor),
+      version: 1,
+    );
+
+    return consumidor;
+  }
 
   Cliente _mapToDomain(ClienteData data) {
     return Cliente(

@@ -37,6 +37,8 @@ class ClientesController extends ChangeNotifier {
   String? _errorMessage;
   String _searchQuery = '';
   String _filtroStatus = 'Todos';
+  String _filtroOrdenacao = 'nome_asc';
+  int _displayLimit = 50;
 
   ClientesController({
     required ClienteRepository clienteRepo,
@@ -49,6 +51,19 @@ class ClientesController extends ChangeNotifier {
   // ─── Getters públicos (somente leitura para a UI) ─────────────────────────
   List<Cliente> get clientes => _clientes;
   List<Cliente> get filteredClientes => _filteredClientes;
+  List<Cliente> get visibleClientes => _filteredClientes.take(_displayLimit).toList();
+  int get displayLimit => _displayLimit;
+  bool get hasMoreClientes => _filteredClientes.length > _displayLimit;
+  int get remainingClientes => (_filteredClientes.length - _displayLimit).clamp(0, _filteredClientes.length);
+
+  void loadMoreClientes({int count = 50}) {
+    _displayLimit += count;
+    notifyListeners();
+  }
+
+  void resetDisplayLimit() {
+    _displayLimit = 50;
+  }
   List<LocalEntrega> get enderecos => _enderecos;
   List<TaxaEntrega> get taxas => _taxas;
   List<PedidoData> get todosPedidos => _todosPedidos;
@@ -59,6 +74,7 @@ class ClientesController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   String get searchQuery => _searchQuery;
   String get filtroStatus => _filtroStatus;
+  String get filtroOrdenacao => _filtroOrdenacao;
 
   // ─── Métodos Auxiliares de Métricas dos Clientes ───────────────────────────
   List<PedidoData> getPedidosDoCliente(String clienteId) {
@@ -103,12 +119,15 @@ class ClientesController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final tenantCtx = DependencyInjection().get<TenantContext>();
+      if (tenantCtx.hasContext) {
+        await _clienteRepo.ensureConsumidorFinalForTenant(tenantCtx.tenantId);
+      }
       final list = await _clienteRepo.findAll();
       var taxas = await _taxaRepo.findAll();
 
       // Se não houver taxas cadastradas, inicializa com padrão
       if (taxas.isEmpty) {
-        final tenantCtx = DependencyInjection().get<TenantContext>();
         final defaults = [
           TaxaEntrega(
             id: const Uuid().v4(), // P2-06: UUID dinâmico — não mais fixo para evitar colisão entre tenants
@@ -134,11 +153,14 @@ class ClientesController extends ChangeNotifier {
       }
 
       final db = DependencyInjection().get<FincoreDatabase>();
-      final tenantCtx = DependencyInjection().get<TenantContext>();
       final listPedidos = await (db.select(db.pedidosTable)
             ..where((t) => t.tenantId.equals(tenantCtx.tenantId)))
           .get();
-      listPedidos.sort((a, b) => b.dataHoraCriacao.compareTo(a.dataHoraCriacao));
+      listPedidos.sort((a, b) {
+        final dataA = a.dataHoraEntregaPrevista ?? a.dataHoraCriacao;
+        final dataB = b.dataHoraEntregaPrevista ?? b.dataHoraCriacao;
+        return dataB.compareTo(dataA);
+      });
       _todosPedidos = listPedidos;
 
       _clientes = list;
@@ -163,6 +185,13 @@ class ClientesController extends ChangeNotifier {
   /// Atualiza o status de filtro e reaplica os filtros.
   void updateFiltroStatus(String status) {
     _filtroStatus = status;
+    _applyFilters();
+    notifyListeners();
+  }
+
+  /// Atualiza a ordenação dos clientes e reaplica os filtros.
+  void updateFiltroOrdenacao(String ordenacao) {
+    _filtroOrdenacao = ordenacao;
     _applyFilters();
     notifyListeners();
   }
@@ -257,12 +286,22 @@ class ClientesController extends ChangeNotifier {
     }
 
     _isSaving = true;
+    _errorMessage = null;
     notifyListeners();
 
     try {
       final tenantCtx = DependencyInjection().get<TenantContext>();
       final isNew = original == null;
       final id = isNew ? const Uuid().v4() : original.id;
+
+      final telNorm = normalizarTelefone(telefone);
+      final existenteTel = await _clienteRepo.findByTelefone(telNorm, excludeId: isNew ? null : id);
+      if (existenteTel != null) {
+        _errorMessage = 'Já existe um cliente cadastrado com este telefone (${formatarTelefone(telNorm)}: ${existenteTel.nomeExibicao}).';
+        _isSaving = false;
+        notifyListeners();
+        return false;
+      }
 
       final emailFinal = email?.trim().isEmpty == true ? null : email?.trim();
       final docFinal = documento?.trim().isEmpty == true ? null : documento?.trim();
@@ -271,7 +310,7 @@ class ClientesController extends ChangeNotifier {
         id: id,
         tenantId: tenantCtx.tenantId,
         nome: nome.trim(),
-        telefone: telefone.trim(),
+        telefone: telNorm.isNotEmpty ? telNorm : telefone.trim(),
         email: emailFinal,
         documento: docFinal,
         observacoes: observacoes.trim(),
@@ -341,14 +380,29 @@ class ClientesController extends ChangeNotifier {
     }
   }
 
-  /// Exclui um cliente (soft delete) e desativa seleção.
+  /// Exclui um cliente (soft delete) com validação de integridade referencial.
   Future<bool> deletarCliente(Cliente cliente) async {
     if (_isConsumidorFinal(cliente)) {
       _errorMessage = 'O cliente Consumidor Final é protegido pelo sistema e não pode ser excluído.';
       return false;
     }
 
+    // 1. Validação em memória dos pedidos carregados
+    final pedidosEmMemoria = _todosPedidos.where((p) => p.clienteId == cliente.id).length;
+    if (pedidosEmMemoria > 0) {
+      _errorMessage = 'Não é possível excluir o cliente "${cliente.nomeExibicao}" pois existem $pedidosEmMemoria pedido(s) vinculados ao seu histórico.';
+      return false;
+    }
+
+    // 2. Validação direta na tabela de pedidos do banco
+    final dbPedidosCount = await _clienteRepo.countPedidosByClienteId(cliente.id);
+    if (dbPedidosCount > 0) {
+      _errorMessage = 'Não é possível excluir o cliente "${cliente.nomeExibicao}" pois existem $dbPedidosCount pedido(s) vinculados no banco de dados.';
+      return false;
+    }
+
     _isSaving = true;
+    _errorMessage = null;
     notifyListeners();
 
     try {
@@ -376,11 +430,52 @@ class ClientesController extends ChangeNotifier {
       await loadData();
       return true;
     } catch (e) {
+      _errorMessage = 'Erro ao excluir cliente: $e';
       debugPrint('Erro ao excluir cliente: $e');
       return false;
     } finally {
       _isSaving = false;
       notifyListeners();
+    }
+  }
+
+  /// Alterna o status Ativo/Inativo de um cliente diretamente (ação rápida).
+  Future<bool> toggleAtivoCliente(Cliente cliente) async {
+    if (_isConsumidorFinal(cliente)) {
+      _errorMessage = 'O cliente Consumidor Final é protegido pelo sistema e deve permanecer ativo.';
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      final tenantCtx = DependencyInjection().get<TenantContext>();
+      final novoStatus = !cliente.ativo;
+      final updated = cliente.copyWith(
+        ativo: novoStatus,
+        metadata: cliente.metadata.copyWith(
+          version: cliente.metadata.version + 1,
+          updatedAt: DateTime.now().toUtc(),
+          updatedBy: tenantCtx.hasContext ? tenantCtx.usuario.id : 'system',
+          syncStatus: SyncStatus.pending,
+        ),
+      );
+
+      await _clienteRepo.save(updated);
+
+      final idx = _clientes.indexWhere((c) => c.id == cliente.id);
+      if (idx != -1) {
+        _clientes[idx] = updated;
+      }
+      if (_selectedCliente?.id == cliente.id) {
+        _selectedCliente = updated;
+      }
+      _applyFilters();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Erro ao alterar status do cliente: $e';
+      notifyListeners();
+      return false;
     }
   }
 
@@ -722,15 +817,18 @@ class ClientesController extends ChangeNotifier {
   }
 
   void _applyFilters() {
-    var filtered = _clientes;
+    var filtered = List<Cliente>.from(_clientes);
 
     // Busca por termo de pesquisa
     if (_searchQuery.trim().isNotEmpty) {
       final q = _searchQuery.toLowerCase();
+      final qNorm = normalizarTelefone(_searchQuery);
       filtered = filtered.where((c) {
+        final matchPhoneNorm = qNorm.length >= 3 && c.telefoneNormalizado.contains(qNorm);
         return c.nome.toLowerCase().contains(q) ||
             (c.apelido?.toLowerCase().contains(q) ?? false) ||
             c.telefone.contains(q) ||
+            matchPhoneNorm ||
             (c.email?.toLowerCase().contains(q) ?? false) ||
             (c.documento?.contains(q) ?? false);
       }).toList();
@@ -743,6 +841,42 @@ class ClientesController extends ChangeNotifier {
       filtered = filtered.where((c) => !c.ativo).toList();
     }
 
+    // Ordenação dos clientes (Padrão: Alfabética A-Z)
+    switch (_filtroOrdenacao) {
+      case 'nome_desc':
+        filtered.sort((a, b) => _normalizeString(b.nome).compareTo(_normalizeString(a.nome)));
+        break;
+      case 'recentes':
+        filtered.sort((a, b) => b.metadata.createdAt.compareTo(a.metadata.createdAt));
+        break;
+      case 'antigos':
+        filtered.sort((a, b) => a.metadata.createdAt.compareTo(b.metadata.createdAt));
+        break;
+      case 'faturamento':
+        filtered.sort((a, b) {
+          final gastA = getTotalGastoCentavos(a.id);
+          final gastB = getTotalGastoCentavos(b.id);
+          final cmp = gastB.compareTo(gastA);
+          if (cmp != 0) return cmp;
+          return _normalizeString(a.nome).compareTo(_normalizeString(b.nome));
+        });
+        break;
+      case 'pedidos':
+        filtered.sort((a, b) {
+          final countA = getCountPedidos(a.id);
+          final countB = getCountPedidos(b.id);
+          final cmp = countB.compareTo(countA);
+          if (cmp != 0) return cmp;
+          return _normalizeString(a.nome).compareTo(_normalizeString(b.nome));
+        });
+        break;
+      case 'nome_asc':
+      default:
+        filtered.sort((a, b) => _normalizeString(a.nome).compareTo(_normalizeString(b.nome)));
+        break;
+    }
+
     _filteredClientes = filtered;
+    _displayLimit = 50;
   }
 }

@@ -134,26 +134,79 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: listaFiltrada.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (ctx, idx) {
             final alerta = listaFiltrada[idx];
-            final Color corTema = alerta.categoria == CategoriaAlerta.acaoNecessaria
-                ? const Color(0xFFE05C5C)
-                : const Color(0xFFF59E0B);
-            return _buildAlertaCard(context, alerta, corTema, planeCtrl, estoqueCtrl);
+            final estilo = _getEstiloAlerta(alerta);
+            return _buildAlertaCard(context, alerta, estilo, planeCtrl, estoqueCtrl);
           },
         ),
       ],
     );
   }
 
+  _AlertaStyleConfig _getEstiloAlerta(AlertaOperacional alerta) {
+    switch (alerta.tipo) {
+      case TipoAlertaOperacional.pedidoAtrasado:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFFEF4444), // Vermelho Carmesim Neon
+          icone: Icons.alarm_on_rounded,
+          categoriaTexto: 'PEDIDO ATRASADO',
+        );
+      case TipoAlertaOperacional.producaoAtrasada:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFFFF6B00), // Laranja Neon
+          icone: Icons.precision_manufacturing_rounded,
+          categoriaTexto: 'PRODUÇÃO ATRASADA',
+        );
+      case TipoAlertaOperacional.pedidoProximoSemEstoque:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFFF43F5E), // Rosa Avermelhado Intenso
+          icone: Icons.warning_amber_rounded,
+          categoriaTexto: 'SEM ESTOQUE P/ ENTREGA',
+        );
+      case TipoAlertaOperacional.estoqueCriticoSemProducao:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFFF59E0B), // Âmbar Intenso
+          icone: Icons.inventory_2_outlined,
+          categoriaTexto: 'ESTOQUE CRÍTICO',
+        );
+      case TipoAlertaOperacional.estoqueCriticoComProducao:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFF0EA5E9), // Azul Ciano
+          icone: Icons.autorenew_rounded,
+          categoriaTexto: 'EM PRODUÇÃO',
+        );
+      case TipoAlertaOperacional.estoqueBaixoSemProducao:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFFEAB308), // Amarelo Dourado
+          icone: Icons.trending_down_rounded,
+          categoriaTexto: 'PONTO DE REPOSIÇÃO',
+        );
+      case TipoAlertaOperacional.campanhaEmExecucao:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFF6366F1), // Roxo Índigo
+          icone: Icons.play_circle_outline_rounded,
+          categoriaTexto: 'CAMPANHA ATIVA',
+        );
+      case TipoAlertaOperacional.producaoConcluidaRecente:
+        return const _AlertaStyleConfig(
+          corTema: Color(0xFF10B981), // Verde Esmeralda
+          icone: Icons.check_circle_outline_rounded,
+          categoriaTexto: 'LOTE CONCLUÍDO',
+        );
+    }
+  }
+
   Widget _buildAlertaCard(
     BuildContext context,
     AlertaOperacional alerta,
-    Color corTema,
+    _AlertaStyleConfig estilo,
     PlanoProducaoController planeCtrl,
     EstoqueController estoqueCtrl,
   ) {
+    final corTema = estilo.corTema;
+
     // Cálculo do projetado
     final projetado = alerta.fisico + alerta.planejado - alerta.reservado;
 
@@ -162,16 +215,28 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
         ? (alerta.produzido / (alerta.planejado + alerta.produzido))
         : null;
 
-    final String badgeLabel = alerta.categoria == CategoriaAlerta.acaoNecessaria
-        ? 'AÇÃO NECESSÁRIA'
-        : 'ACOMPANHAMENTO';
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: FincoreColors.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: corTema.withValues(alpha: 0.25), width: 1),
+        gradient: LinearGradient(
+          colors: [
+            corTema.withValues(alpha: 0.08),
+            FincoreColors.surface,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: corTema.withValues(alpha: 0.35), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: corTema.withValues(alpha: 0.10),
+            blurRadius: 10,
+            spreadRadius: 0,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,19 +244,41 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: corTema.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(4),
+                  color: corTema.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: corTema.withValues(alpha: 0.4), width: 1),
                 ),
-                child: Text(
-                  badgeLabel,
-                  style: TextStyle(color: corTema, fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(estilo.icone, size: 12, color: corTema),
+                    const SizedBox(width: 5),
+                    Text(
+                      estilo.categoriaTexto,
+                      style: TextStyle(color: corTema, fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                    ),
+                  ],
                 ),
               ),
+              if (alerta.atrasoMinutos > 0) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '+${alerta.atrasoMinutos} min de atraso',
+                    style: const TextStyle(color: Color(0xFFFF5252), fontSize: 9.5, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, constraints) {
               final isMobile = constraints.maxWidth < 500;
@@ -203,8 +290,9 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
                     alerta.titulo,
                     style: TextStyle(
                       color: corTema,
-                      fontSize: 13,
+                      fontSize: 13.5,
                       fontWeight: FontWeight.w900,
+                      letterSpacing: -0.2,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -231,7 +319,7 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
               );
 
               final hasButton = alerta.acaoLabel != null;
-              final actionButton = _buildButtonForAlerta(context, alerta, planeCtrl, estoqueCtrl);
+              final actionButton = _buildButtonForAlerta(context, alerta, planeCtrl, estoqueCtrl, corTema);
 
               if (isMobile) {
                 return Column(
@@ -373,6 +461,7 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
     AlertaOperacional alerta,
     PlanoProducaoController planeCtrl,
     EstoqueController estoqueCtrl,
+    Color corTema,
   ) {
     final label = alerta.acaoLabel;
     if (label == null) return const SizedBox.shrink();
@@ -404,15 +493,16 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
         }
       },
       style: ElevatedButton.styleFrom(
-        backgroundColor: FincoreColors.primary,
+        backgroundColor: corTema,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         elevation: 0,
+        shadowColor: corTema.withValues(alpha: 0.4),
       ),
       child: Text(
         label,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -507,4 +597,16 @@ class _BlocoCentralAtencaoState extends State<BlocoCentralAtencao> {
       ),
     );
   }
+}
+
+class _AlertaStyleConfig {
+  final Color corTema;
+  final IconData icone;
+  final String categoriaTexto;
+
+  const _AlertaStyleConfig({
+    required this.corTema,
+    required this.icone,
+    required this.categoriaTexto,
+  });
 }

@@ -149,7 +149,7 @@ class DashboardAlertsService {
           categoria: CategoriaAlerta.acaoNecessaria,
           titulo: 'Pedido Atrasado ($numPed)',
           descricao: 'Pedido de $cliente (${pedido.tipoLogistica.isNotEmpty ? pedido.tipoLogistica : "Entrega/Retirada"}). $motivoAtraso',
-          impacto: 'Risco direto de insatisfação do cliente e descumprimento do SLA de atendimento.',
+          impacto: 'Risco direto de insatisfação do cliente e descumprimento do prazo prometido de entrega.',
           acaoLabel: 'Ver Pedido',
           prioridade: 0,
           pedidoId: pedido.id,

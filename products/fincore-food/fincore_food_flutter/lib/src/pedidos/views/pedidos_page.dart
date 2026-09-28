@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' hide Column;
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/fincore_core.dart';
 import 'package:fincore_shared/fincore_shared.dart';
@@ -12,8 +13,11 @@ import 'package:fincore_food_flutter/src/pedidos/views/widgets/pedido_card.dart'
 import 'package:fincore_food_flutter/src/pedidos/views/widgets/kanban_column.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/widgets/pedido_detail_drawer.dart';
 import 'package:fincore_food_flutter/src/cap/printing/print_capability.dart';
-import 'package:fincore_food_flutter/src/shared/presentation/shell/fincore_shell.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/pdv_page.dart';
+import 'package:fincore_food_flutter/src/shared/services/sound_service.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/widgets/whatsapp_dialog.dart';
+import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
+import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
 
 
 
@@ -22,6 +26,20 @@ import 'package:fincore_food_flutter/src/pedidos/views/pdv_page.dart';
 class PedidosPage extends StatefulWidget {
   static DateTime? dataPreSelecionada;
   static String? filtroPedidoId;
+  static _PedidosPageState? _activeState;
+
+  static void navegarParaData(DateTime data, {String? pedidoId}) {
+    dataPreSelecionada = data;
+    filtroPedidoId = pedidoId;
+    if (_activeState != null && _activeState!.mounted) {
+      _activeState!._controller.setSelectedDate(data);
+      if (pedidoId != null) {
+        _activeState!._historySearchQuery = pedidoId;
+      }
+      _activeState!._controller.carregarOrdens();
+      _activeState!._forceRebuild();
+    }
+  }
 
   const PedidosPage({super.key});
 
@@ -42,9 +60,14 @@ class _PedidosPageState extends State<PedidosPage> {
 
   Timer? _deadlinesTimer;
 
+  void _forceRebuild() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void initState() {
     super.initState();
+    PedidosPage._activeState = this;
     _controller = CentralPedidosController();
 
     if (PedidosPage.dataPreSelecionada != null) {
@@ -62,18 +85,84 @@ class _PedidosPageState extends State<PedidosPage> {
     _userRole =
         tenantCtx.hasContext ? tenantCtx.usuario.role : null;
 
-    // Recarrega ordens em tempo real e atualiza prazos a cada 2s
+    _controller.addListener(_onControllerChanged);
+
+    // Recarrega ordens em tempo real e atualiza prazos/alertas a cada 2s
     _deadlinesTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         _controller.carregarOrdens();
+        _controller.checkProximityAudioAlerts();
         setState(() {});
       }
     });
   }
 
+  String? _lastNotifiedNewOrderId;
+
+  void _onControllerChanged() {
+    if (!mounted) return;
+    if (_controller.lastNewOrder != null && _controller.lastNewOrder!.id != _lastNotifiedNewOrderId) {
+      _lastNotifiedNewOrderId = _controller.lastNewOrder!.id;
+      final parsed  = DadosOrdemKanban.fromOrdem(_controller.lastNewOrder!);
+      final numPed  = _controller.getNumeroPedido(_controller.lastNewOrder!.pedidoId);
+      final numStr  = numPed != null ? '#$numPed' : '';
+      final isWeb   = _controller.lastNewOrder!.observacoes?.contains('cardapio_web') == true || _controller.lastNewOrder!.observacoes?.contains('web') == true;
+
+      // Pedidos do Cardápio Web ganham destaque azul e mensagem especial
+      final bgColor = isWeb ? const Color(0xFF1D4ED8) : FincoreColors.primary;
+      final title   = isWeb
+          ? '🌐 PEDIDO WEB CHEGOU $numStr'
+          : '🔔 NOVO PEDIDO CHEGOU $numStr';
+      final subtitle = isWeb
+          ? 'Cliente: ${parsed.cliente} • Cardápio Digital Online'
+          : 'Cliente: ${parsed.cliente} • Origem: ${parsed.tipoLogistica}';
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 8),
+          backgroundColor: bgColor,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          content: Row(
+            children: [
+              Icon(
+                isWeb ? Icons.language_rounded : Icons.notifications_active_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+                    ),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
+    if (PedidosPage._activeState == this) {
+      PedidosPage._activeState = null;
+    }
     _deadlinesTimer?.cancel();
+    _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -694,6 +783,10 @@ class _PedidosPageState extends State<PedidosPage> {
             : null;
       case StatusOrdemPreparo.pronto:
         return PermissaoService.podeEntregar(_userRole)
+            ? StatusOrdemPreparo.saiuParaEntrega
+            : null;
+      case StatusOrdemPreparo.saiuParaEntrega:
+        return PermissaoService.podeEntregar(_userRole)
             ? StatusOrdemPreparo.entregue
             : null;
       default:
@@ -704,13 +797,170 @@ class _PedidosPageState extends State<PedidosPage> {
   String _acaoRapidaLabel(OrdemPreparo o) {
     switch (o.status) {
       case StatusOrdemPreparo.pendente:
+        if (_controller.isPedidoAguardandoAprovacao(o)) {
+          return 'Aprovar Pedido';
+        }
         return 'Iniciar';
       case StatusOrdemPreparo.emPreparo:
         return 'Pronto';
       case StatusOrdemPreparo.pronto:
+        return 'Saiu p/ Entrega';
+      case StatusOrdemPreparo.saiuParaEntrega:
         return 'Entregar';
       default:
         return '';
+    }
+  }
+
+  Future<void> _executarAcaoRapida(OrdemPreparo o) async {
+    // Se for um pedido Web que ainda aguarda aprovação, aprova e mantém na fila como pendente
+    if (o.status == StatusOrdemPreparo.pendente && _controller.isPedidoAguardandoAprovacao(o)) {
+      await _controller.aprovarPedidoWeb(o);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: FincoreColors.success,
+            content: const Text('✅ Pedido Web aprovado e liberado para a fila de produção!'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
+    final prox = _proximoStatus(o);
+    if (prox == null) return;
+
+    await _controller.moverStatus(o, prox);
+
+    // Se avançou para saiuParaEntrega, abre prompt para notificar cliente no WhatsApp
+    if (prox == StatusOrdemPreparo.saiuParaEntrega && mounted) {
+      _abrirWhatsAppParaOrdem(o, saiuParaEntrega: true);
+    }
+  }
+
+  Future<void> _abrirWhatsAppParaOrdem(OrdemPreparo o, {bool saiuParaEntrega = false}) async {
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final pedido = _controller.pedidosMap[o.pedidoId];
+      final parsed = DadosOrdemKanban.fromOrdem(o);
+
+      String? tel = pedido?.clienteTelefoneAvulso;
+      String nome = pedido?.clienteNomeAvulso ?? parsed.cliente;
+
+      if (pedido?.clienteId != null && (tel == null || tel.isEmpty)) {
+        try {
+          final clienteRow = await (db.select(db.clientesTable)
+                ..where((c) => c.id.equals(pedido!.clienteId!) & c.deletedAt.isNull()))
+              .getSingleOrNull();
+          if (clienteRow != null) {
+            tel = clienteRow.telefone;
+            if (clienteRow.nome.isNotEmpty) {
+              nome = clienteRow.nome;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (tel == null || tel.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: FincoreColors.danger,
+              content: Text('Nenhum telefone cadastrado para este cliente.'),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Busca forma de pagamento para verificar se e PIX
+      String? pixChave;
+      String? pixTipoChave;
+      bool isPix = false;
+
+      if (pedido?.formaPagamentoId != null) {
+        try {
+          final fpRow = await (db.select(db.formasPagamentoTable)
+                ..where((f) => f.id.equals(pedido!.formaPagamentoId!) & f.deletedAt.isNull()))
+              .getSingleOrNull();
+          if (fpRow != null) {
+            isPix = fpRow.tipo == 'pix' || (fpRow.pixChave != null && fpRow.pixChave!.isNotEmpty);
+            if (isPix) {
+              pixChave = fpRow.pixChave;
+              pixTipoChave = fpRow.pixTipoChave;
+            }
+          }
+        } catch (_) {}
+      }
+
+      PixWhatsAppInfo? pixInfo;
+      if (isPix && pixChave != null && pixChave.isNotEmpty) {
+        final totalCentavos = _controller.totalOrdemCentavos(o);
+        final config = await (db.select(db.empresaConfiguracaoTable)..limit(1)).getSingleOrNull();
+
+        final copiaECola = PixGenerator.gerarCopiaCola(
+          chave: pixChave,
+          favorecido: (config?.pixFavorecido != null && config!.pixFavorecido!.isNotEmpty)
+              ? config.pixFavorecido!
+              : nome,
+          cidade: 'Sorocaba',
+          valor: totalCentavos / 100.0,
+          tipoChave: pixTipoChave,
+        );
+
+        pixInfo = PixWhatsAppInfo(
+          chaveDisplay: pixChave,
+          tipoChave: pixTipoChave ?? 'PIX',
+          copiaECola: copiaECola,
+        );
+      }
+
+      final numPedido = pedido?.numeroPedido != null
+          ? '#${pedido!.numeroPedido.toString().padLeft(6, '0')}'
+          : '#${o.pedidoId.length > 6 ? o.pedidoId.substring(0, 6).toUpperCase() : o.pedidoId.toUpperCase()}';
+
+      String? empresaNome;
+      try {
+        if (TenantContext().hasContext) {
+          empresaNome = TenantContext().empresa.nomeFantasia.isNotEmpty
+              ? TenantContext().empresa.nomeFantasia
+              : TenantContext().empresa.razaoSocial;
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+
+      final initialMsg = saiuParaEntrega
+          ? WhatsAppService.gerarTextoSaiuParaEntrega(
+              nomeCliente: nome,
+              numeroPedidoOuId: numPedido,
+              nomeEmpresa: empresaNome,
+            )
+          : WhatsAppService.gerarTextoContatoKanban(
+              nomeCliente: nome,
+              numeroPedidoOuId: numPedido,
+              nomeEmpresa: empresaNome,
+            );
+
+      await WhatsAppDialog.show(
+        context,
+        rawPhone: tel,
+        clienteNome: nome,
+        initialMessage: initialMsg,
+        pixInfo: pixInfo,
+        numeroPedido: numPedido,
+        nomeEmpresa: empresaNome,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao abrir WhatsApp: $e'),
+            backgroundColor: FincoreColors.danger,
+          ),
+        );
+      }
     }
   }
 
@@ -748,6 +998,8 @@ class _PedidosPageState extends State<PedidosPage> {
           );
         }
 
+        final totalAguardando = _controller.ordensWebAguardandoAprovacao.length;
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -756,18 +1008,35 @@ class _PedidosPageState extends State<PedidosPage> {
               children: [
                 _buildSubTab('Painel de Preparação (Kanban)', Icons.view_kanban_outlined, 0),
                 const SizedBox(width: 16),
-                _buildSubTab('Histórico & Todos os Pedidos', Icons.list_alt_outlined, 1),
+                _buildSubTab(
+                  'Aguardando Aprovação',
+                  Icons.hourglass_top_rounded,
+                  1,
+                  badgeCount: totalAguardando,
+                  badgeColor: const Color(0xFFF97316),
+                ),
+                const SizedBox(width: 16),
+                _buildSubTab('Histórico & Todos os Pedidos', Icons.list_alt_outlined, 2),
               ],
             ),
             const SizedBox(height: 14),
 
             if (_activeSubTab == 0) ...[
+              // ── Banner de Alerta se houver pedidos web aguardando ───
+              if (totalAguardando > 0) ...[
+                _buildAlertBannerAprovacao(totalAguardando),
+                const SizedBox(height: 14),
+              ],
+
               // ── Barra de controle ────────────────────────────────────
               _buildControlBar(),
               const SizedBox(height: 14),
 
               // ── Kanban Board ─────────────────────────────────────────
               Expanded(child: _buildKanbanBoard()),
+            ] else if (_activeSubTab == 1) ...[
+              // ── Pedidos Web Aguardando Aprovação ──────────────────────
+              Expanded(child: _buildAguardandoAprovacaoPanel()),
             ] else ...[
               // ── Histórico & Todos os Pedidos (Lista / Tabela) ────────
               Expanded(child: _buildHistoryPanel()),
@@ -778,7 +1047,7 @@ class _PedidosPageState extends State<PedidosPage> {
     );
   }
 
-  Widget _buildSubTab(String label, IconData icon, int index) {
+  Widget _buildSubTab(String label, IconData icon, int index, {int badgeCount = 0, Color? badgeColor}) {
     final isSelected = _activeSubTab == index;
     return GestureDetector(
       onTap: () {
@@ -799,7 +1068,7 @@ class _PedidosPageState extends State<PedidosPage> {
             Icon(
               icon,
               size: 16,
-              color: isSelected ? FincoreColors.primary : FincoreColors.textMuted,
+              color: isSelected ? FincoreColors.primary : (badgeCount > 0 ? (badgeColor ?? const Color(0xFFF97316)) : FincoreColors.textMuted),
             ),
             const SizedBox(width: 6),
             Text(
@@ -807,11 +1076,797 @@ class _PedidosPageState extends State<PedidosPage> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? FincoreColors.primary : FincoreColors.textMuted,
+                color: isSelected ? FincoreColors.primary : (badgeCount > 0 ? Colors.white : FincoreColors.textMuted),
               ),
             ),
+            if (badgeCount > 0) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: badgeColor ?? const Color(0xFFF97316),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$badgeCount',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAlertBannerAprovacao(int totalAguardando) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFFF97316).withValues(alpha: 0.7),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFF97316).withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF97316).withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.notifications_active_rounded,
+              color: Color(0xFFF97316),
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      '🚨 $totalAguardando ${totalAguardando == 1 ? 'Pedido Web Aguardando Aprovação' : 'Pedidos Web Aguardando Aprovação'}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF3B82F6).withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.4)),
+                      ),
+                      child: const Text(
+                        'Cardápio Digital Online',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF60A5FA),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Clientes fizeram pedidos pelo cardápio web (inclusive agendamentos futuros) que necessitam de aprovação.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: FincoreColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton.icon(
+            onPressed: () {
+              setState(() => _activeSubTab = 1);
+            },
+            icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+            label: const Text(
+              'Ver e Aprovar',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF97316),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              elevation: 2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAguardandoAprovacaoPanel() {
+    final ordensAguardando = _controller.ordensWebAguardandoAprovacao;
+
+    if (ordensAguardando.isEmpty) {
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.all(36),
+          constraints: const BoxConstraints(maxWidth: 540),
+          decoration: BoxDecoration(
+            color: FincoreColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: FincoreColors.success.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  color: FincoreColors.success,
+                  size: 48,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Nenhum Pedido Web Aguardando Aprovação',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: FincoreColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Todos os pedidos recebidos através do Cardápio Web foram aprovados e encaminhados para a esteira operacional.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: FincoreColors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 20),
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() => _activeSubTab = 0);
+                },
+                icon: const Icon(Icons.view_kanban_outlined, size: 16),
+                label: const Text('Voltar para o Kanban de Preparo'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: FincoreColors.primary,
+                  side: BorderSide(color: FincoreColors.primary),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header com resumo e botão de aprovar todos
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: FincoreColors.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF97316).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(Icons.hourglass_top_rounded, color: Color(0xFFF97316), size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${ordensAguardando.length} ${ordensAguardando.length == 1 ? 'Pedido Web Aguardando Aprovação' : 'Pedidos Web Aguardando Aprovação'}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: FincoreColors.textPrimary,
+                      ),
+                    ),
+                    const Text(
+                      'Estes pedidos foram feitos online pelo cliente. Ao aprovar, o status do pedido avança para confirmado e entra na fila.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: FincoreColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (ordensAguardando.length > 1)
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final confirmar = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: FincoreColors.surface,
+                        title: const Text('Aprovar Todos os Pedidos Web?', style: TextStyle(color: Colors.white, fontSize: 16)),
+                        content: Text(
+                          'Deseja aprovar todos os ${ordensAguardando.length} pedidos web pendentes de uma só vez?',
+                          style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textMuted)),
+                          ),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            style: ElevatedButton.styleFrom(backgroundColor: FincoreColors.success),
+                            child: const Text('Aprovar Todos', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmar == true) {
+                      for (final o in ordensAguardando) {
+                        await _controller.aprovarPedidoWeb(o);
+                      }
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            backgroundColor: FincoreColors.success,
+                            content: Text('✅ Todos os ${ordensAguardando.length} pedidos foram aprovados!'),
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.done_all_rounded, size: 16),
+                  label: const Text('Aprovar Todos em Lote', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: FincoreColors.success,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Lista de Cards com Scroll
+        Expanded(
+          child: ListView.separated(
+            itemCount: ordensAguardando.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final ordem = ordensAguardando[index];
+              return _buildCardPedidoAguardando(ordem);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCardPedidoAguardando(OrdemPreparo ordem) {
+    final parsed = DadosOrdemKanban.fromOrdem(ordem);
+    final pedidoRow = _controller.pedidosMap[ordem.pedidoId];
+    final numPed = _controller.getNumeroPedido(ordem.pedidoId) ?? pedidoRow?.numeroPedido;
+    final numStr = numPed != null ? '#${numPed.toString().padLeft(6, '0')}' : '#${ordem.pedidoId.substring(0, 6).toUpperCase()}';
+
+    final agendada = parsed.dataAgendada ?? pedidoRow?.dataHoraEntregaPrevista?.toLocal();
+    final now = DateTime.now();
+    String agendamentoStr;
+    bool isAgendamentoDestaque = false;
+    if (agendada != null) {
+      final isHoje = agendada.year == now.year && agendada.month == now.month && agendada.day == now.day;
+      final diffDays = agendada.difference(DateTime(now.year, now.month, now.day)).inDays;
+      final diasLabel = isHoje
+          ? 'HOJE'
+          : (diffDays == 1
+              ? 'AMANHÃ'
+              : (diffDays > 1 ? 'em $diffDays dias' : '${diffDays.abs()} dia(s) atrás'));
+      agendamentoStr = '📅 Agendado para: ${DateFormat('dd/MM/yyyy HH:mm').format(agendada)} ($diasLabel)';
+      isAgendamentoDestaque = true;
+    } else {
+      agendamentoStr = '⚡ Pedido para Preparação Imediata';
+    }
+
+    final totalCentavos = parsed.totalCentavos > 0
+        ? parsed.totalCentavos
+        : (pedidoRow?.valorTotalCentavos ?? _controller.totalOrdemCentavos(ordem));
+    final totalStr = (totalCentavos / 100.0).toStringAsFixed(2).replaceAll('.', ',');
+
+    final dataCriacaoStr = DateFormat('dd/MM/yyyy HH:mm').format(ordem.criadaEm.toLocal());
+    final isDelivery = parsed.tipoLogistica.toLowerCase().contains('entrega') ||
+        parsed.tipoLogistica.toLowerCase().contains('delivery');
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: FincoreColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFFF97316).withValues(alpha: 0.5),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Linha 1: Cabeçalho com Número, Badge Web, Horário de Criação e Status
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: FincoreColors.background,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: FincoreColors.border),
+                ),
+                child: Text(
+                  numStr,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1D4ED8).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFF1D4ED8).withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.language_rounded, size: 13, color: Color(0xFF60A5FA)),
+                    SizedBox(width: 4),
+                    Text(
+                      'Cardápio Web',
+                      style: TextStyle(
+                        color: Color(0xFF93C5FD),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Criado em: $dataCriacaoStr',
+                style: const TextStyle(
+                  color: FincoreColors.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF97316).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFF97316)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.hourglass_top_rounded, size: 12, color: Color(0xFFF97316)),
+                    SizedBox(width: 4),
+                    Text(
+                      'Aguardando Aprovação',
+                      style: TextStyle(
+                        color: Color(0xFFF97316),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // ── Linha 2: Bloco de Agendamento da Entrega / Retirada (Destaque Principal)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: isAgendamentoDestaque
+                  ? const Color(0xFF3B82F6).withValues(alpha: 0.12)
+                  : FincoreColors.background,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isAgendamentoDestaque
+                    ? const Color(0xFF3B82F6).withValues(alpha: 0.4)
+                    : FincoreColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.event_available_rounded,
+                  size: 18,
+                  color: isAgendamentoDestaque ? const Color(0xFF60A5FA) : FincoreColors.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    agendamentoStr,
+                    style: TextStyle(
+                      color: isAgendamentoDestaque ? Colors.white : FincoreColors.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                if (agendada != null)
+                  InkWell(
+                    onTap: () {
+                      _controller.setSelectedDate(agendada);
+                      setState(() => _activeSubTab = 0);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      child: Row(
+                        children: const [
+                          Text(
+                            'Ver no Kanban deste dia',
+                            style: TextStyle(
+                              color: Color(0xFF60A5FA),
+                              fontSize: 11,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                          SizedBox(width: 2),
+                          Icon(Icons.open_in_new_rounded, size: 12, color: Color(0xFF60A5FA)),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── Linha 3: Dados do Cliente e Logística
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Coluna Cliente
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.background,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: FincoreColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.person_outline_rounded, size: 14, color: FincoreColors.textMuted),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              parsed.cliente,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (parsed.telefone.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.phone_outlined, size: 13, color: FincoreColors.textMuted),
+                            const SizedBox(width: 4),
+                            Text(
+                              parsed.telefone,
+                              style: const TextStyle(
+                                color: FincoreColors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // Coluna Logística
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.background,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: FincoreColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            isDelivery ? Icons.delivery_dining_rounded : Icons.storefront_rounded,
+                            size: 14,
+                            color: isDelivery ? const Color(0xFF60A5FA) : const Color(0xFFF59E0B),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isDelivery ? 'Entrega (Delivery)' : 'Retirada no Balcão',
+                            style: TextStyle(
+                              color: isDelivery ? const Color(0xFF60A5FA) : const Color(0xFFF59E0B),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isDelivery && parsed.endereco != null && parsed.endereco!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '${parsed.endereco!}${parsed.bairro != null ? ' - ${parsed.bairro}' : ''}',
+                          style: const TextStyle(
+                            color: FincoreColors.textSecondary,
+                            fontSize: 11,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // Coluna Pagamento & Total
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.background,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: FincoreColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.payment_rounded, size: 14, color: FincoreColors.textMuted),
+                          const SizedBox(width: 4),
+                          Text(
+                            parsed.pagamento.isNotEmpty ? parsed.pagamento : 'Pagamento a definir',
+                            style: const TextStyle(
+                              color: FincoreColors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Total: R\$ $totalStr',
+                        style: TextStyle(
+                          color: FincoreColors.primary,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // ── Linha 4: Itens do Pedido
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: FincoreColors.background.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: FincoreColors.borderSubtle),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'ITENS DO PEDIDO:',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: FincoreColors.textMuted,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: ordem.itens.map((item) {
+                    final qtdStr = item.quantidade % 1 == 0
+                        ? item.quantidade.toInt().toString()
+                        : item.quantidade.toStringAsFixed(1);
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: FincoreColors.surface,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: FincoreColors.border),
+                      ),
+                      child: Text(
+                        '${qtdStr}x ${item.nomeProduto}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                if (parsed.observacoesLimpa.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.note_alt_outlined, size: 13, color: Color(0xFFF59E0B)),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          'Obs: ${parsed.observacoesLimpa}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFFF59E0B),
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Linha 5: Botões de Ação
+          Row(
+            children: [
+              // Botão WhatsApp
+              OutlinedButton.icon(
+                onPressed: () => _abrirWhatsAppParaOrdem(ordem),
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF22C55E)),
+                label: const Text('WhatsApp', style: TextStyle(color: Color(0xFF22C55E), fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFF22C55E)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Botão Detalhes & Impressão
+              OutlinedButton.icon(
+                onPressed: () => _abrirDrawer(ordem),
+                icon: const Icon(Icons.visibility_outlined, size: 15, color: FincoreColors.textSecondary),
+                label: const Text('Ver Detalhes', style: TextStyle(color: FincoreColors.textSecondary, fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: FincoreColors.border),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Botão Recusar / Cancelar
+              if (PermissaoService.podeCancelarPedido(_userRole))
+                OutlinedButton.icon(
+                  onPressed: () => _cancelarPedido(ordem),
+                  icon: const Icon(Icons.close_rounded, size: 15, color: FincoreColors.danger),
+                  label: const Text('Recusar', style: TextStyle(color: FincoreColors.danger, fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: FincoreColors.danger.withValues(alpha: 0.5)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+
+              const Spacer(),
+
+              // Botão Principal: APROVAR PEDIDO
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await _controller.aprovarPedidoWeb(ordem);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: FincoreColors.success,
+                        content: Text('✅ Pedido $numStr aprovado com sucesso e integrado à fila!'),
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+                label: const Text(
+                  'APROVAR PEDIDO',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: FincoreColors.success,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 2,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -968,9 +2023,77 @@ class _PedidosPageState extends State<PedidosPage> {
       return matchesStatus && matchesSearch && matchesFrom && matchesTo && matchesOrigem;
     }).toList();
 
+    final int totalFaturamentoCentavos = list.where((p) => !p.isUsoInterno).fold(0, (sum, p) => sum + p.valorTotalCentavos);
+    final int totalVendasCount = list.where((p) => !p.isUsoInterno).length;
+    final double ticketMedioCentavos = totalVendasCount > 0 ? (totalFaturamentoCentavos / totalVendasCount) : 0;
+    final String totalFaturamentoStr = (totalFaturamentoCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+    final String ticketMedioStr = (ticketMedioCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Linha 0: Cards de Métricas do Histórico ────────────────────
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: FincoreColors.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: FincoreColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('TOTAL DE PEDIDOS', style: TextStyle(color: FincoreColors.textMuted, fontSize: 10, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('${list.length}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: FincoreColors.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: FincoreColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('FATURAMENTO TOTAL', style: TextStyle(color: FincoreColors.textMuted, fontSize: 10, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('R\$ $totalFaturamentoStr', style: TextStyle(color: FincoreColors.primary, fontSize: 18, fontWeight: FontWeight.w900)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: FincoreColors.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: FincoreColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('TICKET MÉDIO', style: TextStyle(color: FincoreColors.textMuted, fontSize: 10, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('R\$ $ticketMedioStr', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         // ── Linha 1: Busca textual + Contador de resultados ────────────
         Row(
           children: [
@@ -1214,6 +2337,39 @@ class _PedidosPageState extends State<PedidosPage> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       IconButton(
+                                        icon: const Icon(Icons.print_outlined, size: 18),
+                                        tooltip: 'Reimprimir Comprovante',
+                                        color: FincoreColors.primary,
+                                        onPressed: () {
+                                          final matchingOrdens = _controller.todasOrdens.where((ord) => ord.pedidoId == p.id);
+                                          final o = matchingOrdens.isNotEmpty
+                                              ? matchingOrdens.first
+                                              : OrdemPreparo(
+                                                  id: p.id,
+                                                  tenantId: p.tenantId,
+                                                  pedidoId: p.id,
+                                                  status: StatusOrdemPreparo.values.firstWhere(
+                                                    (v) => v.name.toLowerCase() == p.status.toLowerCase().trim(),
+                                                    orElse: () => StatusOrdemPreparo.pendente,
+                                                  ),
+                                                  itens: const [],
+                                                  prioridade: PrioridadeOrdem.normal,
+                                                  criadaEm: p.dataHoraCriacao,
+                                                  tempoEstimadoSegundos: 600,
+                                                  metadata: SyncMetadata(
+                                                    version: p.syncVersion,
+                                                    createdAt: p.createdAt,
+                                                    updatedAt: p.updatedAt,
+                                                    createdBy: p.createdBy ?? '',
+                                                    updatedBy: p.updatedBy ?? '',
+                                                  ),
+                                                );
+                                          final parsed = DadosOrdemKanban.fromOrdem(o);
+                                          _exibirOpcoesImpressao(o, parsed);
+                                        },
+                                      ),
+                                      const SizedBox(width: 4),
+                                      IconButton(
                                         icon: const Icon(Icons.visibility_outlined, size: 18),
                                         tooltip: 'Ver Detalhes',
                                         color: FincoreColors.textSecondary,
@@ -1291,20 +2447,32 @@ class _PedidosPageState extends State<PedidosPage> {
             onTap: () => _controller.mudarDia(-1),
           ),
           const SizedBox(width: 4),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: FincoreColors.background,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: FincoreColors.border),
-            ),
-            child: Text(
-              formattedDate,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-                color: FincoreColors.textPrimary,
+          InkWell(
+            onTap: () => _abrirCalendarioCentralPedidos(context),
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: FincoreColors.background,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.calendar_month_rounded, size: 14, color: FincoreColors.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    formattedDate,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: FincoreColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_drop_down, size: 14, color: FincoreColors.textMuted),
+                ],
               ),
             ),
           ),
@@ -1355,18 +2523,105 @@ class _PedidosPageState extends State<PedidosPage> {
 
           const Spacer(),
 
-          // Resumo Operacional Compacto
-          Text(
-            '${_controller.totalPedidos} pedido${_controller.totalPedidos > 1 ? 's' : ''} · '
-            '${_controller.totalEntregas} entrega${_controller.totalEntregas > 1 ? 's' : ''} · '
-            '${_controller.totalRetiradas} retirada${_controller.totalRetiradas > 1 ? 's' : ''}',
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: FincoreColors.textSecondary,
+          // Toggle de Som de Alerta (Apenas Mudo/Ativo)
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                SoundService.enabled = !SoundService.enabled;
+              });
+              if (SoundService.enabled) {
+                SoundService.playAttentionSound();
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: SoundService.enabled ? FincoreColors.primary.withValues(alpha: 0.15) : FincoreColors.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: SoundService.enabled ? FincoreColors.primary : FincoreColors.border),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    SoundService.enabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                    size: 16,
+                    color: SoundService.enabled ? FincoreColors.primary : FincoreColors.textMuted,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    SoundService.enabled ? 'Som Ativo' : 'Som Mudo',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: SoundService.enabled ? FincoreColors.primary : FincoreColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 10),
+
+          // Botão Imprimir Pedidos do Dia
+          ElevatedButton.icon(
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1E1E2E),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  title: Row(
+                    children: [
+                      Icon(Icons.print_rounded, color: FincoreColors.primary),
+                      const SizedBox(width: 8),
+                      const Text('Imprimir Pedidos do Dia', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  content: Text(
+                    'Deseja enviar para a impressora todos os ${_controller.filteredOrdens.length} pedidos agendados para ${_controller.formattedDate()}?',
+                    style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textMuted)),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: FincoreColors.primary,
+                        foregroundColor: Colors.black,
+                      ),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      icon: const Icon(Icons.print, size: 16),
+                      label: const Text('IMPRIMIR EM LOTE', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              );
+
+              if (ok == true) {
+                final printUseCase = DependencyInjection().get<PrintUseCase>();
+                final totalPrinted = await _controller.imprimirPedidosDoDia(printUseCase: printUseCase);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: FincoreColors.success,
+                      content: Text('⚡ $totalPrinted pedidos impressos em lote com sucesso!'),
+                    ),
+                  );
+                }
+              }
+            },
+            icon: const Icon(Icons.print_rounded, size: 16),
+            label: const Text('Imprimir Pedidos do Dia', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E2E3E),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: FincoreColors.border)),
+            ),
+          ),
+          const SizedBox(width: 10),
 
           // Botão Novo Pedido
           if (PermissaoService.podeCriarPedido(_userRole))
@@ -1421,11 +2676,12 @@ class _PedidosPageState extends State<PedidosPage> {
                 mostrarAcaoRapida: _proximoStatus(o) != null,
                 acaoRapidaLabel: _acaoRapidaLabel(o),
                 onAcaoRapida: _proximoStatus(o) != null
-                    ? () => _controller.moverStatus(o, _proximoStatus(o)!)
+                    ? () => _executarAcaoRapida(o)
                     : null,
                 onTap: () => _abrirDrawer(o),
                 onImprimir: () => _exibirOpcoesImpressao(o, parsed),
                 onCancelar: () => _cancelarPedido(o),
+                onWhatsApp: () => _abrirWhatsAppParaOrdem(o),
               );
             },
           ),
@@ -1449,11 +2705,12 @@ class _PedidosPageState extends State<PedidosPage> {
                 mostrarAcaoRapida: _proximoStatus(o) != null,
                 acaoRapidaLabel: _acaoRapidaLabel(o),
                 onAcaoRapida: _proximoStatus(o) != null
-                    ? () => _controller.moverStatus(o, _proximoStatus(o)!)
+                    ? () => _executarAcaoRapida(o)
                     : null,
                 onTap: () => _abrirDrawer(o),
                 onImprimir: () => _exibirOpcoesImpressao(o, parsed),
                 onCancelar: () => _cancelarPedido(o),
+                onWhatsApp: () => _abrirWhatsAppParaOrdem(o),
               );
             },
           ),
@@ -1477,11 +2734,41 @@ class _PedidosPageState extends State<PedidosPage> {
                 mostrarAcaoRapida: _proximoStatus(o) != null,
                 acaoRapidaLabel: _acaoRapidaLabel(o),
                 onAcaoRapida: _proximoStatus(o) != null
-                    ? () => _controller.moverStatus(o, _proximoStatus(o)!)
+                    ? () => _executarAcaoRapida(o)
                     : null,
                 onTap: () => _abrirDrawer(o),
                 onImprimir: () => _exibirOpcoesImpressao(o, parsed),
                 onCancelar: () => _cancelarPedido(o),
+                onWhatsApp: () => _abrirWhatsAppParaOrdem(o),
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: 10),
+
+        // Coluna SAIU PARA ENTREGA
+        Expanded(
+          child: KanbanColumn(
+            title: 'Saiu p/ Entrega',
+            accentColor: const Color(0xFF3B82F6),
+            ordens: _controller.saiuParaEntrega,
+            cardBuilder: (o, _) {
+              final parsed = DadosOrdemKanban.fromOrdem(o);
+              return PedidoCard(
+                ordem: o,
+                parsed: parsed,
+                controller: _controller,
+                userRole: _userRole,
+                accentColor: const Color(0xFF3B82F6),
+                mostrarAcaoRapida: _proximoStatus(o) != null,
+                acaoRapidaLabel: _acaoRapidaLabel(o),
+                onAcaoRapida: _proximoStatus(o) != null
+                    ? () => _executarAcaoRapida(o)
+                    : null,
+                onTap: () => _abrirDrawer(o),
+                onImprimir: () => _exibirOpcoesImpressao(o, parsed),
+                onCancelar: () => _cancelarPedido(o),
+                onWhatsApp: () => _abrirWhatsAppParaOrdem(o),
               );
             },
           ),
@@ -1504,6 +2791,19 @@ class _PedidosPageState extends State<PedidosPage> {
           ),
         ),
       ],
+    );
+  }
+
+  void _abrirCalendarioCentralPedidos(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _CentralPedidosCalendarDialog(
+        initialDate: _controller.selectedDate,
+        controller: _controller,
+        onDateSelected: (novaData) {
+          _controller.setSelectedDate(novaData);
+        },
+      ),
     );
   }
 }
@@ -1628,8 +2928,6 @@ class _EntregueCompactRow extends StatelessWidget {
   }
 }
 
-
-
 class _DateNavButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
@@ -1690,6 +2988,490 @@ class _OrigemChip extends StatelessWidget {
                 : FincoreColors.textSecondary,
             fontWeight:
                 selected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Modal de Calendário Interativo da Central de Pedidos ────────────────────
+
+class _CentralPedidosCalendarDialog extends StatefulWidget {
+  final DateTime initialDate;
+  final CentralPedidosController controller;
+  final ValueChanged<DateTime> onDateSelected;
+
+  const _CentralPedidosCalendarDialog({
+    required this.initialDate,
+    required this.controller,
+    required this.onDateSelected,
+  });
+
+  @override
+  State<_CentralPedidosCalendarDialog> createState() => _CentralPedidosCalendarDialogState();
+}
+
+class _CentralPedidosCalendarDialogState extends State<_CentralPedidosCalendarDialog> {
+  late DateTime _currentMonth;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentMonth = DateTime(widget.initialDate.year, widget.initialDate.month, 1);
+  }
+
+  void _mudarMes(int offset) {
+    setState(() {
+      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + offset, 1);
+    });
+  }
+
+  String _nomeMes(int month) {
+    const meses = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    return meses[month - 1];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final statsMap = widget.controller.getEstatisticasPedidosPorDia();
+
+    final year = _currentMonth.year;
+    final month = _currentMonth.month;
+    final firstDayOfMonth = DateTime(year, month, 1);
+    final daysInMonth = DateUtils.getDaysInMonth(year, month);
+    // Domingo = 0, Segunda = 1 ... Sábado = 6
+    final startWeekday = firstDayOfMonth.weekday == 7 ? 0 : firstDayOfMonth.weekday;
+
+    int totalPedidosMes = 0;
+    int totalAtrasadosMes = 0;
+    int totalEmAbertoMes = 0;
+    int totalFinalizadosMes = 0;
+
+    for (int d = 1; d <= daysInMonth; d++) {
+      final dateKey = DateTime(year, month, d);
+      final st = statsMap[dateKey];
+      if (st != null) {
+        totalPedidosMes += st.total;
+        totalAtrasadosMes += st.atrasados;
+        totalEmAbertoMes += st.emAberto;
+        totalFinalizadosMes += st.finalizados;
+      }
+    }
+
+    return AlertDialog(
+      backgroundColor: FincoreColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.all(20),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Cabeçalho do Mês ──────────────────────────────────────────
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left_rounded, size: 22, color: FincoreColors.textPrimary),
+                  onPressed: () => _mudarMes(-1),
+                  tooltip: 'Mês anterior',
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      '${_nomeMes(month)} $year',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: FincoreColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right_rounded, size: 22, color: FincoreColors.textPrimary),
+                  onPressed: () => _mudarMes(1),
+                  tooltip: 'Próximo mês',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // ── Dias da Semana ────────────────────────────────────────────
+            Row(
+              children: ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'].map((dia) {
+                return Expanded(
+                  child: Center(
+                    child: Text(
+                      dia,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: FincoreColors.textMuted,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+            const Divider(color: FincoreColors.border, height: 1),
+            const SizedBox(height: 8),
+
+            // ── Grid dos Dias do Mês ───────────────────────────────────────
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 7,
+                mainAxisSpacing: 6,
+                crossAxisSpacing: 6,
+                childAspectRatio: 0.98,
+              ),
+              itemCount: 42,
+              itemBuilder: (ctx, index) {
+                final dayNumber = index - startWeekday + 1;
+
+                if (dayNumber < 1 || dayNumber > daysInMonth) {
+                  return const SizedBox.shrink();
+                }
+
+                final date = DateTime(year, month, dayNumber);
+                final isToday = date.year == today.year && date.month == today.month && date.day == today.day;
+                final isSelected = date.year == widget.controller.selectedDate.year &&
+                    date.month == widget.controller.selectedDate.month &&
+                    date.day == widget.controller.selectedDate.day;
+                final stats = statsMap[date] ?? const EstatisticasDiaCalendario();
+
+                // Definição de cores de fundo e borda baseadas no status
+                final Color cellBg;
+                final Color cellBorder;
+                final Color dayNumberColor;
+
+                if (isSelected) {
+                  cellBg = FincoreColors.primary;
+                  cellBorder = FincoreColors.primary;
+                  dayNumberColor = Colors.white;
+                } else if (stats.temAtraso) {
+                  // Destaque de ALERTA para dias com pedidos em atraso
+                  cellBg = const Color(0xFFEF4444).withValues(alpha: 0.12);
+                  cellBorder = const Color(0xFFEF4444).withValues(alpha: 0.55);
+                  dayNumberColor = const Color(0xFFDC2626);
+                } else if (stats.todosFinalizados) {
+                  // Todos os pedidos do dia já finalizados/entregues
+                  cellBg = const Color(0xFF10B981).withValues(alpha: 0.08);
+                  cellBorder = const Color(0xFF10B981).withValues(alpha: 0.40);
+                  dayNumberColor = isToday ? FincoreColors.primary : const Color(0xFF059669);
+                } else if (stats.total > 0) {
+                  // Pedidos em aberto / agendados no prazo
+                  cellBg = const Color(0xFF3B82F6).withValues(alpha: 0.08);
+                  cellBorder = const Color(0xFF3B82F6).withValues(alpha: 0.40);
+                  dayNumberColor = isToday ? FincoreColors.primary : const Color(0xFF2563EB);
+                } else if (isToday) {
+                  cellBg = FincoreColors.primary.withValues(alpha: 0.10);
+                  cellBorder = FincoreColors.primary.withValues(alpha: 0.50);
+                  dayNumberColor = FincoreColors.primary;
+                } else {
+                  cellBg = FincoreColors.background;
+                  cellBorder = FincoreColors.border;
+                  dayNumberColor = FincoreColors.textPrimary;
+                }
+
+                final tooltipMsg = stats.total > 0
+                    ? '$dayNumber de ${_nomeMes(month)}:\n'
+                      '• Total: ${stats.total} pedido(s)\n'
+                      '• ${stats.atrasados} em atraso\n'
+                      '• ${stats.emAberto} em aberto\n'
+                      '• ${stats.finalizados} finalizado(s)'
+                    : '$dayNumber de ${_nomeMes(month)} (Nenhum pedido)';
+
+                return Tooltip(
+                  message: tooltipMsg,
+                  waitDuration: const Duration(milliseconds: 300),
+                  child: InkWell(
+                    onTap: () {
+                      widget.onDateSelected(date);
+                      Navigator.of(context).pop();
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      decoration: BoxDecoration(
+                        color: cellBg,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: cellBorder,
+                          width: isSelected || isToday || stats.temAtraso ? 1.5 : 1,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                '$dayNumber',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: isSelected || isToday || stats.total > 0 ? FontWeight.bold : FontWeight.w600,
+                                  color: dayNumberColor,
+                                ),
+                              ),
+                              if (isToday && !isSelected) ...[
+                                const SizedBox(width: 2),
+                                Container(
+                                  width: 4,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: FincoreColors.primary,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (stats.total > 0) ...[
+                            const SizedBox(height: 2),
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: 2,
+                              runSpacing: 2,
+                              children: [
+                                // Badge de atrasados (Vermelho)
+                                if (stats.atrasados > 0)
+                                  _buildMiniBadge(
+                                    count: stats.atrasados,
+                                    bgColor: isSelected
+                                        ? Colors.white.withValues(alpha: 0.25)
+                                        : const Color(0xFFEF4444).withValues(alpha: 0.2),
+                                    textColor: isSelected ? Colors.white : const Color(0xFFEF4444),
+                                    icon: Icons.error_outline_rounded,
+                                  ),
+                                // Badge de em aberto (Azul)
+                                if (stats.emAberto > 0)
+                                  _buildMiniBadge(
+                                    count: stats.emAberto,
+                                    bgColor: isSelected
+                                        ? Colors.white.withValues(alpha: 0.25)
+                                        : const Color(0xFF3B82F6).withValues(alpha: 0.2),
+                                    textColor: isSelected ? Colors.white : const Color(0xFF3B82F6),
+                                    icon: Icons.schedule_rounded,
+                                  ),
+                                // Badge de finalizados (Verde)
+                                if (stats.finalizados > 0)
+                                  _buildMiniBadge(
+                                    count: stats.finalizados,
+                                    bgColor: isSelected
+                                        ? Colors.white.withValues(alpha: 0.25)
+                                        : const Color(0xFF10B981).withValues(alpha: 0.2),
+                                    textColor: isSelected ? Colors.white : const Color(0xFF10B981),
+                                    icon: Icons.check_circle_outline_rounded,
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+            const Divider(color: FincoreColors.border, height: 1),
+            const SizedBox(height: 8),
+
+            // ── Legenda de Cores ──────────────────────────────────────────
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildLegendItem(color: const Color(0xFFEF4444), label: 'Atrasado'),
+                const SizedBox(width: 14),
+                _buildLegendItem(color: const Color(0xFF3B82F6), label: 'Em Aberto'),
+                const SizedBox(width: 14),
+                _buildLegendItem(color: const Color(0xFF10B981), label: 'Finalizado'),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Divider(color: FincoreColors.border, height: 1),
+            const SizedBox(height: 8),
+
+            // ── Atalhos Rápidos & Total do Mês ───────────────────────────
+            Row(
+              children: [
+                _buildShortcutButton(
+                  label: 'Hoje',
+                  onTap: () {
+                    widget.onDateSelected(today);
+                    Navigator.of(context).pop();
+                  },
+                ),
+                const SizedBox(width: 6),
+                _buildShortcutButton(
+                  label: 'Amanhã',
+                  onTap: () {
+                    widget.onDateSelected(today.add(const Duration(days: 1)));
+                    Navigator.of(context).pop();
+                  },
+                ),
+                const SizedBox(width: 6),
+                _buildShortcutButton(
+                  label: 'Ontem',
+                  onTap: () {
+                    widget.onDateSelected(today.subtract(const Duration(days: 1)));
+                    Navigator.of(context).pop();
+                  },
+                ),
+                const Spacer(),
+                if (totalPedidosMes > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.background,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: FincoreColors.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '$totalPedidosMes no mês',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: FincoreColors.textPrimary,
+                          ),
+                        ),
+                        if (totalAtrasadosMes > 0) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '($totalAtrasadosMes 🔴)',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFEF4444),
+                            ),
+                          ),
+                        ],
+                        if (totalEmAbertoMes > 0) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '($totalEmAbertoMes 🔵)',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF3B82F6),
+                            ),
+                          ),
+                        ],
+                        if (totalFinalizadosMes > 0) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '($totalFinalizadosMes 🟢)',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF10B981),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Fechar', style: TextStyle(color: FincoreColors.textSecondary)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMiniBadge({
+    required int count,
+    required Color bgColor,
+    required Color textColor,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 8, color: textColor),
+          const SizedBox(width: 1.5),
+          Text(
+            '$count',
+            style: TextStyle(
+              fontSize: 8.5,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendItem({required Color color, required String label}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
+            color: FincoreColors.textMuted,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildShortcutButton({required String label, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: FincoreColors.background,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: FincoreColors.border),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: FincoreColors.textPrimary,
           ),
         ),
       ),

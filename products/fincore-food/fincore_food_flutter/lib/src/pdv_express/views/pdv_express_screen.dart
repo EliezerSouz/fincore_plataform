@@ -3,6 +3,7 @@ import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fincore_core/common/kds_models.dart';
+import 'package:fincore_core/common/master_data_models.dart';
 import '../controllers/pdv_express_controller.dart';
 import 'widgets/pix_payment_modal.dart';
 import 'widgets/stepper_header.dart';
@@ -11,17 +12,23 @@ import 'widgets/product_catalog_step.dart';
 import 'widgets/payment_step.dart';
 import 'widgets/order_summary_panel.dart';
 import 'widgets/confirmacao_agendamento_modal.dart';
-import 'comprovante_pedido_page.dart';
+import 'package:fincore_core/context/tenant_context.dart';
+import '../../shared/services/whatsapp_service.dart';
+import '../../shared/presentation/widgets/whatsapp_dialog.dart';
+import '../../financeiro/controllers/financeiro_controller.dart';
+import '../../financeiro/widgets/dialogs_caixa.dart';
 
 class PdvExpressScreen extends StatefulWidget {
   final bool isEmbedded;
   final OrdemPreparo? ordemParaEditar;
   final String? repetirPedidoId;
+  final Cliente? clienteInicial;
   const PdvExpressScreen({
     super.key,
     this.isEmbedded = false,
     this.ordemParaEditar,
     this.repetirPedidoId,
+    this.clienteInicial,
   });
 
   @override
@@ -31,6 +38,7 @@ class PdvExpressScreen extends StatefulWidget {
 class _PdvExpressScreenState extends State<PdvExpressScreen>
     with TickerProviderStateMixin {
   late final PdvExpressController _controller;
+  late final FinanceiroController _finCtrl;
   final FocusNode _keyboardFocusNode = FocusNode();
   final FocusNode _searchFocusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
@@ -46,9 +54,13 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
   @override
   void initState() {
     super.initState();
+    _finCtrl = FinanceiroController();
+    _finCtrl.addListener(_onFinChanged);
+
     _controller = PdvExpressController(
       ordemParaEditar: widget.ordemParaEditar,
       repetirPedidoId: widget.repetirPedidoId,
+      clienteInicial: widget.clienteInicial,
     );
     _controller.addListener(_onControllerChanged);
 
@@ -68,9 +80,167 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       TweenSequenceItem(tween: Tween(begin: 6.0, end: 0.0), weight: 1),
     ]).animate(_shakeController);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    HardwareKeyboard.instance.addHandler(_onHardwareKey);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       _keyboardFocusNode.requestFocus();
+      await _verificarAberturaCaixaObrigatoria();
     });
+  }
+
+  void _onFinChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _verificarAberturaCaixaObrigatoria() async {
+    // Aguarda carregar dados do banco local
+    await Future.delayed(const Duration(milliseconds: 350));
+    if (!mounted) return;
+    if (!_finCtrl.resumo.caixaAberto && widget.ordemParaEditar == null) {
+      if (!mounted) return;
+      await DialogAbrirCaixa.show(
+        context,
+        onConfirm: (val, turno) async {
+          await _finCtrl.abrirCaixa(valorAberturaCentavos: val, nomeTurno: turno);
+          if (mounted) setState(() {});
+        },
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+    _controller.removeListener(_onControllerChanged);
+    _controller.dispose();
+    _finCtrl.removeListener(_onFinChanged);
+    _finCtrl.dispose();
+    _keyboardFocusNode.dispose();
+    _searchFocusNode.dispose();
+    _searchController.dispose();
+    _shakeController.dispose();
+    super.dispose();
+  }
+
+  void _abrirMenuOperacoesCaixa() {
+    final resumo = _finCtrl.resumo;
+    if (!resumo.caixaAberto) {
+      DialogAbrirCaixa.show(
+        context,
+        onConfirm: (val, turno) async {
+          await _finCtrl.abrirCaixa(valorAberturaCentavos: val, nomeTurno: turno);
+          if (mounted) setState(() {});
+        },
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: FincoreColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text('Operações de Caixa & Turno', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.lock_clock_rounded, color: Color(0xFFEF4444)),
+                title: const Text('Conferência & Fechamento de Caixa', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  DialogFecharCaixa.show(
+                    context,
+                    resumo: resumo,
+                    controller: _finCtrl,
+                    formatarValor: (centavos) => 'R\$ ${(centavos / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+                    onConfirm: (v, obs) => _finCtrl.fecharCaixa(valorContadoCentavos: v, observacoes: obs),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.output_rounded, color: Color(0xFFEF4444)),
+                title: const Text('Registrar Sangria (Retirada de Dinheiro)', style: TextStyle(color: FincoreColors.textPrimary)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  DialogMovimentoCaixa.show(
+                    context,
+                    initialTipo: 'sangria',
+                    onConfirm: (t, v, d) => _finCtrl.lancarMovimento(tipo: t, valorCentavos: v, descricao: d),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.input_rounded, color: Color(0xFF10B981)),
+                title: const Text('Reforço de Troco (Suprimento)', style: TextStyle(color: FincoreColors.textPrimary)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  DialogMovimentoCaixa.show(
+                    context,
+                    initialTipo: 'suprimento',
+                    onConfirm: (t, v, d) => _finCtrl.lancarMovimento(tipo: t, valorCentavos: v, descricao: d),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _onHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.f1) {
+      _flashKeyLabel('F1');
+      _controller.setPassoAtual(0);
+      return true;
+    } else if (key == LogicalKeyboardKey.f2) {
+      _flashKeyLabel('F2');
+      _controller.setPassoAtual(1);
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_searchFocusNode.canRequestFocus) {
+          _searchFocusNode.requestFocus();
+          _searchController.selection = TextSelection(
+            baseOffset: 0,
+            extentOffset: _searchController.text.length,
+          );
+        }
+      });
+      return true;
+    } else if (key == LogicalKeyboardKey.f3) {
+      _flashKeyLabel('F3');
+      _controller.setPassoAtual(2);
+      return true;
+    } else if (key == LogicalKeyboardKey.f8) {
+      _flashKeyLabel('F8');
+      _abrirMenuOperacoesCaixa();
+      return true;
+    } else if (key == LogicalKeyboardKey.f12) {
+      _flashKeyLabel('F12');
+      if (_controller.passoAtual == 2 || _controller.state == PdvState.selectingPayment) {
+        _processarFinalizacaoVenda();
+      } else if (!_controller.podeAvancar()) {
+        _triggerShake();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: FincoreColors.danger,
+            content: Text('Por favor, preencha as informações obrigatórias da etapa atual.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        _avancarPasso();
+      }
+      return true;
+    }
+    return false;
   }
 
   /// Diálogo de justificativa para pedidos com data/hora retroativa
@@ -304,17 +474,6 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
     );
   }
 
-  @override
-  void dispose() {
-    _controller.removeListener(_onControllerChanged);
-    _controller.dispose();
-    _keyboardFocusNode.dispose();
-    _searchFocusNode.dispose();
-    _searchController.dispose();
-    _shakeController.dispose();
-    super.dispose();
-  }
-
   void _onControllerChanged() {
     setState(() {});
     if (_controller.state == PdvState.completed) {
@@ -348,6 +507,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
           const _ShortcutEntry(key: 'F1', label: 'Selecionar Cliente & Entrega'),
           const _ShortcutEntry(key: 'F2', label: 'Catálogo de Produtos'),
           const _ShortcutEntry(key: 'F3', label: 'Forma de Pagamento'),
+          const _ShortcutEntry(key: 'F8', label: 'Operações de Caixa (Abrir / Sangria / Fechar)'),
           const _ShortcutEntry(key: 'F12', label: 'Finalizar / Processar Venda'),
           const _ShortcutEntry(key: 'ESC', label: 'Limpar Venda / Cancelar'),
         ];
@@ -507,11 +667,96 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
   }
 
   Future<void> _processarFinalizacaoVenda() async {
-    final ok = await ConfirmacaoAgendamentoModal.show(context, _controller);
-    if (ok == true) {
-      await _controller.confirmPayment();
-    } else if (ok == false) {
+    // ── Validação Fundamental: Caixa Aberto Obrigatório ─────────────
+    if (!_finCtrl.resumo.caixaAberto) {
+      _triggerShake();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: FincoreColors.danger,
+          content: Text('⚠️ Caixa fechado! É obrigatório abrir o caixa para iniciar as vendas.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      await DialogAbrirCaixa.show(
+        context,
+        onConfirm: (val, turno) async {
+          await _finCtrl.abrirCaixa(valorAberturaCentavos: val, nomeTurno: turno);
+          if (mounted) setState(() {});
+        },
+      );
+      if (!mounted) return;
+      if (!_finCtrl.resumo.caixaAberto) return;
+    }
+
+    final result = await ConfirmacaoAgendamentoModal.show(context, _controller);
+    if (result == null || result.action == ConfirmAction.cancelar) {
       _controller.setPassoAtual(0);
+      return;
+    }
+
+    final bool enviarWhats = result.enviarWhatsApp;
+    final cliente = _controller.cliente;
+    final entrega = _controller.entrega;
+    final totalCentavos = _controller.totalInCents;
+    final itensCopy = _controller.cart.map((item) {
+      return {
+        'nome': item.name,
+        'qtd': item.quantity,
+        'total': (item.totalInCents / 100),
+        'obs': null,
+      };
+    }).toList();
+
+    final dataHora = entrega.dataHora;
+    final dataStr = '${dataHora.day.toString().padLeft(2, '0')}/${dataHora.month.toString().padLeft(2, '0')}/${dataHora.year} às ${dataHora.hour.toString().padLeft(2, '0')}:${dataHora.minute.toString().padLeft(2, '0')}';
+    final formaPagtoStr = _controller.selectedFormaPagamento?.nome ?? 'Dinheiro';
+    final enderecoStr = (entrega.tipo == 'Entrega' && (entrega.logradouro.isNotEmpty || entrega.bairro.isNotEmpty))
+        ? '${entrega.logradouro}${entrega.numero.isNotEmpty ? ", ${entrega.numero}" : ""}${entrega.bairro.isNotEmpty ? " - ${entrega.bairro}" : ""}${entrega.cidade.isNotEmpty ? ", ${entrega.cidade}" : ""}${entrega.referencia.isNotEmpty ? " (Ref: ${entrega.referencia})" : ""}'
+        : null;
+
+    String? empresaNome;
+    try {
+      if (TenantContext().hasContext) {
+        empresaNome = TenantContext().empresa.nomeFantasia.isNotEmpty
+            ? TenantContext().empresa.nomeFantasia
+            : TenantContext().empresa.razaoSocial;
+      }
+    } catch (_) {}
+
+    final subtotalCalc = _controller.cart.fold<int>(0, (sum, i) => sum + i.totalInCents) / 100;
+
+    final resumoWhats = WhatsAppService.gerarTextoResumoPedido(
+      nomeCliente: cliente.nome ?? 'Cliente',
+      numeroPedidoOuId: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
+      tipoAtendimento: entrega.tipo,
+      dataHoraPrevista: dataStr,
+      itens: itensCopy,
+      subtotal: subtotalCalc,
+      taxaEntrega: (entrega.taxaEntregaCentavos / 100),
+      taxaServico: (entrega.taxaServicoCentavos / 100),
+      total: (totalCentavos / 100),
+      formaPagamento: formaPagtoStr,
+      enderecoEntrega: enderecoStr,
+      observacoes: entrega.observacoes.isNotEmpty ? entrega.observacoes : null,
+      nomeEmpresa: empresaNome,
+    );
+
+    if (result.action == ConfirmAction.finalizarEImprimir) {
+      await _controller.confirmPayment(autoPrint: true);
+    } else if (result.action == ConfirmAction.finalizar) {
+      await _controller.confirmPayment(autoPrint: false);
+    }
+
+    final tel = cliente.telefone;
+    if (enviarWhats && mounted && tel != null && tel.isNotEmpty && tel != '00000000000') {
+      await WhatsAppDialog.show(
+        context,
+        rawPhone: tel,
+        clienteNome: cliente.nome ?? 'Cliente',
+        initialMessage: resumoWhats,
+        enderecoCliente: enderecoStr,
+        nomeEmpresa: empresaNome,
+      );
     }
   }
 
@@ -541,7 +786,6 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
   }
 
   void _showSuccessNotification() {
-    final lastVenda = _controller.lastVenda;
     final isEdit = widget.ordemParaEditar != null;
 
     if (isEdit) {
@@ -567,21 +811,6 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
         Navigator.of(context).pop(true);
       }
       return;
-    }
-
-    if (lastVenda != null && context.mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ComprovantePedidoPage(
-            pedidoId: lastVenda.id,
-            cliente: _controller.cliente,
-            entrega: _controller.entrega,
-            itens: _controller.cart.toList(),
-            totalCentavos: _controller.totalInCents,
-            formaPagamento: _controller.paymentMethod,
-          ),
-        ),
-      );
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -697,6 +926,8 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                           ),
                         ),
                         const SizedBox(width: 16),
+                        _CaixaQuickHeaderWidget(controller: _finCtrl),
+                        const SizedBox(width: 8),
                         IconButton(
                           icon: const Icon(Icons.keyboard_outlined, color: FincoreColors.textSecondary),
                           tooltip: 'Atalhos de Teclado',
@@ -751,6 +982,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       const _ShortcutEntry(key: 'F1', label: 'Cliente'),
       const _ShortcutEntry(key: 'F2', label: 'Produtos'),
       const _ShortcutEntry(key: 'F3', label: 'Pagamento'),
+      const _ShortcutEntry(key: 'F8', label: 'Caixa'),
       const _ShortcutEntry(key: 'F12', label: 'Finalizar'),
       const _ShortcutEntry(key: 'ESC', label: 'Limpar'),
     ];
@@ -845,6 +1077,132 @@ class _FocusedBorderWrapper extends StatelessWidget {
         ),
       ),
       child: child,
+    );
+  }
+}
+
+class _CaixaQuickHeaderWidget extends StatelessWidget {
+  final FinanceiroController controller;
+  const _CaixaQuickHeaderWidget({required this.controller});
+
+  String _fmt(int centavos) => 'R\$ ${(centavos / 100).toStringAsFixed(2).replaceAll('.', ',')}';
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final resumo = controller.resumo;
+        final aberto = resumo.caixaAberto;
+
+        if (!aberto) {
+          return InkWell(
+            onTap: () => DialogAbrirCaixa.show(
+              context,
+              onConfirm: (val, turno) async {
+                await controller.abrirCaixa(valorAberturaCentavos: val, nomeTurno: turno);
+              },
+            ),
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.point_of_sale_rounded, color: Color(0xFFEF4444), size: 14),
+                  SizedBox(width: 6),
+                  Text('Caixa Fechado (Abrir)', style: TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final obsTurno = resumo.sessaoAtiva?.observacoes;
+        final labelTurno = (obsTurno != null && obsTurno.startsWith('Turno: '))
+            ? obsTurno.replaceAll('Turno: ', '')
+            : null;
+
+        return PopupMenuButton<String>(
+          tooltip: 'Operações de Caixa (Sangria, Suprimento, Fechar)',
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          color: FincoreColors.surface,
+          onSelected: (val) async {
+            if (val == 'sangria') {
+              DialogMovimentoCaixa.show(context, initialTipo: 'sangria', onConfirm: (t, v, d) => controller.lancarMovimento(tipo: t, valorCentavos: v, descricao: d));
+            } else if (val == 'suprimento') {
+              DialogMovimentoCaixa.show(context, initialTipo: 'suprimento', onConfirm: (t, v, d) => controller.lancarMovimento(tipo: t, valorCentavos: v, descricao: d));
+            } else if (val == 'fechar') {
+              DialogFecharCaixa.show(context, resumo: resumo, controller: controller, formatarValor: _fmt, onConfirm: (v, obs) => controller.fecharCaixa(valorContadoCentavos: v, observacoes: obs));
+            }
+          },
+          itemBuilder: (ctx) => [
+            const PopupMenuItem(
+              value: 'sangria',
+              child: Row(
+                children: [
+                  Icon(Icons.output_rounded, size: 16, color: Color(0xFFEF4444)),
+                  SizedBox(width: 8),
+                  Text('Registrar Sangria (Retirada)', style: TextStyle(color: FincoreColors.textPrimary, fontSize: 12)),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'suprimento',
+              child: Row(
+                children: [
+                  Icon(Icons.input_rounded, size: 16, color: Color(0xFF10B981)),
+                  SizedBox(width: 8),
+                  Text('Reforço de Troco (Suprimento)', style: TextStyle(color: FincoreColors.textPrimary, fontSize: 12)),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'fechar',
+              child: Row(
+                children: [
+                  Icon(Icons.lock_clock_rounded, size: 16, color: Color(0xFFEF4444)),
+                  SizedBox(width: 8),
+                  Text('Conferência & Fechamento de Turno', style: TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ],
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: FincoreColors.success.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: FincoreColors.success.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(color: FincoreColors.success, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  labelTurno != null
+                      ? 'Caixa Aberto · $labelTurno (${_fmt(resumo.fundoTrocoCentavos)})'
+                      : 'Caixa Aberto (${_fmt(resumo.fundoTrocoCentavos)})',
+                  style: const TextStyle(color: FincoreColors.success, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_drop_down, color: FincoreColors.success, size: 16),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

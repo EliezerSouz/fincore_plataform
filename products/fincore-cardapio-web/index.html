@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f0f11" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <!-- SEO -->
+  <title id="page-title">Cardápio & Encomendas Online</title>
+  <meta name="description" id="page-desc" content="Faça seu pedido ou agende sua encomenda de salgados para festas e eventos com praticidade e segurança." />
+
+  <!-- Favicon dinâmico -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>" />
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Estilos -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- Fundo gradiente animado -->
+<div class="bg-gradient"></div>
+
+<!-- ─── Loading Overlay ─────────────────────────────────────── -->
+<div class="loading-overlay" id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <p class="loading-text" id="loading-text">Carregando cardápio...</p>
+</div>
+
+<!-- ─── Toast Container ─────────────────────────────────────── -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ─── HEADER GLOBAL (Desktop & Mobile) ────────────────────── -->
+<header class="app-header" id="global-header">
+  <div class="header-inner">
+    <!-- Logo e Marca -->
+    <div class="header-logo" id="header-logo-container" role="button" tabindex="0" title="Ir para o Início">
+      <div class="header-logo-img" id="header-logo-img">🍽️</div>
+      <div class="header-brand-info">
+        <span class="header-store-name" id="header-store-name">Cardápio Digital</span>
+        <span class="header-store-pill" id="header-status-pill"><span class="pulse-dot"></span> Aberto</span>
+      </div>
+    </div>
+
+    <!-- Navegação Desktop -->
+    <nav class="desktop-nav" id="desktop-nav" aria-label="Navegação Principal">
+      <button type="button" class="desktop-nav-link active" id="dnav-home" data-target="screen-home">
+        <span class="dnav-icon">🏠</span> Início
+      </button>
+      <button type="button" class="desktop-nav-link" id="dnav-cardapio" data-target="screen-cardapio">
+        <span class="dnav-icon">🍽️</span> Cardápio
+      </button>
+      <button type="button" class="desktop-nav-link" id="dnav-orders" data-target="screen-orders">
+        <span class="dnav-icon">📦</span> Meus Pedidos
+      </button>
+      <button type="button" class="desktop-nav-link" id="dnav-account" data-target="screen-account">
+        <span class="dnav-icon">👤</span> Minha Conta
+      </button>
+    </nav>
+
+    <!-- Ações do Header (Carrinho & Perfil) -->
+    <div class="header-actions">
+      <!-- Botão Flutuante de Carrinho na Barra Superior -->
+      <button type="button" class="header-cart-badge-btn" id="header-cart-btn" title="Ver Carrinho" aria-label="Ver Carrinho">
+        <span class="cart-icon">🛒</span>
+        <span class="cart-badge-count" id="header-cart-count">0</span>
+        <span class="cart-badge-total" id="header-cart-total">R$ 0,00</span>
+      </button>
+      
+      <!-- Avatar do Usuário / Menu -->
+      <div class="header-avatar" id="header-avatar" role="button" tabindex="0" title="Minha conta" aria-label="Minha conta">👤</div>
+    </div>
+  </div>
+</header>
+
+<!-- ─── TELA 1: HOME / DASHBOARD DO CLIENTE ─────────────────── -->
+<main class="screen active" id="screen-home">
+
+  <!-- Área de Boas-vindas / Central de Ações -->
+  <section class="home-hero">
+    <div class="home-hero-content">
+      <div class="home-greeting-block">
+        <h1 class="home-greeting-title">
+          <span id="home-welcome-badge">Olá!</span> <span class="home-greeting-wave">👋</span>
+        </h1>
+        <p class="home-greeting-sub" id="home-greeting-sub">O que você deseja fazer hoje?</p>
+      </div>
+
+      <!-- Barra de Busca Rápida -->
+      <div class="home-search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" class="home-search-input" id="home-search-input"
+          placeholder="Buscar produtos, salgados, kits..." autocomplete="off" />
+        <button type="button" class="btn btn-primary btn-sm home-search-btn" id="home-search-btn">Buscar</button>
+      </div>
+
+      <!-- Atalhos Rápidos (Central de Ações com alta usabilidade) -->
+      <div class="home-shortcuts-grid">
+        <button type="button" class="action-shortcut-card" id="shortcut-cardapio">
+          <div class="asc-icon-box">🍽️</div>
+          <div class="asc-text-wrap">
+            <strong class="asc-title">Ver Cardápio</strong>
+            <span class="asc-desc">Catálogo completo de produtos</span>
+          </div>
+          <span class="asc-arrow">→</span>
+        </button>
+
+        <button type="button" class="action-shortcut-card" id="shortcut-encomenda">
+          <div class="asc-icon-box">📅</div>
+          <div class="asc-text-wrap">
+            <strong class="asc-title">Fazer Encomenda</strong>
+            <span class="asc-desc">Agendar data e horário para festas</span>
+          </div>
+          <span class="asc-arrow">→</span>
+        </button>
+
+        <button type="button" class="action-shortcut-card" id="shortcut-pedidos">
+          <div class="asc-icon-box">📦</div>
+          <div class="asc-text-wrap">
+            <strong class="asc-title">Meus Pedidos</strong>
+            <span class="asc-desc">Histórico e acompanhamento</span>
+          </div>
+          <span class="asc-arrow">→</span>
+        </button>
+
+        <button type="button" class="action-shortcut-card" id="shortcut-tabela">
+          <div class="asc-icon-box">💰</div>
+          <div class="asc-text-wrap">
+            <strong class="asc-title">Preços por Lote</strong>
+            <span class="asc-desc">Descontos progressivos por quantidade</span>
+          </div>
+          <span class="asc-arrow">→</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Container Principal de Conteúdo da Home -->
+  <div class="home-main-container">
+
+    <!-- 1. PEDIDO EM ANDAMENTO — só aparece se houver pedido ativo real -->
+    <section class="home-section" id="home-active-order-container" style="display:none">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">⚡ Pedido em Andamento</h2>
+          <p class="section-subtitle">Acompanhamento em tempo real</p>
+        </div>
+        <span class="section-badge-live"><span class="pulse-dot"></span> Ao Vivo</span>
+      </div>
+      <div id="home-active-order-card" class="active-order-card">
+        <!-- Renderizado dinamicamente via JS -->
+      </div>
+    </section>
+
+    <!-- 2. PRÓXIMAS ENCOMENDAS (AGENDADAS FUTURAS) — só aparece se houver encomendas futuras -->
+    <section class="home-section" id="home-scheduled-orders-container" style="display:none">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">📅 Suas Próximas Encomendas</h2>
+          <p class="section-subtitle">Pedidos agendados para datas futuras</p>
+        </div>
+        <button type="button" class="section-link-btn" id="home-view-all-scheduled-btn">Ver Todas →</button>
+      </div>
+      <div class="scheduled-orders-grid" id="home-scheduled-orders-grid">
+        <!-- Renderizado dinamicamente via JS -->
+      </div>
+    </section>
+
+    <!-- 3. COMPRE NOVAMENTE (RECOMPRA) — só aparece se houver histórico de pedidos concluídos -->
+    <section class="home-section" id="home-reorder-section" style="display:none">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">🔄 Compre Novamente</h2>
+          <p class="section-subtitle">Repita seu último pedido com praticidade</p>
+        </div>
+      </div>
+      <div class="reorder-card-wrapper" id="home-reorder-card">
+        <!-- Renderizado dinamicamente com os itens reais do último pedido -->
+      </div>
+    </section>
+
+    <!-- 4. BANNER: ENCOMENDAS PARA FESTAS E EVENTOS -->
+    <section class="home-section home-party-section" id="home-party-orders-banner">
+      <div class="party-banner-card">
+        <div class="party-banner-content">
+          <div class="party-banner-badge">🎉 Encomendas para Festas & Eventos</div>
+          <h3 class="party-banner-title">Planeje sua comemoração com mini salgados fresquinhos</h3>
+          <p class="party-banner-desc">
+            Monte sua encomenda escolhendo as quantidades e agende a data e o horário ideal para entrega ou retirada no balcão.
+          </p>
+          <div class="party-banner-actions">
+            <button type="button" class="btn btn-primary" id="btn-party-order-cta">
+              📅 Montar Encomenda
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. MAIS PEDIDOS (PRODUTOS DO CARDÁPIO) -->
+    <section class="home-section" id="home-featured-section">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">🔥 Mais Pedidos</h2>
+          <p class="section-subtitle">Itens em destaque para seu pedido</p>
+        </div>
+        <button type="button" class="section-link-btn" id="home-view-all-prods-btn">Ver Cardápio Completo →</button>
+      </div>
+      <div class="featured-products-grid" id="home-featured-grid">
+        <!-- Renderizado via JS com fotos reais e preços em lote -->
+      </div>
+    </section>
+
+    <!-- 6. CATEGORIAS DO CARDÁPIO -->
+    <section class="home-section" id="home-categories-section">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">🍽️ Categorias</h2>
+          <p class="section-subtitle" id="home-cats-subtitle">Navegue pelas opções do cardápio</p>
+        </div>
+        <button type="button" class="section-link-btn" id="home-view-all-cats-btn">Ver Todas →</button>
+      </div>
+      <div class="home-categories-grid" id="home-categories-grid">
+        <!-- Renderizado dinamicamente com dados reais -->
+      </div>
+    </section>
+
+    <!-- 7. PREÇOS POR QUANTIDADE (TABELA DE LOTES) -->
+    <section class="home-section" id="home-pricing-tiers-section" style="display:none">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">💰 Quanto Maior o Lote, Menor o Preço</h2>
+          <p class="section-subtitle">Descontos progressivos aplicados automaticamente no carrinho</p>
+        </div>
+      </div>
+      <div class="pricing-tiers-summary-box" id="home-pricing-tiers-box">
+        <!-- Renderizado dinamicamente com as faixas reais cadastradas -->
+      </div>
+    </section>
+
+    <!-- 8. INFORMAÇÕES DO ESTABELECIMENTO — somente dados reais do cadastro -->
+    <section class="home-section" id="home-store-info-section" style="display:none">
+      <div class="store-info-box" id="home-store-info-box">
+        <div class="store-info-header">
+          <div class="store-info-icon">📍</div>
+          <div>
+            <h3 class="store-info-title" id="home-info-store-name"></h3>
+            <span class="store-info-status" id="home-info-store-status">
+              <span class="status-dot green"></span> Atendendo
+            </span>
+          </div>
+        </div>
+        <div class="store-info-grid" id="home-store-info-grid">
+          <div class="store-info-item" id="home-info-phone-item" style="display:none">
+            <span class="sii-icon">📱</span>
+            <div>
+              <strong>Contato</strong>
+              <p id="home-info-phone"></p>
+            </div>
+          </div>
+          <div class="store-info-item" id="home-info-address-item" style="display:none">
+            <span class="sii-icon">📍</span>
+            <div>
+              <strong>Localização</strong>
+              <p id="home-info-address"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- ─── TELA 2: CARDÁPIO COMPLETO (Catálogo Gastronômico) ────── -->
+<main class="screen" id="screen-cardapio">
+  <!-- Top Bar de Busca & Categorias do Cardápio -->
+  <div class="catalog-top-controls">
+    <div class="search-bar-container">
+      <div class="search-input-wrapper">
+        <span class="search-icon">🔍</span>
+        <input class="form-input search-input" type="text" id="product-search-input" placeholder="Buscar no cardápio (ex: coxinha, pastel, kibe...)" autocomplete="off" />
+        <button type="button" class="search-clear-btn" id="product-search-clear" style="display:none" aria-label="Limpar busca">&times;</button>
+      </div>
+      <div class="search-feedback-text" id="search-feedback" style="display:none"></div>
+    </div>
+
+    <!-- Navegação por Categorias Horizontal (Pills / Chips com rolagem suave) -->
+    <nav class="categories-nav-wrapper" id="categories-nav-wrapper" aria-label="Navegação de Categorias">
+      <div class="categories-nav" id="categories-nav-list" role="tablist">
+        <button type="button" class="category-chip active" data-cat-id="all" role="tab" aria-selected="true">
+          <span class="cat-chip-icon">🍽️</span>
+          <span class="cat-chip-name">Todos</span>
+          <span class="cat-chip-count" id="chip-count-all">0</span>
+        </button>
+      </div>
+      <!-- Fallback select preservado invisível para compatibilidade -->
+      <select id="category-select" class="category-combobox" style="display:none" aria-label="Selecione a Categoria">
+        <option value="all">🍽️ Todas as Categorias</option>
+      </select>
+    </nav>
+  </div>
+
+  <!-- Lista / Grid de Produtos -->
+  <section class="products-section">
+    <div id="products-container">
+      <div class="empty-state" id="products-empty" style="display:none">
+        <div class="empty-icon">🔍</div>
+        <p class="empty-title">Nenhum produto encontrado</p>
+        <p class="empty-desc">Tente buscar por outro termo ou selecione outra categoria.</p>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-reset-search" style="margin-top:12px">Limpar Busca</button>
+      </div>
+      <div id="products-grid-wrapper">
+        <!-- Skeleton cards renderizados dinamicamente até o carregamento -->
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ─── TELA 3: CHECKOUT / ENCOMENDA ──────────────────────────── -->
+<main class="screen" id="screen-checkout">
+  <div class="checkout-header">
+    <button type="button" class="back-btn" id="checkout-back-btn" aria-label="Voltar para o cardápio">←</button>
+    <div class="checkout-header-titles">
+      <h1 class="checkout-title">Finalizar Pedido / Encomenda</h1>
+      <span class="checkout-subtitle">Revise seus itens e informe os dados de entrega</span>
+    </div>
+  </div>
+
+  <!-- Stepper de Progresso Visual -->
+  <div class="checkout-stepper">
+    <div class="step-item active" id="step-ind-1">
+      <div class="step-num">1</div>
+      <div class="step-label">Itens</div>
+    </div>
+    <div class="step-line active"></div>
+    <div class="step-item active" id="step-ind-2">
+      <div class="step-num">2</div>
+      <div class="step-label">Entrega / Data</div>
+    </div>
+    <div class="step-line active"></div>
+    <div class="step-item active" id="step-ind-3">
+      <div class="step-num">3</div>
+      <div class="step-label">Pagamento</div>
+    </div>
+  </div>
+
+  <div class="checkout-body" id="checkout-body">
+    <!-- Alerta de quantidade mínima por categoria -->
+    <div class="alert alert-error" id="checkout-min-qty-alert" style="display:none;margin-bottom:14px"></div>
+
+    <!-- Seção 1: Itens do carrinho -->
+    <div class="checkout-section card-box">
+      <div class="checkout-section-header">
+        <div class="checkout-section-title">🛒 1. Itens Selecionados</div>
+        <button type="button" class="btn btn-sm btn-ghost btn-danger-text" id="btn-limpar-carrinho" title="Limpar todos os itens">
+          🗑️ Limpar Tudo
+        </button>
+      </div>
+      <div id="checkout-items-list" class="checkout-items-wrapper"></div>
+      
+      <!-- Resumo de Valores dentro da seção -->
+      <div class="checkout-summary-box">
+        <div class="order-total-row">
+          <span>Subtotal dos itens</span>
+          <span id="checkout-subtotal">R$ 0,00</span>
+        </div>
+        <div class="order-total-row">
+          <span>Taxa de entrega</span>
+          <span id="checkout-taxa" class="text-success">Grátis</span>
+        </div>
+        <div class="order-total-row grand">
+          <span>Total a Pagar</span>
+          <span class="grand-value" id="checkout-total">R$ 0,00</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Seção de Dados de Contato do Cliente (exibido apenas para visitante / não logado) -->
+    <div class="checkout-section card-box" id="checkout-contact-section">
+      <div class="checkout-section-header">
+        <div class="checkout-section-title">👤 2. Seus Dados de Contato</div>
+      </div>
+      <div class="form-row gap-sm">
+        <div class="form-group flex-1">
+          <label class="form-label" for="checkout-nome-cliente">Nome Completo *</label>
+          <input class="form-input" type="text" id="checkout-nome-cliente" placeholder="Ex: João Silva" required />
+        </div>
+        <div class="form-group flex-1">
+          <label class="form-label" for="checkout-phone-cliente">WhatsApp / Telefone com DDD *</label>
+          <input class="form-input" type="tel" id="checkout-phone-cliente" placeholder="(00) 00000-0000" maxlength="15" required />
+        </div>
+      </div>
+    </div>
+
+    <!-- Banner de Cliente Identificado (exibido quando logado) -->
+    <div class="checkout-section card-box" id="checkout-logged-user-box" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:40px;height:40px;border-radius:50%;background:rgba(249,115,22,0.15);border:1px solid rgba(249,115,22,0.3);color:var(--brand-400);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px">
+            👤
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--brand-400);text-transform:uppercase;letter-spacing:0.5px">Cliente Identificado</div>
+            <div style="font-size:14.5px;font-weight:800;color:var(--text-primary)" id="checkout-logged-user-name">—</div>
+            <div style="font-size:12.5px;color:var(--text-secondary);font-family:monospace" id="checkout-logged-user-phone">—</div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-ghost" id="btn-checkout-trocar-conta" style="font-size:11.5px;color:var(--text-muted)">
+          🔄 Trocar de conta
+        </button>
+      </div>
+    </div>
+
+    <!-- Seção 3: Tipo de logística / Como receber -->
+    <div class="checkout-section card-box">
+      <div class="checkout-section-title">🚚 3. Como e Quando Receber?</div>
+      
+      <div class="logistica-grid">
+        <div class="logistica-card active" data-logistica="Entrega" id="tab-entrega" role="button" tabindex="0">
+          <div class="logistica-card-icon">🛵</div>
+          <div class="logistica-card-content">
+            <div class="logistica-card-title">Entrega no Endereço</div>
+            <div class="logistica-card-desc">Receba quentinho no local da sua festa ou casa.</div>
+          </div>
+          <div class="logistica-card-check">✓</div>
+        </div>
+
+        <div class="logistica-card" data-logistica="Retirada" id="tab-retirada" role="button" tabindex="0">
+          <div class="logistica-card-icon">🏪</div>
+          <div class="logistica-card-content">
+            <div class="logistica-card-title">Retirada no Local</div>
+            <div class="logistica-card-desc">Retire diretamente no balcão sem taxa.</div>
+          </div>
+          <div class="logistica-card-check">✓</div>
+        </div>
+      </div>
+
+      <!-- Endereço (visível apenas para Entrega) -->
+      <div id="endereco-section" class="endereco-wrapper" style="margin-top:16px">
+        <!-- Card de Endereço Salvo / Cadastrado -->
+        <div id="checkout-saved-address-box" class="saved-address-card" style="display:none">
+          <div class="saved-address-header">
+            <span class="saved-address-badge">📍 Endereço Principal Cadastrado</span>
+            <button type="button" class="btn btn-sm btn-secondary" id="btn-add-novo-endereco">
+              ➕ Entregar em outro endereço
+            </button>
+          </div>
+          <div class="saved-address-text" id="checkout-saved-address-text">—</div>
+        </div>
+
+        <div id="checkout-address-form-container">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div class="form-section-title" id="checkout-address-form-title">📍 Endereço de Entrega *</div>
+            <button type="button" class="btn btn-sm btn-ghost" id="btn-voltar-endereco-salvo" style="display:none">
+              ↩️ Usar endereço cadastrado
+            </button>
+          </div>
+          
+          <div class="form-row gap-sm">
+            <div class="form-group flex-1">
+              <label class="form-label" for="checkout-cep">CEP *</label>
+              <div class="cep-input-wrapper">
+                <input class="form-input" type="text" id="checkout-cep" placeholder="00000-000" maxlength="9" required />
+                <button type="button" class="btn btn-sm btn-ghost cep-btn" id="checkout-cep-btn">🔍 Buscar</button>
+              </div>
+            </div>
+            <div class="form-group" style="width: 75px;">
+              <label class="form-label" for="checkout-uf">UF *</label>
+              <input class="form-input" type="text" id="checkout-uf" placeholder="SP" maxlength="2" required />
+            </div>
+          </div>
+
+          <div class="form-row gap-sm">
+            <div class="form-group flex-2">
+              <label class="form-label" for="checkout-logradouro">Logradouro / Rua *</label>
+              <input class="form-input" type="text" id="checkout-logradouro" placeholder="Ex: Rua das Flores" required />
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="checkout-numero">Número *</label>
+              <input class="form-input" type="text" id="checkout-numero" placeholder="123" required />
+            </div>
+          </div>
+
+          <div class="form-row gap-sm">
+            <div class="form-group flex-1">
+              <label class="form-label" for="checkout-bairro">Bairro *</label>
+              <input class="form-input" type="text" id="checkout-bairro" placeholder="Centro" required />
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="checkout-cidade">Cidade *</label>
+              <input class="form-input" type="text" id="checkout-cidade" placeholder="São Paulo" required />
+            </div>
+          </div>
+
+          <div class="form-row gap-sm">
+            <div class="form-group flex-1">
+              <label class="form-label" for="checkout-complemento">Complemento (opcional)</label>
+              <input class="form-input" type="text" id="checkout-complemento" placeholder="Apto 42, Bloco B..." />
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="checkout-referencia">Ponto de Referência (opcional)</label>
+              <input class="form-input" type="text" id="checkout-referencia" placeholder="Próximo à pracinha..." />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data e Horário Previstos / Agendamento de Encomenda -->
+      <div class="schedule-section" style="margin-top:20px">
+        <div class="form-section-title">📅 Data e Horário Previstos *</div>
+        
+        <!-- Atalhos rápidos de data -->
+        <div class="date-quick-chips">
+          <button type="button" class="date-chip active" id="btn-date-hoje">⚡ Pedido para Hoje</button>
+          <button type="button" class="date-chip" id="btn-date-amanha">📅 Amanhã</button>
+          <button type="button" class="date-chip" id="btn-date-custom">🎉 Encomenda / Outra data</button>
+        </div>
+
+        <div class="datetime-row">
+          <div class="form-group flex-1" style="margin:0">
+            <label class="form-label" for="checkout-data">Data Prevista *</label>
+            <input class="form-input" type="date" id="checkout-data" required />
+          </div>
+          <div class="form-group flex-1" style="margin:0">
+            <label class="form-label" for="checkout-hora">Horário Previsto *</label>
+            <input class="form-input" type="time" id="checkout-hora" required />
+          </div>
+        </div>
+
+        <!-- Aviso de Prazo Mínimo & Horários de Atendimento -->
+        <div class="schedule-rules-notice" id="checkout-schedule-notice" style="margin-top:10px;padding:10px 12px;background:var(--surface-subtle, rgba(255,255,255,0.05));border-radius:8px;font-size:12px;color:var(--text-secondary);display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span>⏱️</span>
+            <span>Antecedência mínima: <strong id="checkout-min-prazo-txt" style="color:var(--brand-400)">120 minutos</strong></span>
+          </div>
+          <button type="button" class="btn-link" id="btn-ver-horarios-checkout" style="background:none;border:none;color:var(--brand-400);font-size:11.5px;font-weight:700;text-decoration:underline;cursor:pointer;padding:0">
+            Ver Horários da Loja
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Seção 3: Forma de Pagamento -->
+    <div class="checkout-section card-box">
+      <div class="checkout-section-title">💳 3. Forma de Pagamento</div>
+      
+      <div class="payment-grid">
+        <div class="payment-card active" data-payment="Pix" data-type="PIX" id="tab-pay-pix" role="button" tabindex="0">
+          <div class="payment-card-icon">⚡</div>
+          <div class="payment-card-title">Pix Instantâneo</div>
+          <div class="payment-card-desc">Copia e Cola Automático com valor</div>
+        </div>
+
+        <div class="payment-card" data-payment="Dinheiro" data-type="DINHEIRO" id="tab-pay-dinheiro" role="button" tabindex="0">
+          <div class="payment-card-icon">💵</div>
+          <div class="payment-card-title">Dinheiro</div>
+          <div class="payment-card-desc">Pagamento na entrega ou balcão</div>
+        </div>
+
+        <div class="payment-card" data-payment="Cartão de Crédito" data-type="CARTAO_CREDITO" id="tab-pay-credito" role="button" tabindex="0">
+          <div class="payment-card-icon">💳</div>
+          <div class="payment-card-title">Cartão de Crédito</div>
+          <div class="payment-card-desc">Maquininha na entrega/retirada</div>
+        </div>
+
+        <div class="payment-card" data-payment="Cartão de Débito" data-type="CARTAO_DEBITO" id="tab-pay-debito" role="button" tabindex="0">
+          <div class="payment-card-icon">💳</div>
+          <div class="payment-card-title">Cartão de Débito</div>
+          <div class="payment-card-desc">Maquininha na entrega/retirada</div>
+        </div>
+      </div>
+
+      <!-- Campo de troco caso dinheiro seja selecionado -->
+      <div id="troco-section" class="troco-wrapper" style="display:none;margin-top:14px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label" for="checkout-troco">Precisa de troco para quanto? (R$)</label>
+          <input class="form-input" type="text" id="checkout-troco" placeholder="Ex: 50,00 ou 100,00" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Seção 4: Observações gerais -->
+    <div class="checkout-section card-box">
+      <div class="checkout-section-title">📝 4. Observações Gerais do Pedido</div>
+      <textarea
+        class="form-input checkout-obs-input"
+        id="checkout-obs"
+        placeholder="Instruções para entrega, observações sobre embalagem, ponto de referência..."
+        maxlength="500"
+      ></textarea>
+    </div>
+  </div>
+
+  <!-- Barra Fixa de Ação do Checkout -->
+  <div class="checkout-actions">
+    <div class="checkout-actions-inner">
+      <!-- Banner de validação -->
+      <div id="checkout-validation-warning" class="validation-warning-box invalid">
+        <span id="checkout-validation-icon">⚠️</span>
+        <span id="checkout-validation-msg">Preencha os dados obrigatórios para liberar o pedido.</span>
+      </div>
+
+      <button type="button" class="btn btn-primary btn-full btn-lg checkout-submit-btn" id="btn-confirmar-pedido">
+        🚀 Revisar e Confirmar Pedido
+      </button>
+
+      <div class="checkout-action-secondary">
+        <button type="button" class="btn btn-secondary" id="btn-enviar-whatsapp">
+          📱 Enviar via WhatsApp
+        </button>
+        <button type="button" class="btn btn-secondary" id="btn-copiar-pedido">
+          📋 Copiar Texto
+        </button>
+      </div>
+      
+      <button type="button" class="btn btn-ghost btn-cancel-order" id="btn-cancelar-rascunho-pedido">
+        🗑️ Cancelar / Limpar Pedido
+      </button>
+    </div>
+  </div>
+</main>
+
+<!-- ─── TELA 4: MEUS PEDIDOS & ENCOMENDAS ────────────────────── -->
+<main class="screen" id="screen-orders">
+  <div class="orders-header-bar">
+    <div class="orders-header-title-wrap">
+      <button type="button" class="back-btn" id="orders-back-btn" aria-label="Voltar para a Home">←</button>
+      <div>
+        <h1 class="orders-main-title">Meus Pedidos & Encomendas</h1>
+        <p class="orders-main-subtitle">Acompanhe seus pedidos em tempo real e consulte seu histórico</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filtros de Status de Pedidos -->
+  <div class="orders-filter-container">
+    <div class="orders-filter-list">
+      <button type="button" class="order-filter-chip active" data-filter="all">Todos</button>
+      <button type="button" class="order-filter-chip" data-filter="em_andamento">Em Andamento</button>
+      <button type="button" class="order-filter-chip" data-filter="agendados">Agendados</button>
+      <button type="button" class="order-filter-chip" data-filter="concluido">Concluídos</button>
+      <button type="button" class="order-filter-chip" data-filter="cancelado">Cancelados</button>
+    </div>
+  </div>
+
+  <div class="orders-list-container">
+    <div class="orders-list" id="orders-list">
+      <div class="empty-state" id="orders-empty" style="display:none">
+        <div class="empty-icon">📦</div>
+        <p class="empty-title">Nenhum pedido encontrado</p>
+        <p class="empty-desc">Você ainda não realizou pedidos nesta categoria.</p>
+        <button type="button" class="btn btn-primary" id="orders-empty-cta" style="margin-top:16px">
+          🍽️ Fazer Primeiro Pedido
+        </button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ─── TELA 5: MINHA CONTA / PERFIL ────────────────────────── -->
+<main class="screen" id="screen-account">
+  <div class="account-header-bar">
+    <div class="account-header-title-wrap">
+      <button type="button" class="back-btn" id="account-back-btn" aria-label="Voltar para a Home">←</button>
+      <div>
+        <h1 class="account-main-title">Minha Conta</h1>
+        <p class="account-main-subtitle">Gerencie seus dados e endereço de entrega</p>
+      </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-ghost btn-danger-text" id="account-logout-btn">Sair da Conta</button>
+  </div>
+
+  <div class="account-container">
+    <div class="account-card">
+      <div class="account-avatar-header">
+        <div class="account-avatar-large" id="account-avatar-large">👤</div>
+        <div class="account-user-title" id="account-user-display-name">Seu Nome</div>
+        <div class="account-user-subtitle" id="account-user-display-email">seu@email.com</div>
+      </div>
+
+      <form id="form-account" novalidate>
+        <div class="form-section-title">👤 Dados Pessoais</div>
+        
+        <div class="form-group">
+          <label class="form-label" for="account-name">Nome Completo *</label>
+          <input class="form-input" type="text" id="account-name" placeholder="Seu Nome" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="account-phone">WhatsApp / Telefone *</label>
+          <input class="form-input" type="tel" id="account-phone" placeholder="(11) 99999-9999" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="account-email">E-mail *</label>
+          <input class="form-input" type="email" id="account-email" placeholder="seu@email.com" required />
+        </div>
+
+        <div class="form-section-title">📍 Endereço Principal de Entrega</div>
+
+        <div class="form-row gap-sm">
+          <div class="form-group flex-1">
+            <label class="form-label" for="account-cep">CEP</label>
+            <div class="cep-input-wrapper">
+              <input class="form-input" type="text" id="account-cep" placeholder="00000-000" maxlength="9" />
+              <button type="button" class="btn btn-sm btn-ghost cep-btn" id="account-cep-btn">🔍 Buscar</button>
+            </div>
+          </div>
+          <div class="form-group" style="width: 70px;">
+            <label class="form-label" for="account-uf">UF</label>
+            <input class="form-input" type="text" id="account-uf" placeholder="SP" maxlength="2" />
+          </div>
+        </div>
+
+        <div class="form-row gap-sm">
+          <div class="form-group flex-2">
+            <label class="form-label" for="account-logradouro">Logradouro / Rua</label>
+            <input class="form-input" type="text" id="account-logradouro" placeholder="Ex: Rua das Flores" />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label" for="account-numero">Número</label>
+            <input class="form-input" type="text" id="account-numero" placeholder="123" />
+          </div>
+        </div>
+
+        <div class="form-row gap-sm">
+          <div class="form-group flex-1">
+            <label class="form-label" for="account-bairro">Bairro</label>
+            <input class="form-input" type="text" id="account-bairro" placeholder="Centro" />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label" for="account-cidade">Cidade</label>
+            <input class="form-input" type="text" id="account-cidade" placeholder="São Paulo" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="account-complemento">Complemento (Apto, Bloco...)</label>
+          <input class="form-input" type="text" id="account-complemento" placeholder="Apto 42, Bloco B" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="account-referencia">Ponto de Referência</label>
+          <input class="form-input" type="text" id="account-referencia" placeholder="Próximo à padaria" />
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-full btn-lg" id="account-save-btn">
+          💾 Salvar Alterações
+        </button>
+      </form>
+    </div>
+  </div>
+</main>
+
+<!-- ─── TELA 6: AUTENTICAÇÃO (Login / Cadastro) ─────────────── -->
+<main class="screen" id="screen-auth">
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="auth-icon">🔐</div>
+      <h2 class="auth-title">Bem-vindo!</h2>
+      <p class="auth-subtitle" id="auth-subtitle">
+        Entre ou crie sua conta para acessar o cardápio e fazer seus pedidos.
+      </p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="auth-tabs" role="tablist">
+      <div class="auth-tab active" id="tab-login" role="tab" aria-selected="true">Entrar</div>
+      <div class="auth-tab" id="tab-register" role="tab" aria-selected="false">Criar conta</div>
+    </div>
+
+    <!-- Alert geral -->
+    <div class="alert alert-error" id="auth-alert" role="alert">
+      <span>⚠️</span>
+      <span id="auth-alert-msg"></span>
+    </div>
+
+    <!-- ── Formulário LOGIN ── -->
+    <form id="form-login" novalidate>
+      <div class="form-group">
+        <label class="form-label" for="login-email">E-mail ou WhatsApp</label>
+        <input
+          class="form-input"
+          type="email"
+          id="login-email"
+          placeholder="seu@email.com"
+          autocomplete="email"
+          required
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="login-password">Senha</label>
+        <input
+          class="form-input"
+          type="password"
+          id="login-password"
+          placeholder="••••••••"
+          autocomplete="current-password"
+          required
+        />
+      </div>
+      <button type="submit" class="btn btn-primary btn-full btn-lg" id="login-btn">
+        Entrar
+      </button>
+    </form>
+
+    <!-- ── Formulário CADASTRO ── -->
+    <form id="form-register" style="display:none" novalidate>
+      <div class="form-group">
+        <label class="form-label" for="reg-name">Nome completo *</label>
+        <input
+          class="form-input"
+          type="text"
+          id="reg-name"
+          placeholder="João da Silva"
+          autocomplete="name"
+          required
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reg-whatsapp">WhatsApp (com DDD) *</label>
+        <input
+          class="form-input"
+          type="tel"
+          id="reg-whatsapp"
+          placeholder="(11) 99999-9999"
+          autocomplete="tel"
+          required
+        />
+        <div id="phone-check-status" class="phone-status-badge" style="display:none"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reg-email">E-mail *</label>
+        <input
+          class="form-input"
+          type="email"
+          id="reg-email"
+          placeholder="seu@email.com"
+          autocomplete="email"
+          required
+        />
+      </div>
+
+      <!-- Endereço Completo Obrigatório -->
+      <div class="form-section-title">📍 Endereço de Entrega Completo</div>
+
+      <div class="form-row gap-sm">
+        <div class="form-group flex-1">
+          <label class="form-label" for="reg-cep">CEP *</label>
+          <div class="cep-input-wrapper">
+            <input
+              class="form-input"
+              type="text"
+              id="reg-cep"
+              placeholder="00000-000"
+              maxlength="9"
+              required
+            />
+            <button type="button" class="btn btn-sm btn-ghost cep-btn" id="reg-cep-btn">🔍 Buscar</button>
+          </div>
+        </div>
+        <div class="form-group" style="width: 80px;">
+          <label class="form-label" for="reg-uf">UF *</label>
+          <input class="form-input" type="text" id="reg-uf" placeholder="SP" maxlength="2" required />
+        </div>
+      </div>
+
+      <div class="form-row gap-sm">
+        <div class="form-group flex-2">
+          <label class="form-label" for="reg-logradouro">Rua / Logradouro *</label>
+          <input class="form-input" type="text" id="reg-logradouro" placeholder="Ex: Rua das Flores" required />
+        </div>
+        <div class="form-group flex-1">
+          <label class="form-label" for="reg-numero">Número *</label>
+          <input class="form-input" type="text" id="reg-numero" placeholder="123" required />
+        </div>
+      </div>
+
+      <div class="form-row gap-sm">
+        <div class="form-group flex-1">
+          <label class="form-label" for="reg-bairro">Bairro *</label>
+          <input class="form-input" type="text" id="reg-bairro" placeholder="Centro" required />
+        </div>
+        <div class="form-group flex-1">
+          <label class="form-label" for="reg-cidade">Cidade *</label>
+          <input class="form-input" type="text" id="reg-cidade" placeholder="São Paulo" required />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="reg-complemento">Complemento (opcional)</label>
+        <input class="form-input" type="text" id="reg-complemento" placeholder="Apto 42, Bloco B" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="reg-referencia">Ponto de referência (opcional)</label>
+        <input class="form-input" type="text" id="reg-referencia" placeholder="Próximo à padaria" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="reg-password">Criar senha *</label>
+        <input
+          class="form-input"
+          type="password"
+          id="reg-password"
+          placeholder="Mín. 6 caracteres"
+          autocomplete="new-password"
+          minlength="6"
+          required
+        />
+      </div>
+      <button type="submit" class="btn btn-primary btn-full btn-lg" id="register-btn">
+        Criar minha conta
+      </button>
+    </form>
+
+    <p style="text-align:center;margin-top:16px">
+      <button type="button" class="btn btn-ghost btn-sm" id="back-to-landing-btn">
+        ← Voltar ao Início
+      </button>
+    </p>
+  </div>
+</main>
+
+<!-- ─── TELA 7: CONFIRMAÇÃO DO PEDIDO REALIZADO ─────────────── -->
+<main class="screen" id="screen-confirmation">
+  <div class="confirmation-container">
+    <div class="confirmation-card">
+      <div class="confirmation-icon-wrap" id="confirm-icon-wrap">
+        <span class="confirmation-icon" id="confirm-icon">📋</span>
+      </div>
+      <h2 class="confirmation-title" id="confirm-title">Pedido Enviado com Sucesso!</h2>
+      <p class="confirmation-subtitle" id="confirm-subtitle">
+        Seu pedido e horário solicitado foram recebidos e estão <strong>aguardando aprovação do estabelecimento</strong>.
+      </p>
+
+      <div class="order-number-badge" id="order-number-badge">
+        <div class="order-number-label">Código do Pedido</div>
+        <div class="order-number-value" id="confirm-order-number">#—</div>
+      </div>
+
+      <!-- Resumo rápido pós-pedido -->
+      <div class="confirm-summary-grid" id="confirm-summary-grid">
+        <div class="confirm-summary-item">
+          <span class="cs-label">Previsão:</span>
+          <span class="cs-val" id="confirm-order-date-text">—</span>
+        </div>
+        <div class="confirm-summary-item">
+          <span class="cs-label">Valor Total:</span>
+          <span class="cs-val text-brand" id="confirm-order-total-text">R$ 0,00</span>
+        </div>
+      </div>
+
+      <!-- Pix no Pedido Confirmado -->
+      <div id="confirm-pix-container" class="confirm-pix-box" style="display:none">
+        <div class="pix-checkout-inner">
+          <div class="pix-checkout-header">
+            <span class="pix-title">⚡ Pague via Pix para Agilizar a Preparação</span>
+          </div>
+          <div class="pix-meta-info">
+            <div class="pix-meta-row"><strong>Favorecido:</strong> <span id="confirm-pix-favorecido">—</span></div>
+            <div class="pix-meta-row"><strong>Banco / Instituição:</strong> <span id="confirm-pix-banco">—</span></div>
+            <div class="pix-meta-row"><strong>Chave Pix (<span id="confirm-pix-tipo">Chave</span>):</strong> <span id="confirm-pix-chave-raw" class="font-mono text-brand font-bold">—</span></div>
+            <div class="pix-meta-row"><strong>Valor do Pedido:</strong> <span id="confirm-pix-valor" class="text-brand font-bold">R$ 0,00</span></div>
+          </div>
+          <div class="pix-actions-grid">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-confirm-copiar-pix-payload">
+              📋 Copiar Pix Copia e Cola (com valor total)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-confirm-copiar-pix">
+              🔑 Copiar Apenas a Chave
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Timeline em tempo real -->
+      <div class="timeline-header-title">Status em Tempo Real</div>
+      <div class="status-timeline" id="status-timeline">
+        <!-- Gerado dinamicamente pelo JS -->
+      </div>
+
+      <!-- Ações do pós-pedido -->
+      <div class="confirmation-actions">
+        <button type="button" class="btn btn-primary btn-full" id="btn-novo-pedido">
+          🍽️ Fazer Novo Pedido
+        </button>
+        <button type="button" class="btn btn-secondary btn-full" id="btn-ver-pedidos">
+          📦 Acompanhar em Meus Pedidos
+        </button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ─── BARRA FLUTUANTE DE CARRINHO (Mobile & Desktop) ──────── -->
+<div class="bottom-cart-bar" id="bottom-cart-bar" style="display:none">
+  <div class="bottom-cart-inner">
+    <div class="bottom-cart-left">
+      <div class="bottom-cart-icon-wrap">
+        <span class="cart-icon">🛒</span>
+        <span class="bottom-cart-badge" id="bottom-cart-count">0</span>
+      </div>
+      <div class="bottom-cart-labels">
+        <span class="bottom-cart-title">Subtotal do Pedido</span>
+        <span class="bottom-cart-total" id="bottom-cart-total">R$ 0,00</span>
+      </div>
+    </div>
+    <button type="button" class="btn btn-primary bottom-cart-cta" id="bottom-cart-action">
+      <span>Ver Pedido</span>
+      <span class="bottom-cart-arrow">→</span>
+    </button>
+  </div>
+</div>
+
+<!-- ─── BOTTOM NAVIGATION BAR (Mobile First Ergonômica) ──────── -->
+<nav class="bottom-nav-bar" id="bottom-nav-bar" aria-label="Navegação Inferior Mobile">
+  <button type="button" class="bnav-item active" id="bnav-home" data-target="screen-home">
+    <span class="bnav-icon">🏠</span>
+    <span class="bnav-label">Início</span>
+  </button>
+  <button type="button" class="bnav-item" id="bnav-cardapio" data-target="screen-cardapio">
+    <span class="bnav-icon">🍽️</span>
+    <span class="bnav-label">Cardápio</span>
+  </button>
+  <button type="button" class="bnav-item" id="bnav-orders" data-target="screen-orders">
+    <span class="bnav-icon">📦</span>
+    <span class="bnav-label">Pedidos</span>
+    <span class="bnav-dot" id="bnav-orders-dot" style="display:none"></span>
+  </button>
+  <button type="button" class="bnav-item" id="bnav-account" data-target="screen-account">
+    <span class="bnav-icon">👤</span>
+    <span class="bnav-label">Conta</span>
+  </button>
+</nav>
+
+<!-- ─── PRODUCT MODAL (Gastronômico) ────────────────────────── -->
+<div class="modal-overlay" id="product-modal" role="dialog" aria-modal="true">
+  <div class="modal-sheet">
+    <div class="modal-drag-handle"></div>
+    <button type="button" class="modal-sheet-close-btn" id="modal-product-close" aria-label="Fechar modal">&times;</button>
+    <div id="modal-image-area" class="modal-image-container"></div>
+    <div class="modal-content">
+      <div class="modal-header-info">
+        <div class="modal-category-tag" id="modal-prod-cat">🥟 Salgados</div>
+        <h2 class="modal-title" id="modal-prod-name">—</h2>
+        <div class="modal-price" id="modal-prod-price">R$ 0,00</div>
+      </div>
+      <p class="modal-desc" id="modal-prod-desc"></p>
+      
+      <!-- Container de Faixas de Precificação Comercial / Lote -->
+      <div id="modal-pricing-tiers" class="pricing-tiers-container" style="display:none"></div>
+
+      <div class="modal-actions-wrapper">
+        <div class="modal-qty-box">
+          <span class="modal-qty-label">Quantidade:</span>
+          <div class="qty-control editable">
+            <button type="button" class="qty-btn minus" id="modal-qty-minus" aria-label="Diminuir">−</button>
+            <input type="number" class="qty-input" id="modal-qty-input" value="1" min="1" max="9999" aria-label="Quantidade" />
+            <button type="button" class="qty-btn plus" id="modal-qty-plus" aria-label="Aumentar">+</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-primary modal-submit-btn" id="modal-add-btn">
+          🛒 Adicionar ao Pedido
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── USER DRAWER (Mobile) ─────────────────────────────────── -->
+<div class="drawer-overlay" id="user-drawer" role="dialog" aria-modal="true">
+  <div class="drawer">
+    <div class="drawer-header">
+      <div style="font-size:32px;margin-bottom:10px" id="drawer-avatar-icon">👤</div>
+      <div class="drawer-user-name" id="drawer-user-name">Carregando...</div>
+      <div class="drawer-user-phone" id="drawer-user-phone">—</div>
+    </div>
+    <div class="drawer-menu">
+      <div class="drawer-item" id="drawer-home-btn">
+        <span class="drawer-item-icon">🏠</span>
+        Início
+      </div>
+      <div class="drawer-item" id="drawer-cardapio-btn">
+        <span class="drawer-item-icon">🍽️</span>
+        Cardápio Completo
+      </div>
+      <div class="drawer-item" id="drawer-orders-btn">
+        <span class="drawer-item-icon">📦</span>
+        Meus Pedidos & Encomendas
+      </div>
+      <div class="drawer-item" id="drawer-profile-btn">
+        <span class="drawer-item-icon">⚙️</span>
+        Minha Conta
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button type="button" class="btn btn-danger btn-full" id="drawer-logout-btn">
+        Sair da conta
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── MODAL DE DETALHES DO PEDIDO (Rastreamento) ──────────── -->
+<div class="modal-backdrop" id="modal-order-detail">
+  <div class="modal-card" style="max-width:500px;max-height:90vh;overflow-y:auto">
+    <button type="button" class="modal-close" id="order-detail-close-btn" aria-label="Fechar">&times;</button>
+
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">Detalhes do Pedido</div>
+      <h2 id="detail-order-number" style="font-size:24px;font-weight:800;color:var(--brand-400);margin:4px 0">#—</h2>
+      <div id="detail-status-badge" class="order-status-pill status-confirmado" style="display:inline-block;margin-top:4px">Confirmado</div>
+    </div>
+
+    <!-- Timeline em tempo real -->
+    <div class="status-timeline" id="detail-status-timeline" style="margin-bottom:20px"></div>
+
+    <!-- Informações do Pedido -->
+    <div style="background:var(--surface-subtle, rgba(255,255,255,0.05));border-radius:12px;padding:14px;margin-bottom:16px;font-size:13px;display:flex;flex-direction:column;gap:6px">
+      <div><strong id="detail-order-date-label">📅 Previsão de Entrega:</strong> <span id="detail-order-date">-</span></div>
+      <div><strong>🚚 Modalidade:</strong> <span id="detail-order-logistics">-</span></div>
+      <div><strong>💳 Pagamento:</strong> <span id="detail-order-payment">-</span></div>
+      <div id="detail-address-container" style="display:none"><strong>📍 Endereço:</strong> <span id="detail-order-address">-</span></div>
+      <div id="detail-obs-container" style="display:none"><strong>📝 Observações:</strong> <span id="detail-order-obs">-</span></div>
+    </div>
+
+    <!-- Bloco Pix se o pedido for Pix -->
+    <div id="detail-pix-container" style="display:none;background:rgba(249, 115, 22, 0.08);border:1px dashed rgba(249, 115, 22, 0.3);border-radius:12px;padding:14px;margin-bottom:16px;font-size:13px">
+      <div style="font-weight:800;color:var(--brand-400);margin-bottom:8px">⚡ Informações para Pagamento via Pix</div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12.5px;color:var(--text-secondary)">
+        <div><strong>Favorecido:</strong> <span id="detail-pix-favorecido" style="color:var(--text-primary);font-weight:700">-</span></div>
+        <div><strong>Banco / Instituição:</strong> <span id="detail-pix-banco" style="color:var(--text-primary);font-weight:700">-</span></div>
+        <div><strong>Chave Pix (<span id="detail-pix-tipo">Chave</span>):</strong> <span id="detail-pix-chave" style="font-family:monospace;font-weight:700;color:var(--brand-400)">-</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-detail-copiar-pix-payload" style="font-size:11.5px;font-weight:800">
+          📋 Copiar Pix com Valor
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-detail-copiar-pix-chave" style="font-size:11.5px;font-weight:800">
+          🔑 Copiar Chave
+        </button>
+      </div>
+    </div>
+
+    <!-- Itens do Pedido -->
+    <div style="font-weight:700;margin-bottom:8px;font-size:14px">🛒 Itens do Pedido</div>
+    <div id="detail-items-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px"></div>
+
+    <!-- Resumo de Valores -->
+    <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;font-weight:800;font-size:18px;color:var(--brand-400)">
+        <span>Total</span>
+        <span id="detail-order-total">R$ 0,00</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px">
+      <button type="button" class="btn btn-secondary btn-full" id="detail-close-modal-btn">Fechar</button>
+      <button type="button" class="btn btn-primary btn-full" id="detail-reorder-btn" style="display:flex;align-items:center;justify-content:center;gap:6px">🔁 Pedir de Novo</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── MODAL DE CONFIRMAÇÃO DO PEDIDO (Frente de Caixa) ────── -->
+<div class="modal-backdrop" id="modal-confirm-checkout">
+  <div class="modal-card" style="max-width:520px;max-height:92vh;overflow-y:auto;padding:20px">
+    <button type="button" class="modal-close" id="confirm-modal-close-btn" aria-label="Fechar">&times;</button>
+
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:32px;margin-bottom:4px">📋</div>
+      <h2 style="font-size:20px;font-weight:800;color:var(--brand-400);margin:4px 0">Confirmação do Pedido</h2>
+      <div style="font-size:13px;color:var(--text-secondary)">Confira o resumo do seu pedido antes de finalizar</div>
+    </div>
+
+    <!-- Dados do Cliente e Logística -->
+    <div style="background:var(--surface-subtle, rgba(255,255,255,0.05));border-radius:12px;padding:14px;margin-bottom:14px;font-size:13px;display:flex;flex-direction:column;gap:6px">
+      <div><strong>👤 Cliente:</strong> <span id="cm-cliente-nome">-</span> (<span id="cm-cliente-phone">-</span>)</div>
+      <div><strong>🚚 Modalidade:</strong> <span id="cm-logistica-tipo" style="font-weight:700;color:var(--brand-400)">-</span></div>
+      <div id="cm-endereco-row"><strong>📍 Endereço:</strong> <span id="cm-endereco-texto">-</span></div>
+      <div><strong>📅 Previsão:</strong> <span id="cm-data-hora">-</span></div>
+      <div><strong>💳 Pagamento:</strong> <span id="cm-forma-pagamento" style="font-weight:700">-</span></div>
+      <div id="cm-obs-row" style="display:none"><strong>📝 Observações:</strong> <span id="cm-obs-texto">-</span></div>
+    </div>
+
+    <!-- Pix Copia e Cola Info (se selecionado Pix) -->
+    <div id="cm-pix-box" style="display:none;background:rgba(249, 115, 22, 0.08);border:1px dashed rgba(249, 115, 22, 0.3);border-radius:12px;padding:14px;margin-bottom:14px;font-size:13px">
+      <div style="font-weight:800;color:var(--brand-400);margin-bottom:6px">⚡ Pagamento via Pix</div>
+      <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:10px;font-size:12.5px;color:var(--text-secondary)">
+        <div><strong>Favorecido:</strong> <span id="cm-pix-favorecido" style="color:var(--text-primary);font-weight:700">-</span></div>
+        <div><strong>Banco / Instituição:</strong> <span id="cm-pix-banco" style="color:var(--text-primary);font-weight:700">-</span></div>
+        <div><strong>Chave Pix (<span id="cm-pix-tipo">Chave</span>):</strong> <span id="cm-pix-chave" style="font-family:monospace;font-weight:700;color:var(--brand-400)">-</span></div>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" id="cm-btn-copiar-pix-payload" style="width:100%;font-weight:800;padding:10px">
+        📋 Copiar Pix Copia e Cola (com valor do pedido)
+      </button>
+    </div>
+
+    <!-- Lista de Itens -->
+    <div style="font-weight:800;margin-bottom:8px;font-size:14px">🛒 Itens do Pedido</div>
+    <div id="cm-items-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;max-height:180px;overflow-y:auto;padding-right:4px"></div>
+
+    <!-- Total -->
+    <div style="border-top:1px solid rgba(255,255,255,0.1);border-bottom:1px solid rgba(255,255,255,0.1);padding:12px 0;margin-bottom:18px;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-secondary)">
+        <span>Subtotal dos Itens</span>
+        <span id="cm-subtotal-val">R$ 0,00</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-secondary)">
+        <span>Taxa de Entrega</span>
+        <span id="cm-taxa-val" style="color:var(--brand-400)">Grátis</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-weight:800;font-size:18px;color:var(--brand-400);margin-top:4px">
+        <span>TOTAL GERAL</span>
+        <span id="cm-total-val">R$ 0,00</span>
+      </div>
+    </div>
+
+    <!-- Ações do Modal -->
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button type="button" class="btn btn-primary btn-full btn-lg" id="cm-btn-confirm-final" style="font-weight:800;font-size:16px">
+        🚀 Confirmar e Enviar Pedido
+      </button>
+      <button type="button" class="btn btn-ghost btn-full" id="cm-btn-edit">
+        ✏️ Voltar e Editar Pedido
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── MODAL DE HORÁRIOS DE ATENDIMENTO ────────────────────── -->
+<div class="modal-backdrop" id="modal-horarios">
+  <div class="modal-card" style="max-width:480px;padding:24px">
+    <button type="button" class="modal-close" id="modal-horarios-close-btn" aria-label="Fechar">&times;</button>
+
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:32px;margin-bottom:4px">⏰</div>
+      <h2 style="font-size:20px;font-weight:800;color:var(--brand-400);margin:4px 0">Horários de Atendimento</h2>
+      <div id="modal-horarios-status-tag" class="order-status-pill status-confirmado" style="display:inline-block;margin-top:4px">Aberto</div>
+    </div>
+
+    <!-- Regra de antecedência -->
+    <div style="background:var(--surface-subtle, rgba(255,255,255,0.05));border-radius:10px;padding:12px;margin-bottom:16px;font-size:12.5px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">⏱️</span>
+      <div>
+        <div style="font-weight:700;color:var(--text-primary)">Prazo mínimo para pedidos</div>
+        <div style="color:var(--text-secondary)" id="modal-horarios-prazo-desc">Antecedência mínima de 120 minutos</div>
+      </div>
+    </div>
+
+    <!-- Grade Semanal -->
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:var(--text-primary)">📅 Dias e Horários da Semana</div>
+    <div id="modal-horarios-grid" style="display:flex;flex-direction:column;gap:6px;margin-bottom:20px"></div>
+
+    <button type="button" class="btn btn-primary btn-full" id="modal-horarios-ok-btn">Entendi</button>
+  </div>
+</div>
+
+<!-- Script principal -->
+<script src="app.js?v=2.1.0"></script>
+
+</body>
+</html>

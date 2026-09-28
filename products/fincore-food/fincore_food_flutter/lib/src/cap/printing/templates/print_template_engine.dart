@@ -123,8 +123,13 @@ class PrintTemplateEngine {
     }
     lines.add(divSingle);
 
+    final totalQtdCaixa = data.itens.fold<double>(0, (sum, item) => sum + item.quantidade);
+    final totalQtdCaixaStr = totalQtdCaixa % 1 == 0 ? totalQtdCaixa.toStringAsFixed(0) : totalQtdCaixa.toStringAsFixed(1);
+    lines.add('[BOLD_ON]TOTAL DE ITENS: $totalQtdCaixaStr un[BOLD_OFF]');
+    lines.add(divSingle);
+
     // 7. Totais + Forma de Pagamento (agrupados — igual ao layout da tela)
-    final subtotal = data.totalCentavos - (data.taxaEntregaCentavos ?? 0) + (data.descontoCentavos ?? 0);
+    final subtotal = data.totalCentavos - (data.taxaEntregaCentavos ?? 0) - (data.taxaServicoCentavos ?? 0) + (data.descontoCentavos ?? 0);
     
     final leftSub = 'SUBTOTAL';
     final rightSub = PrintMoney.format(subtotal);
@@ -138,6 +143,14 @@ class PrintTemplateEngine {
       final dotsTaxaCount = w - leftTaxa.length - rightTaxa.length;
       final dotsTaxa = dotsTaxaCount > 0 ? '.' * dotsTaxaCount : ' ';
       lines.add('$leftTaxa$dotsTaxa$rightTaxa');
+    }
+
+    if (data.taxaServicoCentavos != null && data.taxaServicoCentavos! > 0) {
+      final leftServico = 'TAXA SERVICO/MAO OBRA';
+      final rightServico = PrintMoney.format(data.taxaServicoCentavos!);
+      final dotsServCount = w - leftServico.length - rightServico.length;
+      final dotsServ = dotsServCount > 0 ? '.' * dotsServCount : ' ';
+      lines.add('$leftServico$dotsServ$rightServico');
     }
 
     if (data.descontoCentavos != null && data.descontoCentavos! > 0) {
@@ -186,14 +199,20 @@ class PrintTemplateEngine {
     }
 
     // 9. Instruções PIX Automáticas
+    final effectivePixKey = (data.pixChave != null && data.pixChave!.isNotEmpty) ? data.pixChave! : (config.pixKey ?? '');
+    final effectivePixTipo = (data.pixTipo != null && data.pixTipo!.isNotEmpty) ? data.pixTipo! : config.pixTipo;
+    final effectiveFavorecido = (data.pixBanco != null && data.pixBanco!.isNotEmpty)
+        ? data.pixBanco!
+        : (config.pixFavorecido ?? 'Estabelecimento');
+
     if (data.formaPagamento.toLowerCase().contains('pix') && 
-        (config.pixKey ?? '').isNotEmpty) {
+        effectivePixKey.isNotEmpty) {
       lines.addAll(
         PrintPix.render(
           totalCentavos: data.totalCentavos,
-          chave: config.pixKey!,
-          tipoChave: config.pixTipo,
-          favorecido: config.pixFavorecido ?? 'Estabelecimento',
+          chave: effectivePixKey,
+          tipoChave: effectivePixTipo,
+          favorecido: effectiveFavorecido,
           cidade: config.pixCidade,
           mensagemRodape: config.mensagemRodape,
           imprimirQRCode: config.imprimirQRCode,
@@ -228,7 +247,7 @@ class PrintTemplateEngine {
     // Info do pedido
     final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
     lines.add('[BOLD_ON]PEDIDO: #$idExibicao[BOLD_OFF]');
-    lines.add('[BOLD_ON]${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
+    lines.add('[BOLD_ON]AGENDADO: ${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     lines.add('TIPO: ${data.tipoLogistica}');
     if ((data.clienteNome ?? '').isNotEmpty) {
       lines.add('CLIENTE: ${data.clienteNome!}');
@@ -249,10 +268,20 @@ class PrintTemplateEngine {
       }
     }
     lines.add(divSingle);
+    final totalQtdCozinha = data.itens.fold<double>(0, (sum, item) => sum + item.quantidade);
+    final totalQtdCozinhaStr = totalQtdCozinha % 1 == 0 ? totalQtdCozinha.toStringAsFixed(0) : totalQtdCozinha.toStringAsFixed(1);
+    lines.add('[BOLD_ON]TOTAL DE ITENS: $totalQtdCozinhaStr un[BOLD_OFF]');
+    lines.add(divSingle);
 
     // Observação geral
     if ((data.observacao ?? '').isNotEmpty) {
       lines.add('OBS GERAL: ${data.observacao}');
+    }
+
+    if (data.taxaServicoCentavos != null && data.taxaServicoCentavos! > 0) {
+      lines.add(divSingle);
+      lines.add('[BOLD_ON]*** SERVICO/MAO DE OBRA NO LOCAL ***[BOLD_OFF]');
+      lines.add('TAXA SERVICO: ${PrintMoney.format(data.taxaServicoCentavos!)}');
     }
 
     lines.add('');
@@ -279,6 +308,9 @@ class PrintTemplateEngine {
     lines.add('TIPO: ${data.tipoLogistica}');
     lines.add('PAGTO: ${data.formaPagamento}');
     lines.add('[BOLD_ON]TOTAL: ${PrintMoney.format(data.totalCentavos)}[BOLD_OFF]');
+    if (data.taxaServicoCentavos != null && data.taxaServicoCentavos! > 0) {
+      lines.add('SERVICO/MAO OBRA: ${PrintMoney.format(data.taxaServicoCentavos!)}');
+    }
     lines.add(divSingle);
 
     // Itens resumidos
@@ -306,13 +338,16 @@ class PrintTemplateEngine {
 
     final idExibicao = data.numeroPedido?.toString() ?? data.shortId;
     lines.add('PEDIDO: #$idExibicao');
-    lines.add('[BOLD_ON]${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
+    lines.add('[BOLD_ON]AGENDADO: ${PrintDate.format(data.dataHora.toLocal()).toUpperCase()}[BOLD_OFF]');
     if ((data.clienteNome ?? '').isNotEmpty) {
       lines.add('CLIENTE: ${data.clienteNome!}');
     }
     final formattedPhone = PrintPhone.format(data.clienteTelefone ?? '');
     if (formattedPhone.isNotEmpty) {
       lines.add('FONE: $formattedPhone');
+    }
+    if (data.taxaServicoCentavos != null && data.taxaServicoCentavos! > 0) {
+      lines.add('[BOLD_ON]SERVICO/MAO OBRA: ${PrintMoney.format(data.taxaServicoCentavos!)}[BOLD_OFF]');
     }
     lines.add(divSingle);
 
@@ -343,6 +378,10 @@ class PrintTemplateEngine {
           : item.quantidade.toStringAsFixed(1);
       lines.add('  ${qtyStr}x ${item.nome}');
     }
+    lines.add(divSingle);
+    final totalQtdExp = data.itens.fold<double>(0, (sum, item) => sum + item.quantidade);
+    final totalQtdExpStr = totalQtdExp % 1 == 0 ? totalQtdExp.toStringAsFixed(0) : totalQtdExp.toStringAsFixed(1);
+    lines.add('[BOLD_ON]TOTAL DE ITENS: $totalQtdExpStr un[BOLD_OFF]');
     lines.add(divSingle);
 
     // Total e forma de pagamento

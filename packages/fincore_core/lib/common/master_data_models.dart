@@ -20,6 +20,8 @@ enum TipoFormaPagamento {
   pix,
   cartaoCredito,
   cartaoDebito,
+  notaPrazo,
+  consumoInterno,
   outro,
 }
 
@@ -239,6 +241,20 @@ class Cliente {
       limiteCredito: limiteCredito != null ? limiteCredito() : this.limiteCredito,
     );
   }
+
+  /// Retorna o nome formatado com o apelido (se cadastrado), ex: "João Paulo (Memac)"
+  String get nomeExibicao {
+    if (apelido != null && apelido!.trim().isNotEmpty) {
+      return '$nome (${apelido!.trim()})';
+    }
+    return nome;
+  }
+
+  /// Retorna o telefone devidamente normalizado para 11 dígitos (ou 10 se fixo)
+  String get telefoneNormalizado => normalizarTelefone(telefone);
+
+  /// Retorna o telefone formatado para exibição, ex: "(35) 99250-3114"
+  String get telefoneFormatado => formatarTelefone(telefone);
 }
 
 class LocalEntrega {
@@ -279,6 +295,14 @@ class FormaPagamento {
   final int ordem;
   final bool ativo;
   final bool permiteTroco;
+  final bool isUsoInterno;
+  final bool movimentaFinanceiro;
+  final bool movimentaEstoque;
+  final String? bandeiraPadrao;
+  final String? descricao;
+  final String? pixChave;
+  final String? pixTipoChave;
+  final String? pixTipoBanco;
   final SyncMetadata metadata;
 
   const FormaPagamento({
@@ -289,8 +313,54 @@ class FormaPagamento {
     required this.ordem,
     required this.ativo,
     required this.permiteTroco,
+    this.isUsoInterno = false,
+    this.movimentaFinanceiro = true,
+    this.movimentaEstoque = true,
+    this.bandeiraPadrao,
+    this.descricao,
+    this.pixChave,
+    this.pixTipoChave,
+    this.pixTipoBanco,
     required this.metadata,
   });
+
+  FormaPagamento copyWith({
+    String? id,
+    String? tenantId,
+    String? nome,
+    TipoFormaPagamento? tipo,
+    int? ordem,
+    bool? ativo,
+    bool? permiteTroco,
+    bool? isUsoInterno,
+    bool? movimentaFinanceiro,
+    bool? movimentaEstoque,
+    String? bandeiraPadrao,
+    String? descricao,
+    String? pixChave,
+    String? pixTipoChave,
+    String? pixTipoBanco,
+    SyncMetadata? metadata,
+  }) {
+    return FormaPagamento(
+      id: id ?? this.id,
+      tenantId: tenantId ?? this.tenantId,
+      nome: nome ?? this.nome,
+      tipo: tipo ?? this.tipo,
+      ordem: ordem ?? this.ordem,
+      ativo: ativo ?? this.ativo,
+      permiteTroco: permiteTroco ?? this.permiteTroco,
+      isUsoInterno: isUsoInterno ?? this.isUsoInterno,
+      movimentaFinanceiro: movimentaFinanceiro ?? this.movimentaFinanceiro,
+      movimentaEstoque: movimentaEstoque ?? this.movimentaEstoque,
+      bandeiraPadrao: bandeiraPadrao ?? this.bandeiraPadrao,
+      descricao: descricao ?? this.descricao,
+      pixChave: pixChave ?? this.pixChave,
+      pixTipoChave: pixTipoChave ?? this.pixTipoChave,
+      pixTipoBanco: pixTipoBanco ?? this.pixTipoBanco,
+      metadata: metadata ?? this.metadata,
+    );
+  }
 }
 
 class TaxaEntrega {

@@ -39,7 +39,10 @@ class PedidosTable extends Table with IdentityColumns, AuditColumns, SyncColumns
   /// Taxa de entrega em centavos (0 para Retirada/Balcão)
   IntColumn get valorTaxaEntregaCentavos => integer().withDefault(const Constant(0))();
 
-  /// Total final = subtotal + taxa de entrega
+  /// Taxa de serviço / mão de obra em centavos (0 para pedidos sem serviço adicional)
+  IntColumn get valorTaxaServicoCentavos => integer().withDefault(const Constant(0))();
+
+  /// Total final = subtotal + taxa de entrega + taxa de serviço
   IntColumn get valorTotalCentavos => integer()();
 
   /// Troco solicitado em centavos (nullable — apenas para pagamento em dinheiro)
@@ -74,6 +77,9 @@ class PedidosTable extends Table with IdentityColumns, AuditColumns, SyncColumns
   /// Usada para: cálculo de demanda futura, horário de início recomendado
   /// na cozinha e janela de produção no planejamento.
   DateTimeColumn get dataHoraEntregaPrevista => dateTime().nullable()();
+
+  /// Flag que indica se o pedido é para Consumo / Uso Interno (não gera receita financeira, mas baixa estoque)
+  BoolColumn get isUsoInterno => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};

@@ -1,0 +1,16 @@
+.git
+.gitignore
+.vercel
+.netlify
+node_modules
+package.json
+package-lock.json
+*.log
+apply_*.js
+check_*.js
+fix_*.js
+audit_*.js
+repair_*.js
+test_*.js
+server.js
+supabase/

@@ -43,6 +43,7 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
   final _emailCtrl = TextEditingController();
   final _documentoCtrl = TextEditingController();
   final _preferenciaCtrl = TextEditingController();
+  final _limiteCreditoCtrl = TextEditingController();
   final _obsCtrl = TextEditingController();
 
   // Endereço de Entrega Inicial
@@ -56,6 +57,7 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
   bool _ativo = true;
   bool _aceitaWhatsapp = true;
   bool _aceitaMarketing = false;
+  DateTime? _dataNascimento;
   bool _isSaving = false;
   bool _isSearchingCep = false;
   LocalEntrega? _localExistente;
@@ -67,14 +69,19 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
     if (c != null) {
       _nomeCtrl.text = c.nome;
       _apelidoCtrl.text = c.apelido ?? '';
-      _telefoneCtrl.text = c.telefone;
+      _telefoneCtrl.text = c.telefoneFormatado;
       _emailCtrl.text = c.email ?? '';
       _documentoCtrl.text = c.documento ?? '';
       _preferenciaCtrl.text = c.preferenciaEntrega ?? '';
+      if (c.limiteCredito != null) {
+        final double val = c.limiteCredito! / 100.0;
+        _limiteCreditoCtrl.text = val.toStringAsFixed(2).replaceAll('.', ',');
+      }
       _obsCtrl.text = c.observacoes;
       _ativo = c.ativo;
       _aceitaWhatsapp = c.aceitaWhatsapp;
       _aceitaMarketing = c.aceitaMarketing;
+      _dataNascimento = c.dataNascimento;
       _carregarEnderecoCliente(c.id);
     }
   }
@@ -111,6 +118,7 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
     _emailCtrl.dispose();
     _documentoCtrl.dispose();
     _preferenciaCtrl.dispose();
+    _limiteCreditoCtrl.dispose();
     _obsCtrl.dispose();
     _logrCtrl.dispose();
     _numCtrl.dispose();
@@ -165,11 +173,30 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
       final isNew = widget.cliente == null;
       final id = isNew ? const Uuid().v4() : widget.cliente!.id;
 
+      final telNorm = normalizarTelefone(_telefoneCtrl.text);
+      final duplicado = await clienteRepo.findByTelefone(telNorm, excludeId: isNew ? null : id);
+      if (duplicado != null) {
+        if (mounted) {
+          setState(() => _isSaving = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Já existe um cliente cadastrado com este telefone (${formatarTelefone(telNorm)}: ${duplicado.nomeExibicao}).'),
+              backgroundColor: Colors.redAccent,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+
+      final double? parsedCredito = double.tryParse(_limiteCreditoCtrl.text.replaceAll('.', '').replaceAll(',', '.'));
+      final int? limiteCreditoCentavos = parsedCredito != null ? (parsedCredito * 100).round() : null;
+
       final novoCliente = Cliente(
         id: id,
         tenantId: tenantCtx.tenantId,
         nome: _nomeCtrl.text.trim(),
-        telefone: _telefoneCtrl.text.trim(),
+        telefone: formatarTelefone(_telefoneCtrl.text).isNotEmpty ? formatarTelefone(_telefoneCtrl.text) : (telNorm.isNotEmpty ? telNorm : _telefoneCtrl.text.trim()),
         email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
         documento: _documentoCtrl.text.trim().isEmpty ? null : _documentoCtrl.text.trim(),
         observacoes: _obsCtrl.text.trim(),
@@ -178,6 +205,8 @@ class _ClienteFormDialogState extends State<ClienteFormDialog> {
         aceitaWhatsapp: _aceitaWhatsapp,
         aceitaMarketing: _aceitaMarketing,
         preferenciaEntrega: _preferenciaCtrl.text.trim().isEmpty ? null : _preferenciaCtrl.text.trim(),
+        limiteCredito: limiteCreditoCentavos,
+        dataNascimento: _dataNascimento,
         metadata: widget.cliente?.metadata.copyWith(
               updatedAt: DateTime.now().toUtc(),
               syncStatus: SyncStatus.pending,

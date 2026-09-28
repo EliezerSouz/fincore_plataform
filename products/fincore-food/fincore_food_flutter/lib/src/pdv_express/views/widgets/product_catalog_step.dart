@@ -116,6 +116,9 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
         ),
       );
 
+      final stockVal = widget.controller.estoqueMap[p.id];
+      final stockInfo = widget.controller.stockDetailsMap[p.id];
+
       tempProds.add({
         'id': p.id,
         'sku': p.codigo ?? (p.id.length > 5 ? p.id.substring(0, 5) : p.id),
@@ -124,6 +127,9 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
         'price': basePrice,
         'category': category.nome,
         'image': p.imagem,
+        'stock': stockVal,
+        'stockInfo': stockInfo,
+        'controlaEstoque': p.controlaEstoque,
       });
     }
 
@@ -226,76 +232,82 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
         ),
         const SizedBox(height: 12),
 
-        // Filtro por Categoria (Dropdown + Chips horizontais)
-        if (!_isLoading)
-          Row(
-            children: [
-              // Dropdown Selecionar Categoria (Ideal para mais de 10 categorias)
-              Container(
-                height: 38,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E24),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: FincoreColors.border),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _categories.contains(_selectedCategory) ? _selectedCategory : 'Todos',
-                    dropdownColor: const Color(0xFF1E1E24),
-                    icon: Icon(Icons.arrow_drop_down, color: FincoreColors.primary),
-                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          _selectedCategory = val;
-                          _applyFilters(widget.searchController.text);
-                        });
-                      }
-                    },
-                    items: _categories.map((cat) {
-                      return DropdownMenuItem<String>(
-                        value: cat,
-                        child: Text(cat == 'Todos' ? '📂 Todas Categorias' : '🏷️ $cat'),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              // Chips Horizontais para seleção rápida
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: _categories.map((cat) {
-                      final isSelected = _selectedCategory == cat;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          selected: isSelected,
-                          label: Text(cat),
-                          selectedColor: FincoreColors.primary,
-                          labelStyle: TextStyle(
-                            color: isSelected ? Colors.black : Colors.white,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          ),
-                          onSelected: (selected) {
-                            if (selected) {
+        // Filtro por Categoria exclusivo (Combobox) + Resumo Projetado do Carrinho
+        if (!_isLoading) ...[
+          Builder(
+            builder: (context) {
+              final totalUnits = widget.controller.cart.fold<double>(0, (sum, i) => sum + i.quantity);
+              final totalUnitsStr = totalUnits % 1 == 0 ? totalUnits.toStringAsFixed(0) : totalUnits.toStringAsFixed(1);
+              final cartSubtotalCents = widget.controller.cart.fold(0, (sum, i) => sum + i.totalInCents);
+              final subtotalStr = (cartSubtotalCents / 100).toStringAsFixed(2).replaceAll('.', ',');
+
+              return Row(
+                children: [
+                  // Dropdown Exclusivo de Categoria
+                  Expanded(
+                    child: Container(
+                      height: 42,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E24),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: FincoreColors.border),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          isExpanded: true,
+                          value: _categories.contains(_selectedCategory) ? _selectedCategory : 'Todos',
+                          dropdownColor: const Color(0xFF1E1E24),
+                          icon: Icon(Icons.arrow_drop_down, color: FincoreColors.primary),
+                          style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+                          onChanged: (val) {
+                            if (val != null) {
                               setState(() {
-                                _selectedCategory = cat;
+                                _selectedCategory = val;
                                 _applyFilters(widget.searchController.text);
                               });
                             }
                           },
+                          items: _categories.map((cat) {
+                            return DropdownMenuItem<String>(
+                              value: cat,
+                              child: Text(cat == 'Todos' ? '📂 Todas as Categorias' : '🏷️ $cat'),
+                            );
+                          }).toList(),
                         ),
-                      );
-                    }).toList(),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            ],
+                  const SizedBox(width: 12),
+                  // Badge do Carrinho Projetado (Total de Itens & Subtotal)
+                  Container(
+                    height: 42,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.shopping_basket_outlined, color: FincoreColors.primary, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'CARRINHO: $totalUnitsStr un | R\$ $subtotalStr',
+                          style: TextStyle(
+                            color: FincoreColors.primary,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
+        ],
         const SizedBox(height: 16),
 
         // Grid de Produtos ou Skeleton de Carregamento
@@ -322,10 +334,30 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
                             ? 'R\$ ${((product['price'] as int) / 100).toStringAsFixed(2)}'
                             : 'R\$ 0,00';
 
+                        final stockInfo = product['stockInfo'] as StockInfo?;
+                        final controlaEstoque = product['controlaEstoque'] as bool? ?? false;
+                        final double stockProjVal = stockInfo?.projetado ?? (product['stock'] as double? ?? 0.0);
+                        final stockProjStr = stockProjVal % 1 == 0 ? stockProjVal.toStringAsFixed(0) : stockProjVal.toStringAsFixed(1);
+
+                        final String stockSummaryLine;
+                        if (!controlaEstoque) {
+                          stockSummaryLine = 'Estoque: Não controlado';
+                        } else {
+                          stockSummaryLine = 'Saldo Projetado: $stockProjStr un';
+                        }
+
                         final tooltipMsg = [
                           name,
                           if (desc.isNotEmpty) 'Descrição: $desc',
                           'SKU: $sku | Categoria: $category',
+                          stockSummaryLine,
+                          if (controlaEstoque && stockInfo != null) ...[
+                            '  • Físico: ${stockInfo.fisico % 1 == 0 ? stockInfo.fisico.toStringAsFixed(0) : stockInfo.fisico.toStringAsFixed(1)} un',
+                            if (stockInfo.reservado > 0)
+                              '  • Reservado p/ entregas: -${stockInfo.reservado % 1 == 0 ? stockInfo.reservado.toStringAsFixed(0) : stockInfo.reservado.toStringAsFixed(1)} un',
+                            if (stockInfo.producaoPlanejada > 0)
+                              '  • Produção prevista: +${stockInfo.producaoPlanejada % 1 == 0 ? stockInfo.producaoPlanejada.toStringAsFixed(0) : stockInfo.producaoPlanejada.toStringAsFixed(1)} un',
+                          ],
                           'Preço: $priceStr',
                         ].join('\n');
 
@@ -398,56 +430,119 @@ class _ProductCatalogStepState extends State<ProductCatalogStep> {
                                             },
                                           ),
                                           // Badge de Info com Modal de Detalhes
-                                          if (desc.isNotEmpty)
-                                            Positioned(
-                                              top: 4,
-                                              right: 4,
-                                              child: GestureDetector(
-                                                onTap: () {
-                                                  showDialog(
-                                                    context: context,
-                                                    builder: (ctx) => AlertDialog(
-                                                      backgroundColor: const Color(0xFF1E1E24),
-                                                      shape: RoundedRectangleBorder(
-                                                        borderRadius: BorderRadius.circular(12),
-                                                        side: const BorderSide(color: FincoreColors.border),
-                                                      ),
-                                                      title: Text(
-                                                        name,
-                                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                                      ),
-                                                      content: Column(
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                                        children: [
-                                                          Text('SKU: $sku | Categoria: $category',
-                                                              style: TextStyle(color: FincoreColors.textMuted, fontSize: 12)),
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                showDialog(
+                                                  context: context,
+                                                  builder: (ctx) => AlertDialog(
+                                                    backgroundColor: const Color(0xFF1E1E24),
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius: BorderRadius.circular(12),
+                                                      side: const BorderSide(color: FincoreColors.border),
+                                                    ),
+                                                    title: Text(
+                                                      name,
+                                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                                    ),
+                                                    content: Column(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Text('SKU: $sku | Categoria: $category',
+                                                            style: TextStyle(color: FincoreColors.textMuted, fontSize: 12)),
+                                                        const SizedBox(height: 10),
+                                                        if (controlaEstoque && stockInfo != null) ...[
+                                                          Container(
+                                                            width: double.infinity,
+                                                            padding: const EdgeInsets.all(12),
+                                                            decoration: BoxDecoration(
+                                                              color: const Color(0xFF141418),
+                                                              borderRadius: BorderRadius.circular(8),
+                                                              border: Border.all(color: FincoreColors.border),
+                                                            ),
+                                                            child: Column(
+                                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                                              children: [
+                                                                Row(
+                                                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                                  children: [
+                                                                    const Text('Físico Atual:', style: TextStyle(color: FincoreColors.textMuted, fontSize: 12)),
+                                                                    Text('${stockInfo.fisico % 1 == 0 ? stockInfo.fisico.toStringAsFixed(0) : stockInfo.fisico.toStringAsFixed(1)} un',
+                                                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                                                  ],
+                                                                ),
+                                                                if (stockInfo.reservado > 0) ...[
+                                                                  const SizedBox(height: 4),
+                                                                  Row(
+                                                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                                    children: [
+                                                                      const Text('Reservado p/ Entregas:', style: TextStyle(color: Colors.orangeAccent, fontSize: 12)),
+                                                                      Text('-${stockInfo.reservado % 1 == 0 ? stockInfo.reservado.toStringAsFixed(0) : stockInfo.reservado.toStringAsFixed(1)} un',
+                                                                          style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                                                                    ],
+                                                                  ),
+                                                                ],
+                                                                if (stockInfo.producaoPlanejada > 0) ...[
+                                                                  const SizedBox(height: 4),
+                                                                  Row(
+                                                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                                    children: [
+                                                                      const Text('Produção Programada:', style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                                                                      Text('+${stockInfo.producaoPlanejada % 1 == 0 ? stockInfo.producaoPlanejada.toStringAsFixed(0) : stockInfo.producaoPlanejada.toStringAsFixed(1)} un',
+                                                                          style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                                                                    ],
+                                                                  ),
+                                                                ],
+                                                                const SizedBox(height: 6),
+                                                                const Divider(color: Color(0xFF2E2E38), height: 1),
+                                                                const SizedBox(height: 6),
+                                                                Row(
+                                                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                                  children: [
+                                                                    const Text('SALDO PROJETADO:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5)),
+                                                                    Text('${stockProjStr} un',
+                                                                        style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.w900, fontSize: 13.5)),
+                                                                  ],
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
                                                           const SizedBox(height: 10),
-                                                          Text(desc, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4)),
-                                                          const SizedBox(height: 14),
-                                                          Text('Preço Base: $priceStr',
-                                                              style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold, fontSize: 14)),
+                                                        ] else ...[
+                                                          Text('Estoque: $stockSummaryLine',
+                                                              style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold, fontSize: 12.5)),
+                                                          const SizedBox(height: 10),
                                                         ],
-                                                      ),
-                                                      actions: [
-                                                        TextButton(
-                                                          onPressed: () => Navigator.pop(ctx),
-                                                          child: Text('OK', style: TextStyle(color: FincoreColors.primary)),
-                                                        ),
+                                                        if (desc.isNotEmpty) ...[
+                                                          Text(desc, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4)),
+                                                          const SizedBox(height: 10),
+                                                        ],
+                                                        Text('Preço Base: $priceStr',
+                                                            style: TextStyle(color: FincoreColors.primary, fontWeight: FontWeight.bold, fontSize: 14)),
                                                       ],
                                                     ),
-                                                  );
-                                                },
-                                                child: Container(
-                                                  padding: const EdgeInsets.all(4),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.black.withValues(alpha: 0.6),
-                                                    shape: BoxShape.circle,
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () => Navigator.pop(ctx),
+                                                        child: Text('OK', style: TextStyle(color: FincoreColors.primary)),
+                                                      ),
+                                                    ],
                                                   ),
-                                                  child: Icon(Icons.info_outline, size: 16, color: FincoreColors.primary),
+                                                );
+                                              },
+                                              child: Container(
+                                                padding: const EdgeInsets.all(4),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black.withValues(alpha: 0.6),
+                                                  shape: BoxShape.circle,
                                                 ),
+                                                child: Icon(Icons.info_outline, size: 16, color: FincoreColors.primary),
                                               ),
                                             ),
+                                          ),
                                         ],
                                       ),
                                     ),

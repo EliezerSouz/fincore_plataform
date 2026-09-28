@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
+import 'package:fincore_core/common/domain_primitives.dart';
 import '../../controllers/pdv_express_controller.dart';
 import '../../models/pdv_item.dart';
 
@@ -21,6 +22,7 @@ class OrderSummaryPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final subtotalCentavos = controller.cart.fold(0, (sum, i) => sum + i.totalInCents);
     final taxaCentavos = controller.entrega.tipo == 'Entrega' ? controller.entrega.taxaEntregaCentavos : 0;
+    final taxaServicoCentavos = controller.entrega.taxaServicoCentavos;
     final totalCentavos = controller.totalInCents;
     final passo = controller.passoAtual;
 
@@ -106,18 +108,13 @@ class OrderSummaryPanel extends StatelessWidget {
             _TotalsSection(
               subtotalCentavos: subtotalCentavos,
               taxaCentavos: taxaCentavos,
+              taxaServicoCentavos: taxaServicoCentavos,
               totalCentavos: totalCentavos,
             ),
             const SizedBox(height: 16),
           ],
 
-          // ── 4. Método de Pagamento (Apenas se Etapa 3/Pagamento) ──────
-          if (passo == 2) ...[
-            _PaymentMethodSelector(controller: controller),
-            const SizedBox(height: 16),
-          ],
-
-          // ── 5. Botão CTA Principal Dinâmico ──────────────────────────
+          // ── 4. Botão CTA Principal Dinâmico ──────────────────────────
           SizedBox(
             height: 48,
             child: ElevatedButton(
@@ -200,7 +197,7 @@ class _CustomerSelectorCard extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          hasCliente ? (cliente.nome ?? 'Cliente não informado') : 'Cliente não selecionado',
+          hasCliente ? (cliente.nomeExibicao ?? cliente.nome ?? 'Cliente não informado') : 'Cliente não selecionado',
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -209,7 +206,7 @@ class _CustomerSelectorCard extends StatelessWidget {
         ),
         if (hasCliente && cliente.telefone != null && cliente.telefone!.isNotEmpty)
           Text(
-            cliente.telefone!,
+            formatarTelefone(cliente.telefone!),
             style: const TextStyle(
               color: FincoreColors.textSecondary,
               fontSize: 12,
@@ -436,11 +433,13 @@ class _QuantityBtn extends StatelessWidget {
 class _TotalsSection extends StatelessWidget {
   final int subtotalCentavos;
   final int taxaCentavos;
+  final int taxaServicoCentavos;
   final int totalCentavos;
 
   const _TotalsSection({
     required this.subtotalCentavos,
     required this.taxaCentavos,
+    this.taxaServicoCentavos = 0,
     required this.totalCentavos,
   });
 
@@ -448,6 +447,7 @@ class _TotalsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final subtotalStr = (subtotalCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
     final taxaStr = (taxaCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+    final taxaServicoStr = (taxaServicoCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
     final totalStr = (totalCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
 
     return Column(
@@ -465,20 +465,38 @@ class _TotalsSection extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Taxa de entrega:',
-              style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
-            ),
-            Text(
-              'R\$ $taxaStr',
-              style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
-            ),
-          ],
-        ),
+        if (taxaCentavos > 0) ...[
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Taxa de entrega:',
+                style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+              ),
+              Text(
+                'R\$ $taxaStr',
+                style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+              ),
+            ],
+          ),
+        ],
+        if (taxaServicoCentavos > 0) ...[
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Serviço / Mão de obra:',
+                style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+              ),
+              Text(
+                'R\$ $taxaServicoStr',
+                style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -500,102 +518,6 @@ class _TotalsSection extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ],
-    );
-  }
-}
-
-/// ── Seletor de Pagamento em Pills (PIX, Dinheiro, Cartão) ───────────────────
-class _PaymentMethodSelector extends StatelessWidget {
-  final PdvExpressController controller;
-
-  const _PaymentMethodSelector({required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    final methods = [
-      {'id': 'PIX', 'label': 'PIX', 'icon': Icons.qr_code},
-      {'id': 'Dinheiro', 'label': 'Dinheiro', 'icon': Icons.attach_money},
-      {'id': 'Cartão', 'label': 'Cartão', 'icon': Icons.credit_card},
-    ];
-
-    final activeMethod = controller.paymentMethod;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Método de Pagamento:',
-          style: TextStyle(
-            color: FincoreColors.textSecondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            color: FincoreColors.background,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: FincoreColors.border),
-          ),
-          child: Row(
-            children: methods.map((m) {
-              final id = m['id'] as String;
-              final label = m['label'] as String;
-              final icon = m['icon'] as IconData;
-              final isSelected = activeMethod.toLowerCase().contains(id.toLowerCase());
-
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => controller.setPaymentMethod(id),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? FincoreColors.surface
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(8),
-                      border: isSelected
-                          ? Border.all(color: FincoreColors.border)
-                          : null,
-                    ),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            icon,
-                            size: 14,
-                            color: isSelected
-                                ? FincoreColors.primary
-                                : FincoreColors.textMuted,
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            label,
-                            style: TextStyle(
-                              color: isSelected
-                                  ? FincoreColors.textPrimary
-                                  : FincoreColors.textMuted,
-                              fontSize: 12,
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
         ),
       ],
     );

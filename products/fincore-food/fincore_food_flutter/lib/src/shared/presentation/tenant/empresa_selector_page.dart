@@ -125,46 +125,57 @@ class _EmpresaSelectorPageState extends State<EmpresaSelectorPage>
               children: [
                 // Header
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF6C63FF), Color(0xFF4ECDC4)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Icon(
-                        Icons.business_rounded,
-                        color: Colors.white,
-                        size: 26,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    Row(
                       children: [
-                        const Text(
-                          'Bem-vindo de volta!',
-                          style: TextStyle(
-                            color: Color(0xFF8B949E),
-                            fontSize: 13,
-                            letterSpacing: 0.3,
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: FincoreColors.primary.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: FincoreColors.primary.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.business_rounded,
+                            color: Colors.white,
+                            size: 26,
                           ),
                         ),
-                        const Text(
-                          'Escolha a empresa',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: -0.5,
-                          ),
+                        const SizedBox(width: 16),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Bem-vindo de volta!',
+                              style: TextStyle(
+                                color: Color(0xFF8B949E),
+                                fontSize: 13,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                            const Text(
+                              'Escolha a empresa',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
+                    ),
+                    IconButton(
+                      tooltip: 'Sair da Conta (Logout)',
+                      icon: const Icon(Icons.logout_rounded, color: Color(0xFFF85149), size: 24),
+                      onPressed: () async {
+                        await Supabase.instance.client.auth.signOut();
+                      },
                     ),
                   ],
                 ),
@@ -183,23 +194,53 @@ class _EmpresaSelectorPageState extends State<EmpresaSelectorPage>
 
                 // Lista de empresas
                 Expanded(
-                  child: ListView.separated(
-                    itemCount: widget.empresas.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final empresa = widget.empresas[index];
-                      final empresaId = empresa['id'] as String;
-                      final isLoading = _loadingTenantId == empresaId;
-                      final isDisabled = _loadingTenantId != null && !isLoading;
+                  child: widget.empresas.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.business_center_outlined, size: 54, color: Color(0xFF8B949E)),
+                              const SizedBox(height: 16),
+                              const Text(
+                                'Nenhuma empresa ativa encontrada para esta conta.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white70, fontSize: 14),
+                              ),
+                              const SizedBox(height: 24),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: FincoreColors.primary,
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                                ),
+                                onPressed: () async {
+                                  await Supabase.instance.client.auth.signOut();
+                                },
+                                icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 20),
+                                label: const Text(
+                                  'Sair e Fazer Login Novamente',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          itemCount: widget.empresas.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            final empresa = widget.empresas[index];
+                            final empresaId = empresa['id'] as String;
+                            final isLoading = _loadingTenantId == empresaId;
+                            final isDisabled = _loadingTenantId != null && !isLoading;
 
-                      return _EmpresaCard(
-                        empresa: empresa,
-                        isLoading: isLoading,
-                        isDisabled: isDisabled,
-                        onTap: () => _selecionarEmpresa(empresa),
-                      );
-                    },
-                  ),
+                            return _EmpresaCard(
+                              empresa: empresa,
+                              isLoading: isLoading,
+                              isDisabled: isDisabled,
+                              onTap: () => _selecionarEmpresa(empresa),
+                            );
+                          },
+                        ),
                 ),
 
                 // Rodapé

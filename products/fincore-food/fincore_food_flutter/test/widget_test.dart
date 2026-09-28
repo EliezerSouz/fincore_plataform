@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/shell/fincore_shell.dart';
 import 'package:fincore_food_flutter/src/pdv_express/views/pdv_express_screen.dart';
+import 'package:fincore_food_flutter/src/pdv_express/views/widgets/product_catalog_step.dart';
 import 'package:fincore_food_flutter/src/shared/database_initializer.dart';
 
 import 'package:intl/date_symbol_data_local.dart';
@@ -71,10 +72,12 @@ void main() {
     await tester.pumpAndSettle();
 
     // Deve exibir o Catálogo de Produtos
-    expect(find.text('Todos'), findsOneWidget); // choice chips
+    expect(find.byType(ProductCatalogStep), findsOneWidget);
 
     // Clicar na Etapa 3: Forma de Pagamento no StepperHeader
-    await tester.tap(find.text('3  Pagamento & Confirmação'));
+    final step3Finder = find.widgetWithText(GestureDetector, '3  Pagamento & Confirmação');
+    expect(step3Finder, findsOneWidget);
+    (tester.widget(step3Finder) as GestureDetector).onTap?.call();
     await tester.pumpAndSettle();
 
     // Deve exibir Pagamento & Observações

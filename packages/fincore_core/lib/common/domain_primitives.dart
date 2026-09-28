@@ -51,3 +51,45 @@ class SyncMetadata {
     );
   }
 }
+
+/// Normaliza o número de telefone removendo pontuações e padronizando
+/// telefones móveis brasileiros (adicionando o 9º dígito quando omitido).
+/// Ex: (35) 9250-3114 -> 35992503114
+/// Ex: (35) 9 9250-3114 -> 35992503114
+/// Ex: (35) 3521-1234 -> 3535211234 (Fixo mantido com 10 dígitos)
+String normalizarTelefone(String? raw) {
+  if (raw == null) return '';
+  var digits = raw.replaceAll(RegExp(r'\D'), '');
+
+  // Trata prefixo de país +55 se houver
+  if (digits.startsWith('55') && (digits.length == 12 || digits.length == 13)) {
+    digits = digits.substring(2);
+  }
+
+  // Se tiver 10 dígitos (DDD + 8 dígitos) e for celular (iniciado por 6, 7, 8, 9)
+  if (digits.length == 10) {
+    final ddd = digits.substring(0, 2);
+    final primeiroDigito = digits[2];
+    if (['6', '7', '8', '9'].contains(primeiroDigito)) {
+      digits = '${ddd}9${digits.substring(2)}';
+    }
+  }
+
+  return digits;
+}
+
+/// Formata o telefone normalizado para exibição amigável.
+/// Ex: 35992503114 -> (35) 99250-3114
+/// Ex: 3535211234 -> (35) 3521-1234
+String formatarTelefone(String? tel) {
+  final norm = normalizarTelefone(tel);
+  if (norm.length == 11) {
+    return '(${norm.substring(0, 2)}) ${norm.substring(2, 7)}-${norm.substring(7)}';
+  } else if (norm.length == 10) {
+    return '(${norm.substring(0, 2)}) ${norm.substring(2, 6)}-${norm.substring(6)}';
+  } else if (norm.isNotEmpty) {
+    return tel ?? norm;
+  }
+  return '';
+}
+

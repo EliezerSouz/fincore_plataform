@@ -104,6 +104,12 @@ class LancamentosFinanceirosTable extends Table
   /// Data e hora exata do lançamento
   DateTimeColumn get dataHora => dateTime()();
 
+  /// Bandeira do cartão (ex: Visa, Mastercard, Elo) — para conciliação futura
+  TextColumn get bandeira => text().nullable()();
+
+  /// NSU / Identificador da transação da maquininha — para conciliação futura
+  TextColumn get nsuTransacao => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }

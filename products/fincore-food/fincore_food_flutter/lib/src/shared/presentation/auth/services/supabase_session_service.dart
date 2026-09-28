@@ -240,19 +240,22 @@ class SupabaseSessionService {
       return const SupabaseSessionResult();
     }
 
-    // 4. Se tem múltiplas empresas → seleção
-    if (membros.length > 1) {
-      final empresas = membros
-          .map((m) => m['empresa'] as Map<String, dynamic>?)
-          .whereType<Map<String, dynamic>>()
-          .toList();
-      return SupabaseSessionResult(multiEmpresas: empresas);
+    // 4. Seleção automática da empresa ativa/preferencial do usuário
+    Map<String, dynamic>? membro = membros.firstOrNull;
+
+    final prefTenantId = usuarioRow['activeTenantId'] as String? ?? usuarioRow['tenantId'] as String?;
+    if (prefTenantId != null && prefTenantId.isNotEmpty) {
+      final found = membros.where((m) => m['tenantId'] == prefTenantId).firstOrNull;
+      if (found != null) {
+        membro = found;
+      }
     }
 
-    // 5. Exatamente 1 empresa → bootstrap direto
-    final membro = membros.first;
-    final empresaRow = membro['empresa'] as Map<String, dynamic>?;
+    if (membro == null) {
+      return const SupabaseSessionResult();
+    }
 
+    final empresaRow = membro['empresa'] as Map<String, dynamic>?;
     if (empresaRow == null) {
       return const SupabaseSessionResult();
     }

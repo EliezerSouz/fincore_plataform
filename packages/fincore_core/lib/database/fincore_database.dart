@@ -96,7 +96,7 @@ class FincoreDatabase extends _$FincoreDatabase {
   FincoreDatabase(super.e);
 
   @override
-  int get schemaVersion => 23;
+  int get schemaVersion => 29;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -295,6 +295,75 @@ class FincoreDatabase extends _$FincoreDatabase {
             try { await customStatement('ALTER TABLE planejamento_producao_table ADD COLUMN necessidade_origem TEXT'); } catch (_) {}
             LogService.instance.info(LogModule.migration, 'Migration 023: ✔ OK');
           }
+          if (from < 24) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 024: Adicionando intervalo_alerta_pendentes_segundos e janela_projecao_estoque_dias...');
+            try { await customStatement('ALTER TABLE empresa_configuracao_table ADD COLUMN intervalo_alerta_pendentes_segundos INTEGER NOT NULL DEFAULT 60'); } catch (_) {}
+            try { await customStatement('ALTER TABLE empresa_configuracao_table ADD COLUMN janela_projecao_estoque_dias INTEGER NOT NULL DEFAULT 14'); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 024: ✔ OK');
+          }
+          if (from < 25) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 025: Adicionando is_uso_interno a pedidos_table...');
+            try { await customStatement('ALTER TABLE pedidos_table ADD COLUMN is_uso_interno INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 025: ✔ OK');
+          }
+          if (from < 26) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 026: Expandindo formas_pagamento_table e seeding...');
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN is_uso_interno INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN movimenta_financeiro INTEGER NOT NULL DEFAULT 1'); } catch (_) {}
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN movimenta_estoque INTEGER NOT NULL DEFAULT 1'); } catch (_) {}
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN bandeira_padrao TEXT'); } catch (_) {}
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN descricao TEXT'); } catch (_) {}
+
+            // Seeding de formas de pagamento padrão para tenants que não possuem nenhuma cadastrada
+            try {
+              final tenants = await customSelect('SELECT id FROM empresas_table WHERE deleted_at IS NULL').get();
+              for (final tenant in tenants) {
+                final tId = tenant.read<String>('id');
+                final count = await customSelect('SELECT COUNT(*) AS c FROM formas_pagamento_table WHERE tenant_id = ? AND deleted_at IS NULL', variables: [Variable.withString(tId)]).getSingle();
+                if ((count.read<int>('c')) == 0) {
+                  final now = DateTime.now().toUtc().toIso8601String();
+                  await customStatement('''
+                    INSERT INTO formas_pagamento_table (id, tenant_id, nome, tipo, ordem, ativo, permite_troco, is_uso_interno, movimenta_financeiro, movimenta_estoque, created_at, updated_at, sync_version, sync_status)
+                    VALUES
+                      (lower(hex(randomblob(16))), '$tId', 'Dinheiro', 'dinheiro', 1, 1, 1, 0, 1, 1, '$now', '$now', 1, 'pending'),
+                      (lower(hex(randomblob(16))), '$tId', 'PIX', 'pix', 2, 1, 0, 0, 1, 1, '$now', '$now', 1, 'pending'),
+                      (lower(hex(randomblob(16))), '$tId', 'Cartão de Crédito', 'cartaoCredito', 3, 1, 0, 0, 1, 1, '$now', '$now', 1, 'pending'),
+                      (lower(hex(randomblob(16))), '$tId', 'Cartão de Débito', 'cartaoDebito', 4, 1, 0, 0, 1, 1, '$now', '$now', 1, 'pending'),
+                      (lower(hex(randomblob(16))), '$tId', 'Consumo / Uso Interno', 'consumoInterno', 5, 1, 0, 1, 0, 1, '$now', '$now', 1, 'pending')
+                  ''');
+                }
+              }
+            } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 026: ✔ OK');
+          }
+          if (from < 27) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 027: Adicionando bandeira e nsu_transacao a lancamentos_financeiros_table...');
+            try { await customStatement('ALTER TABLE lancamentos_financeiros_table ADD COLUMN bandeira TEXT'); } catch (_) {}
+            try { await customStatement('ALTER TABLE lancamentos_financeiros_table ADD COLUMN nsu_transacao TEXT'); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 027: ✔ OK');
+          }
+          if (from < 28) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 028: Adicionando pix_chave, pix_tipo_chave e pix_tipo_banco a formas_pagamento_table...');
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN pix_chave TEXT'); } catch (_) {}
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN pix_tipo_chave TEXT'); } catch (_) {}
+            try { await customStatement('ALTER TABLE formas_pagamento_table ADD COLUMN pix_tipo_banco TEXT'); } catch (_) {}
+
+            // Normaliza tipos legados em maiúsculas ('DINHEIRO' -> 'dinheiro', 'PIX' -> 'pix', etc)
+            try {
+              await customStatement("UPDATE formas_pagamento_table SET tipo = 'dinheiro' WHERE lower(tipo) = 'dinheiro'");
+              await customStatement("UPDATE formas_pagamento_table SET tipo = 'pix' WHERE lower(tipo) = 'pix'");
+              await customStatement("UPDATE formas_pagamento_table SET tipo = 'cartaoCredito' WHERE lower(tipo) = 'cartaocredito' OR lower(tipo) = 'cartao_credito'");
+              await customStatement("UPDATE formas_pagamento_table SET tipo = 'cartaoDebito' WHERE lower(tipo) = 'cartaodebito' OR lower(tipo) = 'cartao_debito'");
+              await customStatement("UPDATE formas_pagamento_table SET tipo = 'consumoInterno' WHERE lower(tipo) = 'consumointerno' OR lower(tipo) = 'consumo_interno'");
+            } catch (_) {}
+
+            LogService.instance.info(LogModule.migration, 'Migration 028: ✔ OK');
+          }
+          if (from < 29) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 029: Adicionando valor_taxa_servico_centavos a pedidos_table...');
+            try { await customStatement('ALTER TABLE pedidos_table ADD COLUMN valor_taxa_servico_centavos INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 029: ✔ OK');
+          }
           LogService.instance.info(LogModule.migration, 'Atualização de schema concluída com sucesso (v$to)');
         },
         beforeOpen: (details) async {
@@ -333,6 +402,13 @@ class FincoreDatabase extends _$FincoreDatabase {
             await customStatement('UPDATE empresa_configuracao_table SET cliente_obrigatorio_venda = 0 WHERE cliente_obrigatorio_venda IS NULL');
             await customStatement("UPDATE empresa_configuracao_table SET atendimento_padrao = 'Delivery' WHERE atendimento_padrao IS NULL");
             await customStatement('UPDATE empresa_configuracao_table SET margem_seguranca_minutos = 10 WHERE margem_seguranca_minutos IS NULL');
+
+            await customStatement('UPDATE empresa_configuracao_table SET intervalo_alerta_pendentes_segundos = 60 WHERE intervalo_alerta_pendentes_segundos IS NULL');
+            await customStatement('UPDATE empresa_configuracao_table SET janela_projecao_estoque_dias = 14 WHERE janela_projecao_estoque_dias IS NULL');
+            await customStatement('UPDATE pedidos_table SET is_uso_interno = 0 WHERE is_uso_interno IS NULL');
+            await customStatement('UPDATE formas_pagamento_table SET is_uso_interno = 0 WHERE is_uso_interno IS NULL');
+            await customStatement('UPDATE formas_pagamento_table SET movimenta_financeiro = 1 WHERE movimenta_financeiro IS NULL');
+            await customStatement('UPDATE formas_pagamento_table SET movimenta_estoque = 1 WHERE movimenta_estoque IS NULL');
           } catch (_) {}
 
           try {

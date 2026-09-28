@@ -33,23 +33,33 @@ class _PixPaymentModalState extends State<PixPaymentModal> {
 
   Future<void> _loadPixConfig() async {
     final config = await FincoreImpressaoConfig.carregar();
+    final selectedForma = widget.controller.selectedFormaPagamento;
     final valorReais = widget.controller.totalInCents / 100.0;
 
+    final chavePix = (selectedForma?.pixChave != null && selectedForma!.pixChave!.isNotEmpty)
+        ? selectedForma.pixChave!
+        : config.pixChave;
+    final tipoPix = (selectedForma?.pixTipoChave != null && selectedForma!.pixTipoChave!.isNotEmpty)
+        ? selectedForma.pixTipoChave!
+        : config.pixTipo;
+    final favorecido = config.pixFavorecido.isNotEmpty ? config.pixFavorecido : (selectedForma?.pixTipoBanco ?? 'Estabelecimento');
+
     String copiaCola = '';
-    if (config.pixChave.isNotEmpty) {
+    if (chavePix.isNotEmpty) {
       copiaCola = PixGenerator.gerarCopiaCola(
-        chave: config.pixChave,
-        favorecido: config.pixFavorecido.isNotEmpty ? config.pixFavorecido : 'Estabelecimento',
+        chave: chavePix,
+        favorecido: favorecido,
         cidade: 'Sorocaba',
         valor: valorReais,
+        tipoChave: tipoPix,
       );
     }
 
     if (mounted) {
       setState(() {
         _loading = false;
-        _pixChave = config.pixChave;
-        _pixTipo = config.pixTipo;
+        _pixChave = chavePix;
+        _pixTipo = tipoPix;
         _pixFavorecido = config.pixFavorecido;
         _pixCopiaCola = copiaCola;
       });

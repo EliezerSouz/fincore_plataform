@@ -214,6 +214,7 @@ class FincoreThermalPrinterService {
           cidade: 'Sorocaba',
           valor: valorPix,
           mensagem: 'Salgaderia',
+          tipoChave: pixTipo,
         );
 
         sb.write('\x1D(k\x04\x001A2\x00'); // Modelo 2

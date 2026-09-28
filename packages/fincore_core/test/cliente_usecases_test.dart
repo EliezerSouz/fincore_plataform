@@ -233,5 +233,29 @@ void main() {
       expect(porEmail.length, equals(1));
       expect(porEmail.first.nome, equals('Julio Cesar'));
     });
+
+    test('Deve impedir cadastro duplicado de telefone com 8 e 9 dígitos', () async {
+      // Cadastra primeiro cliente com telefone (35) 9 9250-3114 (11 dígitos)
+      await criarUseCase.execute(
+        input: const ClienteInput(
+          nome: 'João Paulo',
+          apelido: 'Memac',
+          telefone: '(35) 9 9250-3114',
+        ),
+        operadorId: 'op-01',
+      );
+
+      // Tenta cadastrar segundo cliente com telefone (35) 9250-3114 (10 dígitos sem o 9º)
+      expect(
+        () => criarUseCase.execute(
+          input: const ClienteInput(
+            nome: 'Outro João Paulo',
+            telefone: '(35) 9250-3114',
+          ),
+          operadorId: 'op-01',
+        ),
+        throwsA(isA<ClienteDomainException>()),
+      );
+    });
   });
 }

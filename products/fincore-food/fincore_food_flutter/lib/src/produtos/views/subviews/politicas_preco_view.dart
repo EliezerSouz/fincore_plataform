@@ -1349,31 +1349,63 @@ class _PoliticasPrecoViewState extends State<PoliticasPrecoView> with SingleTick
             _buildInspectorSectionTitle('Faixas de Preço (v$_versaoAtual)'),
             if (_tempFaixas.isEmpty)
               const Text('Nenhuma faixa de preço definida.', style: TextStyle(fontSize: 12, color: FincoreColors.textMuted))
-            else
-              Table(
-                columnWidths: const {
-                  0: FlexColumnWidth(3),
-                  1: FlexColumnWidth(3),
-                  2: FlexColumnWidth(4),
-                },
-                children: [
-                  const TableRow(
+            else ...[
+              Builder(
+                builder: (context) {
+                  final baseCentavos = _tempFaixas.isNotEmpty ? _tempFaixas.first.valorCentavos : 0;
+                  return Table(
+                    columnWidths: const {
+                      0: FlexColumnWidth(2.5),
+                      1: FlexColumnWidth(2.5),
+                      2: FlexColumnWidth(3.0),
+                      3: FlexColumnWidth(2.5),
+                    },
                     children: [
-                      Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Qtd Mínima', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Qtd Máxima', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Valor Unitário', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                    ],
-                  ),
-                  for (final f in _tempFaixas)
-                    TableRow(
-                      children: [
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text('${f.minima} un', style: const TextStyle(fontSize: 12, color: FincoreColors.textPrimary))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(f.maxima == null || f.maxima! >= 9999 ? '∞' : '${f.maxima} un', style: const TextStyle(fontSize: 12, color: FincoreColors.textPrimary))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text('R\$ ${(f.valorCentavos / 100).toStringAsFixed(2)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.primary))),
+                      const TableRow(
+                        children: [
+                          Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Qtd Mínima', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Qtd Máxima', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Valor Unitário', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('Desconto', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        ],
+                      ),
+                      for (int i = 0; i < _tempFaixas.length; i++) ...[
+                        () {
+                          final f = _tempFaixas[i];
+                          final discountPct = baseCentavos > 0 && f.valorCentavos < baseCentavos
+                              ? (((baseCentavos - f.valorCentavos) / baseCentavos) * 100).round()
+                              : 0;
+
+                          return TableRow(
+                            children: [
+                              Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text('${f.minima} un', style: const TextStyle(fontSize: 12, color: FincoreColors.textPrimary))),
+                              Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(f.maxima == null || f.maxima! >= 9999 ? '∞' : '${f.maxima} un', style: const TextStyle(fontSize: 12, color: FincoreColors.textPrimary))),
+                              Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text('R\$ ${(f.valorCentavos / 100).toStringAsFixed(2)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.primary))),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                child: discountPct > 0
+                                    ? Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: FincoreColors.success.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          '$discountPct% OFF',
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.success),
+                                        ),
+                                      )
+                                    : Text(i == 0 ? 'Base' : '-', style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted)),
+                              ),
+                            ],
+                          );
+                        }(),
                       ],
-                    ),
-                ],
+                    ],
+                  );
+                },
               ),
+            ],
 
             const SizedBox(height: 16),
             const Divider(color: FincoreColors.border),
@@ -1656,6 +1688,10 @@ class _PoliticasPrecoViewState extends State<PoliticasPrecoView> with SingleTick
           final fx = _tempFaixas[idx];
           final text = fx.maxima == null || fx.maxima! >= 9999 ? 'ou mais' : 'até ${fx.maxima}';
           final precoFormatado = (fx.valorCentavos / 100).toStringAsFixed(2);
+          final baseCentavos = _tempFaixas.isNotEmpty ? _tempFaixas.first.valorCentavos : 0;
+          final discountPct = baseCentavos > 0 && fx.valorCentavos < baseCentavos
+              ? (((baseCentavos - fx.valorCentavos) / baseCentavos) * 100).round()
+              : 0;
 
           return Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1667,6 +1703,33 @@ class _PoliticasPrecoViewState extends State<PoliticasPrecoView> with SingleTick
                 Expanded(
                   child: Text('De ${fx.minima} $text un', style: const TextStyle(fontSize: 12, color: FincoreColors.textPrimary, fontWeight: FontWeight.w600)),
                 ),
+                if (discountPct > 0) ...[
+                  Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.success.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '$discountPct% OFF',
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.success),
+                    ),
+                  ),
+                ] else if (idx == 0) ...[
+                  Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.border,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'Base',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: FincoreColors.textMuted),
+                    ),
+                  ),
+                ],
                 Text('R\$ $precoFormatado / un', style: TextStyle(fontSize: 12, color: FincoreColors.primary, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
                 IconButton(

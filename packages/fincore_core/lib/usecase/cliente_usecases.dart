@@ -16,6 +16,7 @@ class ClienteDomainException implements Exception {
 class ClienteInput {
   final String nome;
   final String telefone;
+  final String? apelido;
   final String? email;
   final String? documento;
   final String observacoes;
@@ -23,6 +24,7 @@ class ClienteInput {
   const ClienteInput({
     required this.nome,
     required this.telefone,
+    this.apelido,
     this.email,
     this.documento,
     this.observacoes = '',
@@ -55,6 +57,12 @@ class CriarClienteUseCase {
   }) async {
     input.validate();
 
+    final telNorm = normalizarTelefone(input.telefone);
+    final existenteTel = await _repository.findByTelefone(telNorm);
+    if (existenteTel != null) {
+      throw ClienteDomainException('Já existe um cliente cadastrado com este telefone (${formatarTelefone(telNorm)}: ${existenteTel.nomeExibicao}).');
+    }
+
     final activeTenant = _repository.activeTenantId;
     final now = DateTime.now();
 
@@ -62,7 +70,8 @@ class CriarClienteUseCase {
       id: _uuid.v4(),
       tenantId: activeTenant,
       nome: input.nome.trim(),
-      telefone: input.telefone.trim(),
+      apelido: input.apelido?.trim().isEmpty == true ? null : input.apelido?.trim(),
+      telefone: telNorm.isNotEmpty ? telNorm : input.telefone.trim(),
       email: input.email?.trim(),
       documento: input.documento?.trim(),
       observacoes: input.observacoes.trim(),
@@ -101,10 +110,17 @@ class EditarClienteUseCase {
       throw ClienteDomainException('Cliente $clienteId não foi encontrado.');
     }
 
+    final telNorm = normalizarTelefone(input.telefone);
+    final existenteTel = await _repository.findByTelefone(telNorm, excludeId: clienteId);
+    if (existenteTel != null) {
+      throw ClienteDomainException('Já existe outro cliente cadastrado com este telefone (${formatarTelefone(telNorm)}: ${existenteTel.nomeExibicao}).');
+    }
+
     final now = DateTime.now();
     final atualizado = existente.copyWith(
       nome: input.nome.trim(),
-      telefone: input.telefone.trim(),
+      apelido: () => input.apelido?.trim().isEmpty == true ? null : input.apelido?.trim(),
+      telefone: telNorm.isNotEmpty ? telNorm : input.telefone.trim(),
       email: () => input.email?.trim(),
       documento: () => input.documento?.trim(),
       observacoes: input.observacoes.trim(),
@@ -121,7 +137,7 @@ class EditarClienteUseCase {
   }
 }
 
-/// Caso de Uso: [CU-V06] Excluir Cliente (Soft Delete Lógico)
+/// Caso de Uso: [CU-V06] Excluir Cliente (Soft Delete Lógico com Validação de Integridade)
 class ExcluirClienteUseCase {
   final ClienteRepository _repository;
 
@@ -135,6 +151,13 @@ class ExcluirClienteUseCase {
     final existente = await _repository.findById(clienteId);
     if (existente == null || existente.metadata.deletedAt != null) {
       throw ClienteDomainException('Cliente $clienteId não foi encontrado para exclusão.');
+    }
+
+    final totalPedidos = await _repository.countPedidosByClienteId(clienteId);
+    if (totalPedidos > 0) {
+      throw ClienteDomainException(
+        'Não é possível excluir o cliente "${existente.nomeExibicao}" pois existem $totalPedidos pedido(s) vinculados ao seu histórico.',
+      );
     }
 
     await _repository.delete(clienteId);

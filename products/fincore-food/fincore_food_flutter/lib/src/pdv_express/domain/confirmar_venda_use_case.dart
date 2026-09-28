@@ -39,6 +39,8 @@ class ConfirmarVendaInput {
   final String operadorNome;
   final String? observacao;
   final bool movimentarEstoque;
+  final bool isUsoInterno;
+  final bool isRetroativo;
 
   const ConfirmarVendaInput({
     required this.pedido,
@@ -55,6 +57,8 @@ class ConfirmarVendaInput {
     required this.operadorNome,
     this.observacao,
     this.movimentarEstoque = true,
+    this.isUsoInterno = false,
+    this.isRetroativo = false,
   });
 }
 
@@ -191,17 +195,31 @@ class ConfirmarVendaUseCase {
             .go();
       }
 
+      String? cleanClienteId = input.pedido.clienteId;
+      if (cleanClienteId != null) {
+        final isUuid = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(cleanClienteId);
+        if (!isUuid) {
+          cleanClienteId = null;
+        }
+      }
+
+      final pedidoStatus = input.isRetroativo ? 'entregue' : 'confirmado';
+      final kdsStatus = input.isRetroativo ? 'entregue' : 'pendente';
+      final kdsTitulo = input.isRetroativo ? 'Pedido finalizado (Retroativo)' : histTitle;
+      final kdsDescricao = input.isRetroativo ? 'Registrado retroativamente com status entregue.' : histDesc;
+
       await _db.into(_db.pedidosTable).insertOnConflictUpdate(
         PedidosTableCompanion.insert(
           id: pedidoId,
           tenantId: activeTenant,
-          status: const Value('confirmado'),
+          status: Value(pedidoStatus),
           tipoLogistica: input.pedido.tipoLogistica,
-          clienteId: Value(input.pedido.clienteId),
+          clienteId: Value(cleanClienteId),
           clienteNomeAvulso: Value(input.clienteNome),
           clienteTelefoneAvulso: Value(input.clienteTelefone),
           valorSubtotalCentavos: input.pedido.valorSubtotalCentavos,
           valorTaxaEntregaCentavos: Value(input.pedido.valorTaxaEntregaCentavos),
+          valorTaxaServicoCentavos: Value(input.pedido.valorTaxaServicoCentavos),
           valorTotalCentavos: input.pedido.valorTotalCentavos,
           trocoParaCentavos: Value(input.pedido.trocoParaCentavos),
           observacoes: Value(input.pedido.observacoes),
@@ -213,6 +231,7 @@ class ConfirmarVendaUseCase {
           dataHoraCriacao: input.pedido.dataHoraCriacao.toUtc(),
           canalOrigem: const Value('pdv_express'),
           dataHoraEntregaPrevista: Value(input.dataEntregaPrevista?.toUtc()),
+          isUsoInterno: Value(input.isUsoInterno),
           syncVersion: const Value(1),
           syncStatus: SyncStatus.pending,
           createdAt: now,
@@ -284,7 +303,8 @@ class ConfirmarVendaUseCase {
           'total: ${input.pedido.valorTotalCentavos}'
           '$enderecoLine'
           '$bairroLine'
-          '$agendadoStr\n'
+          '$agendadoStr'
+          '$obsLine\n'
           '[/DADOS_PEDIDO]';
 
       await _db.into(_db.ordensPreparoTable).insertOnConflictUpdate(
@@ -293,10 +313,11 @@ class ConfirmarVendaUseCase {
           tenantId: activeTenant,
           pedidoId: pedidoId,
           itensJson: kdsItensJson,
-          status: 'pendente',
+          status: kdsStatus,
           prioridade: input.dataEntregaPrevista != null ? 'programado' : 'normal',
           operadorId: Value(activeUser),
           criadaEm: input.pedido.dataHoraCriacao.toLocal(),
+          concluidaEm: Value(input.isRetroativo ? now.toLocal() : null),
           observacoes: Value(observacoesKDS),
           syncVersion: const Value(1),
           syncStatus: SyncStatus.pending,
@@ -313,8 +334,8 @@ class ConfirmarVendaUseCase {
           id: historicoId,
           tenantId: activeTenant,
           ordemPreparoId: ordemPreparoId,
-          titulo: histTitle,
-          descricao: histDesc,
+          titulo: kdsTitulo,
+          descricao: kdsDescricao,
           operadorNome: Value(input.operadorNome),
           criadaEm: now.toLocal(),
           syncVersion: const Value(1),
@@ -340,7 +361,7 @@ class ConfirmarVendaUseCase {
           final pId = mov.produtoId;
           final tipo = mov.tipo;
           final qtd = mov.quantidade;
-          final mot = mov.motivo ?? '';
+          final mot = mov.motivo;
 
           if (tipo == 'saida') {
             saldoFisicoPorProduto[pId] = (saldoFisicoPorProduto[pId] ?? 0) + qtd;
@@ -430,9 +451,34 @@ class ConfirmarVendaUseCase {
             );
           }
         }
+      } else {
+        // Grava movimentações isentas como marcadores para que o reconciliador de estoque NUNCA baixe
+        for (final item in input.itens) {
+          await _db.into(_db.movimentacoesEstoqueTable).insert(
+            MovimentacoesEstoqueTableCompanion.insert(
+              id: _uuid.v4(),
+              tenantId: activeTenant,
+              produtoId: item.produtoId,
+              pedidoId: Value(pedidoId),
+              tipo: 'isento',
+              quantidade: 0,
+              quantidadeAntes: 0,
+              quantidadeDepois: 0,
+              motivo: Value('Isento de movimentação de estoque — Pedido #${proxNumero.toString().padLeft(4, '0')}'),
+              operadorId: Value(activeUser),
+              dataHora: input.pedido.dataHoraCriacao.toLocal(),
+              syncVersion: const Value(1),
+              syncStatus: SyncStatus.pending,
+              createdAt: now,
+              updatedAt: now,
+              createdBy: activeUser,
+              updatedBy: activeUser,
+            ),
+          );
+        }
       }
 
-      // ── 7. Lançamento financeiro (se houver sessão de caixa ativa) ──────
+      // ── 7. Lançamento financeiro (se houver sessão de caixa ativa e não for uso interno) ──────
       lancamentoId = await _criarLancamentoFinanceiro(
         activeTenant: activeTenant,
         activeUser: activeUser,
@@ -442,6 +488,7 @@ class ConfirmarVendaUseCase {
         formaPagamentoId: input.pedido.formaPagamentoId,
         paymentMethod: input.paymentMethod,
         dataHora: input.pedido.dataHoraCriacao.toLocal(),
+        isUsoInterno: input.isUsoInterno,
       );
 
       // ── 8. Outbox — pedido ──────────────────────────────────────────────
@@ -453,18 +500,20 @@ class ConfirmarVendaUseCase {
         payload: {
           'id': pedidoId,
           'tenantId': activeTenant,
-          'clienteId': input.pedido.clienteId,
+          'clienteId': cleanClienteId,
           'clienteNomeAvulso': input.clienteNome,
           'clienteTelefoneAvulso': input.clienteTelefone,
           'tipoLogistica': input.pedido.tipoLogistica,
           'valorSubtotalCentavos': input.pedido.valorSubtotalCentavos,
           'valorTaxaEntregaCentavos': input.pedido.valorTaxaEntregaCentavos,
+          'valorTaxaServicoCentavos': input.pedido.valorTaxaServicoCentavos,
           'valorTotalCentavos': input.pedido.valorTotalCentavos,
           'formaPagamentoId': input.pedido.formaPagamentoId,
           'formaPagamentoNome': input.paymentMethod,
           'trocoParaCentavos': input.pedido.trocoParaCentavos,
           'observacoes': input.pedido.observacoes,
-          'status': 'confirmado',
+          'isUsoInterno': input.isUsoInterno,
+          'status': pedidoStatus,
           'canalOrigem': 'pdv_express',
           'operadorId': activeUser,
           'dataHoraCriacao': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
@@ -528,10 +577,11 @@ class ConfirmarVendaUseCase {
           'tenantId': activeTenant,
           'pedidoId': pedidoId,
           'itensJson': kdsItensJson,
-          'status': 'pendente',
+          'status': kdsStatus,
           'prioridade': input.isEntregaAgendada ? 'programado' : 'normal',
           'operadorId': activeUser,
           'criadaEm': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
+          if (input.isRetroativo) 'concluidaEm': now.toIso8601String(),
           'tempoEstimadoSegundos': 0,
           'observacoes': observacoesKDS,
           'syncVersion': 1,
@@ -551,8 +601,8 @@ class ConfirmarVendaUseCase {
           'id': historicoId,
           'tenantId': activeTenant,
           'ordemPreparoId': ordemPreparoId,
-          'titulo': histTitle,
-          'descricao': histDesc,
+          'titulo': kdsTitulo,
+          'descricao': kdsDescricao,
           'operadorNome': input.operadorNome,
           'criadaEm': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
           'versao': 'v1',
@@ -644,7 +694,66 @@ class ConfirmarVendaUseCase {
     required String? formaPagamentoId,
     required String paymentMethod,
     required DateTime dataHora,
+    required bool isUsoInterno,
   }) async {
+    // Se for uso interno, consumo próprio ou cortesia, não gera movimentação financeira
+    if (isUsoInterno) return null;
+
+    final lowerMethod = paymentMethod.toLowerCase();
+    if (lowerMethod.contains('consumo') || lowerMethod.contains('cortesia') || lowerMethod.contains('bonifica') || lowerMethod.contains('interno')) {
+      return null;
+    }
+
+    String? bandeiraPadrao;
+    if (formaPagamentoId != null) {
+      final formaRow = await (_db.select(_db.formasPagamentoTable)
+            ..where((t) => t.id.equals(formaPagamentoId) & t.tenantId.equals(activeTenant)))
+          .getSingleOrNull();
+      if (formaRow != null) {
+        final rowNomeLower = formaRow.nome.toLowerCase();
+        if (!formaRow.movimentaFinanceiro ||
+            formaRow.isUsoInterno ||
+            formaRow.tipo == 'consumo_interno' ||
+            formaRow.tipo == 'consumo' ||
+            rowNomeLower.contains('consumo') ||
+            rowNomeLower.contains('cortesia') ||
+            rowNomeLower.contains('bonifica')) {
+          return null;
+        }
+
+        // Venda a Prazo / Faturado / Cartão (Débito e Crédito): não entram no caixa imediato;
+        // serão liquidados/quitados via Contas a Receber da Adquirente / Cliente
+        final isCartaoOuPrazo = formaRow.tipo == 'notaPrazo' ||
+            formaRow.tipo == 'cartaoCredito' ||
+            formaRow.tipo == 'cartaoDebito' ||
+            formaRow.tipo == 'cartao' ||
+            rowNomeLower.contains('prazo') ||
+            rowNomeLower.contains('faturad') ||
+            rowNomeLower.contains('cart') ||
+            rowNomeLower.contains('créd') ||
+            rowNomeLower.contains('cred') ||
+            rowNomeLower.contains('déb') ||
+            rowNomeLower.contains('deb');
+
+        if (isCartaoOuPrazo) {
+          return null;
+        }
+
+        bandeiraPadrao = formaRow.bandeiraPadrao;
+      }
+    }
+
+    // Se o método de pagamento textual indicar a prazo ou cartão
+    if (lowerMethod.contains('prazo') ||
+        lowerMethod.contains('faturad') ||
+        lowerMethod.contains('cart') ||
+        lowerMethod.contains('créd') ||
+        lowerMethod.contains('cred') ||
+        lowerMethod.contains('déb') ||
+        lowerMethod.contains('deb')) {
+      return null;
+    }
+
     final sessao = await (_db.select(_db.sessoesCaixaTable)
           ..where((t) =>
               t.tenantId.equals(activeTenant) &
@@ -669,6 +778,7 @@ class ConfirmarVendaUseCase {
         descricao: Value('Venda PDV #${proxNumero.toString().padLeft(4, '0')}'),
         operadorId: Value(activeUser),
         dataHora: dataHora,
+        bandeira: Value(bandeiraPadrao),
         syncVersion: const Value(1),
         syncStatus: SyncStatus.pending,
         createdAt: DateTime.now().toUtc(),

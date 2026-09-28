@@ -2506,7 +2506,7 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
                     // CARD 3 — PREPARAÇÃO NA COZINHA & TEMPOS (SLA)
                     // ══════════════════════════════════════════════════════
                     _buildFormCard(
-                      label: 'Preparação na Cozinha & Tempos (SLA)',
+                      label: 'Preparação na Cozinha & Tempos de Entrega',
                       icon: Icons.restaurant_outlined,
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,

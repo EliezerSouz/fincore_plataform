@@ -198,7 +198,7 @@ class LogEvent {
         createdAt = (createdAt ?? DateTime.now()).toUtc();
 
   static String _generateTraceId() {
-    final now = DateTime.now();
+    final now = DateTime.now().toLocal();
     final y = now.year.toString();
     final m = now.month.toString().padLeft(2, '0');
     final d = now.day.toString().padLeft(2, '0');

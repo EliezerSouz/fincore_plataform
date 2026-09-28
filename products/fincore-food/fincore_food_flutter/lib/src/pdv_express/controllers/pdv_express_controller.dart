@@ -24,10 +24,6 @@ import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_pricing/pricing_engine.dart';
 import '../models/pricing_result.dart';
 import '../../cap/printing/print_capability.dart';
-import 'package:fincore_core/common/core_models.dart';
-import 'package:fincore_pricing/pricing_engine.dart';
-import '../models/pricing_result.dart';
-import '../../cap/printing/print_capability.dart';
 
 import 'package:fincore_pricing/repository/tabela_precificacao_repository.dart';
 import 'package:fincore_pricing/repository/item_tabela_precificacao_repository.dart';
@@ -60,15 +56,33 @@ class JustificativaRetroativoResult {
   });
 }
 
+/// Estrutura completa de saldos de estoque (Físico, Reservado, Produção Planejada, Saldo Projetado)
+class StockInfo {
+  final double fisico;
+  final double reservado;
+  final double producaoPlanejada;
+
+  const StockInfo({
+    this.fisico = 0,
+    this.reservado = 0,
+    this.producaoPlanejada = 0,
+  });
+
+  double get disponivel => fisico - reservado;
+  double get projetado => disponivel + producaoPlanejada;
+}
+
 class DadosCliente {
   final String? id;
   final String? nome;
+  final String? apelido;
   final String? telefone;
   final String? apelidoEndereco;
 
   const DadosCliente({
     this.id,
     this.nome,
+    this.apelido,
     this.telefone,
     this.apelidoEndereco,
   });
@@ -76,15 +90,26 @@ class DadosCliente {
   DadosCliente copyWith({
     String? id,
     String? nome,
+    String? apelido,
     String? telefone,
     String? apelidoEndereco,
   }) {
     return DadosCliente(
       id: id ?? this.id,
       nome: nome ?? this.nome,
+      apelido: apelido ?? this.apelido,
       telefone: telefone ?? this.telefone,
       apelidoEndereco: apelidoEndereco ?? this.apelidoEndereco,
     );
+  }
+
+  /// Retorna o nome formatado com o apelido, ex: "João Paulo (Memac)"
+  String? get nomeExibicao {
+    if (nome == null) return null;
+    if (apelido != null && apelido!.trim().isNotEmpty) {
+      return '$nome (${apelido!.trim()})';
+    }
+    return nome;
   }
 
   bool get isEmpty => (nome == null || nome!.isEmpty) && (telefone == null || telefone!.isEmpty);
@@ -99,6 +124,7 @@ class DadosEntrega {
   final String cidade;
   final String cep;
   final int taxaEntregaCentavos;
+  final int taxaServicoCentavos;
   final int? trocoParaCentavos;
   final String prioridade; // 'Normal', 'Entrega Programada', 'Urgente', 'VIP'
   final String observacoes;
@@ -117,6 +143,7 @@ class DadosEntrega {
     this.cidade = '', // HC-001: Carregado da EmpresaConfiguracao no loadCatalog()
     this.cep = '',
     this.taxaEntregaCentavos = 0,
+    this.taxaServicoCentavos = 0,
     this.trocoParaCentavos,
     this.prioridade = 'Normal',
     this.observacoes = '',
@@ -136,6 +163,7 @@ class DadosEntrega {
     String? cidade,
     String? cep,
     int? taxaEntregaCentavos,
+    int? taxaServicoCentavos,
     int? Function()? trocoParaCentavos,
     String? prioridade,
     String? observacoes,
@@ -154,6 +182,7 @@ class DadosEntrega {
       cidade: cidade ?? this.cidade,
       cep: cep ?? this.cep,
       taxaEntregaCentavos: taxaEntregaCentavos ?? this.taxaEntregaCentavos,
+      taxaServicoCentavos: taxaServicoCentavos ?? this.taxaServicoCentavos,
       trocoParaCentavos: trocoParaCentavos != null ? trocoParaCentavos() : this.trocoParaCentavos,
       prioridade: prioridade ?? this.prioridade,
       observacoes: observacoes ?? this.observacoes,
@@ -223,8 +252,23 @@ class PdvExpressController extends ChangeNotifier {
   final List<PdvItem> _cart = [];
   List<PdvItem> get cart => List.unmodifiable(_cart);
 
+  List<FormaPagamento> _formasPagamento = [];
+  List<FormaPagamento> get formasPagamento => _formasPagamento;
+
+  FormaPagamento? _selectedFormaPagamento;
+  FormaPagamento? get selectedFormaPagamento => _selectedFormaPagamento;
+
   String _paymentMethod = 'Dinheiro';
-  String get paymentMethod => _paymentMethod;
+  String get paymentMethod => _selectedFormaPagamento?.nome ?? _paymentMethod;
+
+  Map<String, double> _estoqueMap = {};
+  Map<String, double> get estoqueMap => _estoqueMap;
+
+  Map<String, StockInfo> _stockDetailsMap = {};
+  Map<String, StockInfo> get stockDetailsMap => _stockDetailsMap;
+
+  bool _autoPrintOnFinalize = false;
+  bool get autoPrintOnFinalize => _autoPrintOnFinalize;
 
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
@@ -244,9 +288,13 @@ class PdvExpressController extends ChangeNotifier {
 
   final OrdemPreparo? ordemParaEditar;
   final String? repetirPedidoId;
+  final Cliente? clienteInicial;
 
-  PdvExpressController({this.ordemParaEditar, this.repetirPedidoId})
-      : produtoRepo = DependencyInjection().get<ProdutoRepository>(),
+  PdvExpressController({
+    this.ordemParaEditar,
+    this.repetirPedidoId,
+    this.clienteInicial,
+  })  : produtoRepo = DependencyInjection().get<ProdutoRepository>(),
         categoriaRepo = DependencyInjection().get<CategoriaRepository>(),
         clienteRepo = DependencyInjection().get<ClienteRepository>(),
         localRepo = DependencyInjection().get<LocalEntregaRepository>(),
@@ -267,6 +315,7 @@ class PdvExpressController extends ChangeNotifier {
   PdvExpressController.custom({
     this.ordemParaEditar,
     this.repetirPedidoId,
+    this.clienteInicial,
     required this.produtoRepo,
     required this.categoriaRepo,
     required this.clienteRepo,
@@ -289,9 +338,46 @@ class PdvExpressController extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
-      _products = await produtoRepo.findAll();
+      _products = await produtoRepo.findAtivos();
       _categories = await categoriaRepo.findAll();
       _clientes = await clienteRepo.findAll();
+
+      try {
+        final estoques = await db.select(db.estoqueProdutosTable).get();
+        final planejamentos = await (db.select(db.planejamentoProducaoTable)
+              ..where((t) => t.status.isNotIn(['concluida', 'cancelada'])))
+            .get();
+
+        final Map<String, double> producaoMap = {};
+        for (var p in planejamentos) {
+          final pid = p.produtoId;
+          final qtd = p.quantidadePlanejada.toDouble();
+          producaoMap[pid] = (producaoMap[pid] ?? 0) + qtd;
+        }
+
+        final Map<String, StockInfo> stockDetails = {};
+        final Map<String, double> estMap = {};
+
+        for (var e in estoques) {
+          final pid = e.produtoId;
+          final fis = e.quantidadeAtual.toDouble();
+          final res = e.quantidadeReservada.toDouble();
+          final prod = producaoMap[pid] ?? 0.0;
+
+          final info = StockInfo(
+            fisico: fis,
+            reservado: res,
+            producaoPlanejada: prod,
+          );
+          stockDetails[pid] = info;
+          estMap[pid] = info.projetado;
+        }
+
+        _stockDetailsMap = stockDetails;
+        _estoqueMap = estMap;
+      } catch (e) {
+        debugPrint('[loadCatalog] Erro ao carregar estoques: $e');
+      }
 
       // Garantir formas de pagamento padrão se a tabela estiver vazia
       final formas = await pagamentoRepo.findAll();
@@ -307,7 +393,7 @@ class PdvExpressController extends ChangeNotifier {
           'id': dineroId,
           'tenantId': activeTenant,
           'nome': 'Dinheiro',
-          'tipo': 'DINHEIRO',
+          'tipo': TipoFormaPagamento.dinheiro.name,
           'ordem': 1,
           'ativo': true,
           'permiteTroco': true,
@@ -320,8 +406,8 @@ class PdvExpressController extends ChangeNotifier {
         final pixPayload = {
           'id': pixId,
           'tenantId': activeTenant,
-          'nome': 'Pix',
-          'tipo': 'PIX',
+          'nome': 'PIX',
+          'tipo': TipoFormaPagamento.pix.name,
           'ordem': 2,
           'ativo': true,
           'permiteTroco': false,
@@ -338,7 +424,7 @@ class PdvExpressController extends ChangeNotifier {
               id: dineroId,
               tenantId: activeTenant,
               nome: 'Dinheiro',
-              tipo: 'DINHEIRO',
+              tipo: TipoFormaPagamento.dinheiro.name,
               ordem: 1,
               ativo: true,
               permiteTroco: true,
@@ -353,8 +439,8 @@ class PdvExpressController extends ChangeNotifier {
             FormasPagamentoTableCompanion.insert(
               id: pixId,
               tenantId: activeTenant,
-              nome: 'Pix',
-              tipo: 'PIX',
+              nome: 'PIX',
+              tipo: TipoFormaPagamento.pix.name,
               ordem: 2,
               ativo: true,
               permiteTroco: false,
@@ -387,6 +473,16 @@ class PdvExpressController extends ChangeNotifier {
             createdAt: DateTime.now(),
           ));
         });
+      }
+
+      final todasFormas = await pagamentoRepo.findAll();
+      _formasPagamento = todasFormas.where((f) => f.ativo).toList();
+      _formasPagamento.sort((a, b) => a.ordem.compareTo(b.ordem));
+
+      if (_selectedFormaPagamento == null && _formasPagamento.isNotEmpty) {
+        final defaultDinheiro = _formasPagamento.where((f) => f.tipo == TipoFormaPagamento.dinheiro).firstOrNull;
+        _selectedFormaPagamento = defaultDinheiro ?? _formasPagamento.first;
+        _paymentMethod = _selectedFormaPagamento!.nome;
       }
 
       final configs = await configRepo.findAll();
@@ -461,8 +557,14 @@ class PdvExpressController extends ChangeNotifier {
             );
           }
 
-          if (pedidoRow.formaPagamentoNome != null) {
+          if (pedidoRow.formaPagamentoId != null) {
+            _selectedFormaPagamento = _formasPagamento.where((f) => f.id == pedidoRow.formaPagamentoId).firstOrNull;
+          }
+          if (_selectedFormaPagamento == null && pedidoRow.formaPagamentoNome != null) {
             _paymentMethod = pedidoRow.formaPagamentoNome!;
+            _selectedFormaPagamento = _formasPagamento.where((f) => f.nome.toLowerCase() == pedidoRow.formaPagamentoNome!.toLowerCase()).firstOrNull;
+          } else if (_selectedFormaPagamento != null) {
+            _paymentMethod = _selectedFormaPagamento!.nome;
           }
 
           final itemRows = await (db.select(db.itensPedidoTable)
@@ -525,8 +627,14 @@ class PdvExpressController extends ChangeNotifier {
             );
           }
 
-          if (pedidoRow.formaPagamentoNome != null) {
+          if (pedidoRow.formaPagamentoId != null) {
+            _selectedFormaPagamento = _formasPagamento.where((f) => f.id == pedidoRow.formaPagamentoId).firstOrNull;
+          }
+          if (_selectedFormaPagamento == null && pedidoRow.formaPagamentoNome != null) {
             _paymentMethod = pedidoRow.formaPagamentoNome!;
+            _selectedFormaPagamento = _formasPagamento.where((f) => f.nome.toLowerCase() == pedidoRow.formaPagamentoNome!.toLowerCase()).firstOrNull;
+          } else if (_selectedFormaPagamento != null) {
+            _paymentMethod = _selectedFormaPagamento!.nome;
           }
 
           final itemRows = await (db.select(db.itensPedidoTable)
@@ -548,6 +656,32 @@ class PdvExpressController extends ChangeNotifier {
           _passoAtual = 1;
         }
       }
+      if (clienteInicial != null && ordemParaEditar == null && repetirPedidoId == null) {
+        final c = clienteInicial!;
+        _cliente = DadosCliente(
+          id: c.id,
+          nome: c.nome,
+          apelido: c.apelido,
+          telefone: c.telefone,
+        );
+        try {
+          final locals = await localRepo.findByClienteId(c.id);
+          if (locals.isNotEmpty) {
+            final address = locals.firstWhere((l) => l.ativo, orElse: () => locals.first);
+            final taxaCadastrada = await taxaRepo.findByBairro(address.bairro);
+            final valorCentavos = taxaCadastrada?.valorCentavos ?? 0;
+            _entrega = _entrega.copyWith(
+              logradouro: address.logradouro,
+              numero: address.numero,
+              bairro: address.bairro,
+              referencia: address.referencia,
+              cep: address.cep,
+              cidade: address.cidade.isNotEmpty ? address.cidade : _entrega.cidade,
+              taxaEntregaCentavos: valorCentavos,
+            );
+          }
+        } catch (_) {}
+      }
     } catch (e) {
       _errorMessage = 'Falha ao carregar catálogo: $e';
       _state = PdvState.error;
@@ -565,7 +699,8 @@ class PdvExpressController extends ChangeNotifier {
   int get totalInCents {
     final subtotal = _cart.fold(0, (sum, item) => sum + item.totalInCents);
     final frete = _entrega.tipo == 'Entrega' ? _entrega.taxaEntregaCentavos : 0;
-    return subtotal + frete;
+    final servico = _entrega.taxaServicoCentavos;
+    return subtotal + frete + servico;
   }
 
   void setPassoAtual(int step) {
@@ -632,8 +767,32 @@ class PdvExpressController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectFormaPagamento(FormaPagamento forma) {
+    _selectedFormaPagamento = forma;
+    _paymentMethod = forma.nome;
+    notifyListeners();
+  }
+
   void setPaymentMethod(String method) {
     _paymentMethod = method;
+    final clean = method.toLowerCase().trim();
+    final match = _formasPagamento.where((f) {
+      if (f.nome.toLowerCase() == clean) return true;
+      if (clean == 'pix' && (f.tipo == TipoFormaPagamento.pix || f.nome.toLowerCase().contains('pix'))) return true;
+      if (clean == 'dinheiro' && (f.tipo == TipoFormaPagamento.dinheiro || f.nome.toLowerCase().contains('dinheiro'))) return true;
+      if ((clean.contains('cartão') || clean.contains('cartao') || clean.contains('cart')) &&
+          (f.tipo == TipoFormaPagamento.cartaoCredito || f.tipo == TipoFormaPagamento.cartaoDebito || f.nome.toLowerCase().contains('cart'))) {
+        return true;
+      }
+      if ((clean.contains('consumo') || clean.contains('cortesia') || clean.contains('bonifica') || clean.contains('interno')) &&
+          (f.tipo == TipoFormaPagamento.consumoInterno || f.isUsoInterno || !f.movimentaFinanceiro || f.nome.toLowerCase().contains('consumo'))) {
+        return true;
+      }
+      return false;
+    }).firstOrNull;
+    if (match != null) {
+      _selectedFormaPagamento = match;
+    }
     notifyListeners();
   }
 
@@ -808,7 +967,14 @@ class PdvExpressController extends ChangeNotifier {
     _cart.clear();
     _cliente = const DadosCliente();
     _entrega = DadosEntrega();
-    _paymentMethod = 'Dinheiro';
+    if (_formasPagamento.isNotEmpty) {
+      final defaultDinheiro = _formasPagamento.where((f) => f.tipo == TipoFormaPagamento.dinheiro).firstOrNull;
+      _selectedFormaPagamento = defaultDinheiro ?? _formasPagamento.first;
+      _paymentMethod = _selectedFormaPagamento!.nome;
+    } else {
+      _selectedFormaPagamento = null;
+      _paymentMethod = 'Dinheiro';
+    }
     _errorMessage = null;
     _pixTimer?.cancel();
     _pixCountdown = 120;
@@ -835,7 +1001,8 @@ class PdvExpressController extends ChangeNotifier {
   /// Recebe a data retroativa e deve retornar o resultado (JustificativaRetroativoResult) ou null para cancelar.
   Future<JustificativaRetroativoResult?> Function(DateTime dataRetroativa)? onPedidoRetroativo;
 
-  Future<void> confirmPayment() async {
+  Future<void> confirmPayment({bool autoPrint = false}) async {
+    _autoPrintOnFinalize = autoPrint;
     if (_isPersistingVenda || _state == PdvState.confirming || _state == PdvState.completed) {
       return;
     }
@@ -884,14 +1051,18 @@ class PdvExpressController extends ChangeNotifier {
   Future<String?> _resolveFormaPagamentoId(String methodLabel) async {
     try {
       final formas = await pagamentoRepo.findAll();
-      final cleanLabel = methodLabel.toLowerCase();
+      final cleanLabel = methodLabel.toLowerCase().trim();
       
       final matched = formas.where((f) {
-        final name = f.nome.toLowerCase();
-        if (cleanLabel.contains('pix') && name.contains('pix')) return true;
-        if (cleanLabel.contains('dinheiro') && name.contains('dinheiro')) return true;
-        if (cleanLabel.contains('cart') && name.contains('cart')) return true;
-        return name.contains(cleanLabel) || cleanLabel.contains(name);
+        final name = f.nome.toLowerCase().trim();
+        if (cleanLabel.contains('pix') && (name.contains('pix') || f.tipo == TipoFormaPagamento.pix)) return true;
+        if (cleanLabel.contains('dinheiro') && (name.contains('dinheiro') || f.tipo == TipoFormaPagamento.dinheiro)) return true;
+        if (cleanLabel.contains('cart') && (name.contains('cart') || f.tipo == TipoFormaPagamento.cartaoCredito || f.tipo == TipoFormaPagamento.cartaoDebito)) return true;
+        if ((cleanLabel.contains('consumo') || cleanLabel.contains('cortesia') || cleanLabel.contains('bonifica') || cleanLabel.contains('interno')) &&
+            (name.contains('consumo') || name.contains('cortesia') || f.tipo == TipoFormaPagamento.consumoInterno || f.isUsoInterno || !f.movimentaFinanceiro)) {
+          return true;
+        }
+        return name == cleanLabel || cleanLabel.contains(name) || name.contains(cleanLabel);
       }).firstOrNull;
       
       if (matched != null) {
@@ -927,6 +1098,8 @@ class PdvExpressController extends ChangeNotifier {
 
       final subtotal = _cart.fold(0, (sum, i) => sum + i.totalInCents);
       final frete = _entrega.tipo == 'Entrega' ? _entrega.taxaEntregaCentavos : 0;
+      final servico = _entrega.taxaServicoCentavos;
+      final totalVenda = subtotal + frete + servico;
 
       int? distanciaMetros = _entrega.distanciaMetros;
       int? tempoDeslocamentoSegundos = _entrega.tempoDeslocamentoSegundos;
@@ -946,11 +1119,19 @@ class PdvExpressController extends ChangeNotifier {
         'cep': _entrega.cep,
         'referencia': _entrega.referencia,
         'taxaEntregaCentavos': _entrega.taxaEntregaCentavos,
+        'taxaServicoCentavos': _entrega.taxaServicoCentavos,
         'distanciaMetros': distanciaMetros,
         'tempoDeslocamentoSegundos': tempoDeslocamentoSegundos,
       }) : null;
 
-      final formaPgtoId = await _resolveFormaPagamentoId(_paymentMethod);
+      final formaPgtoId = _selectedFormaPagamento?.id ?? (await _resolveFormaPagamentoId(_paymentMethod));
+      final formaPgtoNome = _selectedFormaPagamento?.nome ?? _paymentMethod;
+      final isUsoInterno = (_selectedFormaPagamento?.isUsoInterno ?? false) ||
+          (_selectedFormaPagamento?.tipo == TipoFormaPagamento.consumoInterno) ||
+          (_selectedFormaPagamento?.movimentaFinanceiro == false) ||
+          formaPgtoNome.toLowerCase().contains('consumo') ||
+          formaPgtoNome.toLowerCase().contains('cortesia') ||
+          formaPgtoNome.toLowerCase().contains('bonifica');
       final isEdit = ordemParaEditar != null;
 
       final List<ItemPedidoData> oldItems = isEdit
@@ -982,7 +1163,8 @@ class PdvExpressController extends ChangeNotifier {
           ? '${obsBase.isNotEmpty ? '$obsBase\n' : ''}[RETROATIVO] Justificativa: $_motivoRetroativo ($infoEstoqueRetroativo)'
           : obsBase;
 
-      final movimentarEstoque = isRetroativo ? (_movimentarEstoqueRetroativo ?? false) : true;
+      final movimentaEstoqueForma = _selectedFormaPagamento?.movimentaEstoque ?? true;
+      final movimentarEstoque = isRetroativo ? (_movimentarEstoqueRetroativo ?? false) : movimentaEstoqueForma;
       _motivoRetroativo = null; // Limpa após uso
       _movimentarEstoqueRetroativo = null;
 
@@ -993,7 +1175,8 @@ class PdvExpressController extends ChangeNotifier {
         tipoLogistica: _entrega.tipo,
         valorSubtotalCentavos: subtotal,
         valorTaxaEntregaCentavos: frete,
-        valorTotalCentavos: subtotal + frete,
+        valorTaxaServicoCentavos: servico,
+        valorTotalCentavos: totalVenda,
         formaPagamentoId: formaPgtoId,
         trocoParaCentavos: _entrega.trocoParaCentavos,
         itens: draftItens,
@@ -1004,11 +1187,12 @@ class PdvExpressController extends ChangeNotifier {
       );
 
       final useCase = ConfirmarVendaUseCase(db: db, context: tenantContext);
+      final nomeClienteFinal = _cliente.nomeExibicao ?? _cliente.nome;
       final result = await useCase.execute(ConfirmarVendaInput(
         pedido: pedido,
         itens: draftItens,
-        paymentMethod: _paymentMethod,
-        clienteNome: _cliente.nome,
+        paymentMethod: formaPgtoNome,
+        clienteNome: nomeClienteFinal,
         clienteTelefone: _cliente.telefone,
         enderecoJson: enderecoStr,
         ordemPreparoIdExistente: ordemParaEditar?.id,
@@ -1019,6 +1203,8 @@ class PdvExpressController extends ChangeNotifier {
         operadorNome: tenantContext.usuario.nome,
         observacao: _entrega.observacoes,
         movimentarEstoque: movimentarEstoque,
+        isUsoInterno: isUsoInterno,
+        isRetroativo: isRetroativo,
       ));
 
       try {
@@ -1031,7 +1217,7 @@ class PdvExpressController extends ChangeNotifier {
           entityDisplayName: 'Pedido #${result.numeroPedido}',
           entityModule: 'PDV',
           diff: {
-            'cliente': _cliente.nome ?? 'Consumidor',
+            'cliente': nomeClienteFinal ?? 'Consumidor',
             'valorTotalCentavos': pedido.valorTotalCentavos,
             'tipoLogistica': pedido.tipoLogistica,
             'pagamento': _paymentMethod,
@@ -1041,37 +1227,40 @@ class PdvExpressController extends ChangeNotifier {
         debugPrint('Erro ao gerar log de auditoria do pedido: $e');
       }
 
-      // A impressão automática na finalização direta no controller foi removida.
-      // O comprovante será aberto em tela (ComprovantePedidoPage) e perguntará 
-      // ao operador se ele deseja imprimir, evitando desperdício de bobina.
-      try {
-        final printData = PrintData(
-          pedidoId: pedido.id,
-          numeroPedido: result.numeroPedido,
-          clienteNome: _cliente.nome,
-          clienteTelefone: _cliente.telefone,
-          tipoLogistica: pedido.tipoLogistica,
-          endereco: _entrega.tipo == 'Entrega'
-              ? '${_entrega.logradouro}, ${_entrega.numero}'
-              : null,
-          bairro: _entrega.bairro,
-          formaPagamento: _paymentMethod,
-          totalCentavos: pedido.valorTotalCentavos,
-          taxaEntregaCentavos: pedido.valorTaxaEntregaCentavos,
-          trocoParaCentavos: pedido.trocoParaCentavos,
-          itens: _cart.map((item) => PrintDataItem(
-            nome: item.name,
-            quantidade: item.quantity,
-            precoUnitarioCentavos: item.priceInCents,
-            totalCentavos: item.totalInCents,
-          )).toList(),
-          dataHora: pedido.dataHoraCriacao,
-          observacao: _entrega.observacoes,
-          status: 'confirmado',
-        );
-        debugPrint('[CAP.PRINTING] Impressão automática ignorada (fluxo com confirmação ativo).');
-      } catch (e) {
-        debugPrint('[CAP.PRINTING] Erro ao preparar dados de impressão: $e');
+      if (_autoPrintOnFinalize) {
+        try {
+          final printData = PrintData(
+            pedidoId: pedido.id,
+            numeroPedido: result.numeroPedido,
+            clienteNome: nomeClienteFinal,
+            clienteTelefone: _cliente.telefone,
+            tipoLogistica: pedido.tipoLogistica,
+            endereco: _entrega.tipo == 'Entrega'
+                ? '${_entrega.logradouro}, ${_entrega.numero}'
+                : null,
+            bairro: _entrega.bairro,
+            formaPagamento: _paymentMethod,
+            totalCentavos: pedido.valorTotalCentavos,
+            taxaEntregaCentavos: pedido.valorTaxaEntregaCentavos,
+            taxaServicoCentavos: pedido.valorTaxaServicoCentavos,
+            trocoParaCentavos: pedido.trocoParaCentavos,
+            itens: _cart.map((item) => PrintDataItem(
+              nome: item.name,
+              quantidade: item.quantity,
+              precoUnitarioCentavos: item.priceInCents,
+              totalCentavos: item.totalInCents,
+            )).toList(),
+            dataHora: _entrega.dataHora.toLocal(),
+            observacao: _entrega.observacoes,
+            status: 'confirmado',
+          );
+
+          await printUseCase.imprimirPedido(
+            data: printData,
+          );
+        } catch (e) {
+          debugPrint('Erro ao disparar impressão automática: $e');
+        }
       }
 
       _lastVenda = pedido;
@@ -1334,7 +1523,10 @@ class PdvExpressController extends ChangeNotifier {
         ));
       }
 
-      _paymentMethod = venda.formaPagamentoId ?? 'Dinheiro';
+      if (venda.formaPagamentoId != null) {
+        _selectedFormaPagamento = _formasPagamento.where((f) => f.id == venda.formaPagamentoId).firstOrNull;
+      }
+      _paymentMethod = _selectedFormaPagamento?.nome ?? 'Dinheiro';
       _state = PdvState.selectingPayment;
       _passoAtual = 2;
       _lastVenda = null;

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:drift/drift.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import 'package:fincore_core/fincore_core.dart';
 import '../../../estoque/controllers/estoque_controller.dart';
 
@@ -52,6 +53,18 @@ class SupabaseSyncService {
 
   final StreamController<String> _syncEventsController = StreamController<String>.broadcast();
   Stream<String> get onDataSynced => _syncEventsController.stream;
+
+  // Conjunto de colunas ausentes conhecidas no Supabase (prevenção e auto-heal dinâmico)
+  static final Set<String> _knownMissingColumns = {
+    'forma_pagamento.isUsoInterno',
+    'forma_pagamento.movimentaFinanceiro',
+    'forma_pagamento.movimentaEstoque',
+    'forma_pagamento.bandeiraPadrao',
+    'forma_pagamento.descricao',
+    'forma_pagamento.pixChave',
+    'forma_pagamento.pixTipoChave',
+    'forma_pagamento.pixTipoBanco',
+  };
 
   // Mapeamento: entityName do outbox → nome da tabela no Supabase
   static const Map<String, String> _entityToTable = {
@@ -172,6 +185,9 @@ class SupabaseSyncService {
       final payload = jsonDecode(entry.payload) as Map<String, dynamic>;
       payload.remove('_traceId');
       payload.remove('traceId');
+
+      // Remove preventivamente colunas que sabidamente não existem no schema remoto do Supabase
+      payload.removeWhere((key, _) => _knownMissingColumns.contains('$tableName.$key'));
 
       if (tableName == 'audit_logs') {
         payload.remove('device_info');
@@ -313,10 +329,18 @@ class SupabaseSyncService {
         }
       }
 
-      if (payload.containsKey('updatedBy')) {
-        final val = payload['updatedBy'] as String? ?? '';
-        if (val.isEmpty || val == 'PDV' || val == 'system' || !val.contains('-')) {
+      // Garante campos obrigatórios de auditoria para integridade no Supabase (evitando violação de not-null constraint)
+      if (tableName != 'audit_logs') {
+        final valUpdated = payload['updatedBy'] as String? ?? '';
+        if (valUpdated.isEmpty || valUpdated == 'PDV' || valUpdated == 'system' || !valUpdated.contains('-')) {
           payload['updatedBy'] = tenantUserId;
+        }
+
+        if (!payload.containsKey('createdAt') || payload['createdAt'] == null) {
+          payload['createdAt'] = DateTime.now().toUtc().toIso8601String();
+        }
+        if (!payload.containsKey('updatedAt') || payload['updatedAt'] == null) {
+          payload['updatedAt'] = DateTime.now().toUtc().toIso8601String();
         }
       }
 
@@ -354,39 +378,156 @@ class SupabaseSyncService {
         }
       }
 
-      // Sanitizar campo 'status' para tabelas pedido e ordens_preparo:
-      // O CHECK CONSTRAINT exige snake_case ('em_preparo'), mas enums no Dart
-      // podem enviar camelCase ('emPreparo'). Tradução defensiva aqui.
-      if (tableName == 'pedido' && payload.containsKey('status')) {
-        const statusCamelToSnake = {
-          'emPreparo': 'em_preparo',
-          'pendente': 'confirmado',
-        };
-        final rawStatus = payload['status'] as String? ?? '';
-        if (statusCamelToSnake.containsKey(rawStatus)) {
-          payload['status'] = statusCamelToSnake[rawStatus];
-          LogService.instance.debug(
-            LogModule.sync,
-            'Status sanitizado: "$rawStatus" → "${payload['status']}" ($tableName)',
-          );
-        }
-        try {
-          final remoteRow = await _supabase.from('pedido').select('status, syncVersion').eq('id', entry.entityId).maybeSingle();
-          if (remoteRow != null && remoteRow['status'] != null) {
-            final remoteStatus = remoteRow['status'] as String;
-            final remoteVersion = (remoteRow['syncVersion'] as num?)?.toInt() ?? 1;
-            final payloadStatus = payload['status'] as String;
-            final payloadVersion = (payload['syncVersion'] as num?)?.toInt() ?? entry.version;
-
-            if (payloadVersion < remoteVersion) {
-              payload['status'] = remoteStatus;
-            } else if (payloadVersion == remoteVersion) {
-              if (StatusPrecedence.isHigherOrEqual(remoteStatus, payloadStatus)) {
-                payload['status'] = remoteStatus;
+      // Garantir integridade de chave estrangeira para lancamento_financeiro -> sessao_caixa
+      if (tableName == 'lancamento_financeiro' && payload.containsKey('sessaoCaixaId')) {
+        final sessaoId = payload['sessaoCaixaId'] as String? ?? '';
+        if (sessaoId.isNotEmpty && RegExp(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$').hasMatch(sessaoId)) {
+          try {
+            final remoteSessao = await _supabase.from('sessao_caixa').select('id').eq('id', sessaoId).maybeSingle();
+            if (remoteSessao == null) {
+              final db = DependencyInjection().get<FincoreDatabase>();
+              final sessaoRow = await (db.select(db.sessoesCaixaTable)..where((t) => t.id.equals(sessaoId))).getSingleOrNull();
+              if (sessaoRow != null) {
+                await _supabase.from('sessao_caixa').upsert({
+                  'id': sessaoRow.id,
+                  'tenantId': sessaoRow.tenantId,
+                  'operadorId': sessaoRow.operadorId,
+                  'operadorNome': sessaoRow.operadorNome,
+                  'status': sessaoRow.status,
+                  'dataAbertura': sessaoRow.dataAbertura.toIso8601String(),
+                  if (sessaoRow.dataFechamento != null)
+                    'dataFechamento': sessaoRow.dataFechamento!.toIso8601String(),
+                  'valorAberturaCentavos': sessaoRow.valorAberturaCentavos,
+                  'valorFechamentoCentavos': sessaoRow.valorFechamentoCentavos,
+                  'totalVendasCentavos': sessaoRow.totalVendasCentavos,
+                  'totalDespesasCentavos': sessaoRow.totalDespesasCentavos,
+                  'diferencaCentavos': sessaoRow.diferencaCentavos,
+                  'observacoes': sessaoRow.observacoes,
+                  'syncVersion': sessaoRow.syncVersion,
+                  'createdAt': sessaoRow.createdAt.toIso8601String(),
+                  'updatedAt': sessaoRow.updatedAt.toIso8601String(),
+                  'createdBy': sessaoRow.createdBy,
+                  'updatedBy': sessaoRow.updatedBy,
+                }, onConflict: 'id');
+                LogService.instance.info(
+                  LogModule.sync,
+                  'Sessão de caixa pai ($sessaoId) enviada preventivamente para garantir integridade do lançamento financeiro.',
+                );
               }
             }
+          } catch (e) {
+            LogService.instance.warning(LogModule.sync, 'Aviso ao verificar sessao_caixa pai: $e');
           }
-        } catch (_) {}
+        }
+      }
+
+      // Sanitizar clienteId se contiver strings não-UUID (ex: 'consumidor_final')
+      if (payload.containsKey('clienteId')) {
+        final val = payload['clienteId'] as String? ?? '';
+        if (val.isNotEmpty) {
+          final isUuid = RegExp(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$').hasMatch(val);
+          if (!isUuid) {
+            payload['clienteId'] = null;
+          }
+        }
+      }
+
+      // Sanitizar operadorId se contiver strings não-UUID (ex: 'system', 'admin')
+      if (payload.containsKey('operadorId')) {
+        final val = payload['operadorId'] as String? ?? '';
+        if (val.isNotEmpty) {
+          final isUuid = RegExp(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$').hasMatch(val);
+          if (!isUuid) {
+            payload['operadorId'] = null;
+          }
+        }
+      }
+
+      // Sanitizar sessaoCaixaId se contiver strings não-UUID (ex: 'sessao_avulsa_...')
+      if (tableName == 'lancamento_financeiro' || payload.containsKey('sessaoCaixaId')) {
+        final val = payload['sessaoCaixaId'] as String? ?? '';
+        final isUuid = RegExp(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$').hasMatch(val);
+        if (!isUuid) {
+          try {
+            final tId = payload['tenantId'] ?? _context.tenantId;
+            final sessaoRemote = await _supabase.from('sessao_caixa').select('id').eq('tenantId', tId).eq('status', 'aberta').maybeSingle();
+            if (sessaoRemote != null && sessaoRemote['id'] != null) {
+              payload['sessaoCaixaId'] = sessaoRemote['id'] as String;
+            } else {
+              final fallbackSessaoId = const Uuid().v4();
+              await _supabase.from('sessao_caixa').upsert({
+                'id': fallbackSessaoId,
+                'tenantId': tId,
+                'operadorId': tenantUserId,
+                'operadorNome': 'Operador',
+                'status': 'aberta',
+                'dataAbertura': DateTime.now().toUtc().toIso8601String(),
+                'createdAt': DateTime.now().toUtc().toIso8601String(),
+                'updatedAt': DateTime.now().toUtc().toIso8601String(),
+                'createdBy': tenantUserId,
+                'updatedBy': tenantUserId,
+              }, onConflict: 'id');
+              payload['sessaoCaixaId'] = fallbackSessaoId;
+            }
+          } catch (_) {
+            payload['sessaoCaixaId'] = const Uuid().v4();
+          }
+        }
+      }
+
+      // Sanitizar campo 'status' para tabelas pedido e ordens_preparo:
+      // O CHECK CONSTRAINT no PostgreSQL ('pedido_status_check') exige:
+      // ('rascunho', 'confirmado', 'em_preparo', 'pronto', 'entregue', 'cancelado').
+      if (tableName == 'pedido') {
+        // Sanitizar valorTaxaServicoCentavos para garantir consistência total com subtotal e entrega
+        final subtotal = (payload['valorSubtotalCentavos'] as num?)?.toInt() ?? 0;
+        final entrega = (payload['valorTaxaEntregaCentavos'] as num?)?.toInt() ?? 0;
+        final total = (payload['valorTotalCentavos'] as num?)?.toInt() ?? 0;
+        int servico = (payload['valorTaxaServicoCentavos'] as num?)?.toInt() ?? (total - subtotal - entrega);
+        if (servico < 0) servico = 0;
+        payload['valorTaxaServicoCentavos'] = servico;
+
+        if (payload.containsKey('status')) {
+          const statusMap = {
+            'emPreparo': 'em_preparo',
+            'pendente': 'confirmado',
+            'recebido': 'confirmado',
+            'saiu_para_entrega': 'pronto',
+            'saiuparaentrega': 'pronto',
+            'saiuParaEntrega': 'pronto',
+            'em_transito': 'pronto',
+            'emtransito': 'pronto',
+            'emTransito': 'pronto',
+          };
+          final rawStatus = payload['status'] as String? ?? '';
+          if (statusMap.containsKey(rawStatus)) {
+            payload['status'] = statusMap[rawStatus];
+            LogService.instance.debug(
+              LogModule.sync,
+              'Status de Pedido sanitizado: "$rawStatus" → "${payload['status']}" ($tableName)',
+            );
+          } else if (!const {'rascunho', 'confirmado', 'em_preparo', 'pronto', 'entregue', 'cancelado'}.contains(rawStatus)) {
+            // Fallback defensivo para qualquer outro status desconhecido
+            payload['status'] = 'confirmado';
+          }
+          try {
+            final remoteRow = await _supabase.from('pedido').select('status, syncVersion').eq('id', entry.entityId).maybeSingle();
+            if (remoteRow != null && remoteRow['status'] != null) {
+              final remoteStatus = remoteRow['status'] as String;
+              final remoteVersion = (remoteRow['syncVersion'] as num?)?.toInt() ?? 1;
+              final payloadStatus = payload['status'] as String;
+              final payloadVersion = (payload['syncVersion'] as num?)?.toInt() ?? entry.version;
+
+              if (payloadVersion < remoteVersion) {
+                payload['status'] = remoteStatus;
+              } else if (payloadVersion == remoteVersion) {
+                if (StatusPrecedence.isHigherOrEqual(remoteStatus, payloadStatus)) {
+                  payload['status'] = remoteStatus;
+                }
+              }
+            }
+          } catch (_) {}
+        }
       } else if (tableName == 'ordens_preparo' && payload.containsKey('status')) {
         const statusCamelToSnake = {
           'emPreparo': 'em_preparo',
@@ -434,7 +575,7 @@ class SupabaseSyncService {
       } else if (entry.action.toLowerCase() == 'update') {
         final idCol = tableName == 'empresa_configuracao' ? 'tenantId' : 'id';
         int attempts = 0;
-        while (attempts < 5) {
+        while (attempts < 30) {
           try {
             await _supabase
                 .from(tableName)
@@ -445,11 +586,29 @@ class SupabaseSyncService {
             break;
           } on PostgrestException catch (e) {
             attempts++;
-            if ((e.code == 'PGRST204' || e.message.contains("Could not find the '")) && attempts < 5) {
+            if ((e.code == 'PGRST204' || e.message.contains("Could not find the '") || e.message.contains('in the schema cache')) && attempts < 30) {
               final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(e.message);
               if (match != null) {
                 final missingCol = match.group(1)!;
+                _knownMissingColumns.add('$tableName.$missingCol');
                 payload.remove(missingCol);
+                if (tableName == 'pedido' && missingCol == 'valorTaxaServicoCentavos') {
+                  int subtotal = (payload['valorSubtotalCentavos'] as num?)?.toInt() ?? 0;
+                  int entrega = (payload['valorTaxaEntregaCentavos'] as num?)?.toInt() ?? 0;
+                  if (subtotal == 0) {
+                    try {
+                      final db = DependencyInjection().get<FincoreDatabase>();
+                      final localPed = await (db.select(db.pedidosTable)..where((t) => t.id.equals(entry.entityId))).getSingleOrNull();
+                      if (localPed != null) {
+                        subtotal = localPed.valorSubtotalCentavos;
+                        entrega = localPed.valorTaxaEntregaCentavos;
+                        payload['valorSubtotalCentavos'] = subtotal;
+                        payload['valorTaxaEntregaCentavos'] = entrega;
+                      }
+                    } catch (_) {}
+                  }
+                  payload['valorTotalCentavos'] = subtotal + entrega;
+                }
                 LogService.instance.warning(
                   LogModule.sync,
                   'Coluna "$missingCol" ausente na tabela "$tableName" do Supabase - removida do payload para desobstruir sync.',
@@ -463,7 +622,7 @@ class SupabaseSyncService {
       } else {
         final conflictCol = tableName == 'empresa_configuracao' ? 'tenantId' : 'id';
         int attempts = 0;
-        while (attempts < 5) {
+        while (attempts < 30) {
           try {
             await _supabase.from(tableName).upsert(
               payload,
@@ -499,11 +658,17 @@ class SupabaseSyncService {
                 break;
               }
             }
-            if ((e.code == 'PGRST204' || e.message.contains("Could not find the '")) && attempts < 5) {
+            if ((e.code == 'PGRST204' || e.message.contains("Could not find the '") || e.message.contains('in the schema cache')) && attempts < 30) {
               final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(e.message);
               if (match != null) {
                 final missingCol = match.group(1)!;
+                _knownMissingColumns.add('$tableName.$missingCol');
                 payload.remove(missingCol);
+                if (tableName == 'pedido' && missingCol == 'valorTaxaServicoCentavos') {
+                  final subtotal = (payload['valorSubtotalCentavos'] as num?)?.toInt() ?? 0;
+                  final entrega = (payload['valorTaxaEntregaCentavos'] as num?)?.toInt() ?? 0;
+                  payload['valorTotalCentavos'] = subtotal + entrega;
+                }
                 LogService.instance.warning(
                   LogModule.sync,
                   'Coluna "$missingCol" ausente na tabela "$tableName" do Supabase - removida do payload para desobstruir sync.',
@@ -743,13 +908,13 @@ class SupabaseSyncService {
       } catch (_) {}
     }
 
-    // Final fallback: query table without tenant filter
+    // Final fallback: query table with strict tenant filter
     try {
       final res = await _supabase.from(tableName).select();
       final allRows = res.cast<Map<String, dynamic>>();
       return allRows.where((row) {
         final rTenant = row['tenantId'] ?? row['tenant_id'];
-        return rTenant == null || rTenant == tenantId;
+        return rTenant != null && rTenant == tenantId;
       }).toList();
     } catch (e) {
       rethrow;
@@ -853,22 +1018,35 @@ class SupabaseSyncService {
           }
           // ─────────────────────────────────────────────────────────
 
-          await _applyRowLocally(entityName, row, db);
-          appliedCount++;
+          try {
+            await _applyRowLocally(entityName, row, db);
+            appliedCount++;
 
-          await LogService.instance.logSync(
-            step: 'PULL',
-            action: 'APLICADO',
-            entity: entityName,
-            id: shortId,
-            status: LogStatus.success,
-            message: '[APLICADO NO BANCO LOCAL] $entityName$descStr (v$serverVersion)\n'
-                '  ID: $shortId\n'
-                '${desc.isNotEmpty ? '  Descrição: $desc\n' : ''}'
-                '  Versão Servidor: v$serverVersion\n'
-                '  Decisão: Gravado no SQLite local (Last Write Wins).',
-            tenantId: tenantId,
-          );
+            await LogService.instance.logSync(
+              step: 'PULL',
+              action: 'APLICADO',
+              entity: entityName,
+              id: shortId,
+              status: LogStatus.success,
+              message: '[APLICADO NO BANCO LOCAL] $entityName$descStr (v$serverVersion)\n'
+                  '  ID: $shortId\n'
+                  '${desc.isNotEmpty ? '  Descrição: $desc\n' : ''}'
+                  '  Versão Servidor: v$serverVersion\n'
+                  '  Decisão: Gravado no SQLite local (Last Write Wins).',
+              tenantId: tenantId,
+            );
+          } catch (e) {
+            stalledCount++;
+            await LogService.instance.logSync(
+              step: 'PULL',
+              action: 'ERRO_LINHA',
+              entity: entityName,
+              id: shortId,
+              status: LogStatus.failed,
+              message: 'Falha ao aplicar linha $shortId ($entityName) no SQLite: $e',
+              tenantId: tenantId,
+            );
+          }
 
           // Espelha mutação remota recebida no log de Banco de Dados (banco_dados_YYYY-MM-DD.log)
           try {
@@ -1336,6 +1514,14 @@ class SupabaseSyncService {
                 ordem: row['ordem'] as int? ?? 0,
                 permiteTroco: row['permiteTroco'] as bool? ?? false,
                 ativo: row['ativo'] as bool? ?? true,
+                isUsoInterno: Value(row['isUsoInterno'] as bool? ?? false),
+                movimentaFinanceiro: Value(row['movimentaFinanceiro'] as bool? ?? true),
+                movimentaEstoque: Value(row['movimentaEstoque'] as bool? ?? true),
+                bandeiraPadrao: Value(row['bandeiraPadrao'] as String?),
+                descricao: Value(row['descricao'] as String?),
+                pixChave: Value(row['pixChave'] as String?),
+                pixTipoChave: Value(row['pixTipoChave'] as String?),
+                pixTipoBanco: Value(row['pixTipoBanco'] as String?),
                 syncVersion: Value(row['syncVersion'] as int? ?? 1),
                 syncStatus: SyncStatus.synced,
                 lastSyncedAt: Value(DateTime.now().toUtc()),
@@ -1613,6 +1799,14 @@ class SupabaseSyncService {
         break;
       case 'HistoricoOrdemPreparo':
       case 'historicos_ordem_preparo':
+        final parentId = row['ordemPreparoId'] as String?;
+        if (parentId != null && parentId.isNotEmpty) {
+          final parentExists = await (db.select(db.ordensPreparoTable)..where((t) => t.id.equals(parentId))).getSingleOrNull();
+          if (parentExists == null) {
+            // Ordem de preparo pai não existe no SQLite local; ignora histórico orfão para evitar erro de Foreign Key
+            break;
+          }
+        }
         await db.into(db.historicosOrdemPreparoTable).insertOnConflictUpdate(
               HistoricosOrdemPreparoTableCompanion.insert(
                 id: row['id'] as String,
@@ -1823,6 +2017,7 @@ class SupabaseSyncService {
         clienteTelefoneAvulso: Value(row['clienteTelefoneAvulso'] as String? ?? row['cliente_telefone_avulso'] as String?),
         valorSubtotalCentavos: (row['valorSubtotalCentavos'] as num?)?.toInt() ?? (row['valor_subtotal_centavos'] as num?)?.toInt() ?? 0,
         valorTaxaEntregaCentavos: Value((row['valorTaxaEntregaCentavos'] as num?)?.toInt() ?? (row['valor_taxa_entrega_centavos'] as num?)?.toInt() ?? 0),
+        valorTaxaServicoCentavos: Value((row['valorTaxaServicoCentavos'] as num?)?.toInt() ?? (row['valor_taxa_servico_centavos'] as num?)?.toInt() ?? 0),
         valorTotalCentavos: (row['valorTotalCentavos'] as num?)?.toInt() ?? (row['valor_total_centavos'] as num?)?.toInt() ?? 0,
         trocoParaCentavos: Value((row['trocoParaCentavos'] as num?)?.toInt() ?? (row['troco_para_centavos'] as num?)?.toInt()),
         formaPagamentoId: Value(row['formaPagamentoId'] as String? ?? row['forma_pagamento_id'] as String?),

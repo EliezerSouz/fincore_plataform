@@ -11,7 +11,7 @@ class CorrelationIdGenerator {
   static int _counter = 0;
 
   static String generateCorrelationId([DateTime? date]) {
-    final now = date ?? DateTime.now();
+    final now = (date ?? DateTime.now()).toLocal();
     final y = now.year.toString();
     final m = now.month.toString().padLeft(2, '0');
     final d = now.day.toString().padLeft(2, '0');
@@ -494,9 +494,10 @@ class FincoreLogger {
   // ── Obtenção / Rotação Diária de Arquivo ─────────────────────────────────
 
   Future<File> _getCategoryFile(_LogCategoryConfig category, DateTime now, {bool isJson = false}) async {
-    final yearStr = now.year.toString();
-    final monthStr = now.month.toString().padLeft(2, '0');
-    final dayStr = now.day.toString().padLeft(2, '0');
+    final local = now.toLocal();
+    final yearStr = local.year.toString();
+    final monthStr = local.month.toString().padLeft(2, '0');
+    final dayStr = local.day.toString().padLeft(2, '0');
     final dateKey = '$yearStr-$monthStr-$dayStr';
     final monthKey = '$yearStr-$monthStr';
 
@@ -508,14 +509,14 @@ class FincoreLogger {
     }
 
     final rootDir = logRootPath;
-    final dir = Directory('$rootDir/$monthKey');
+    final dir = Directory('$rootDir/$monthKey/$dayStr');
     if (!await dir.exists()) await dir.create(recursive: true);
 
     final file = File('${dir.path}/${category.filePrefix}_$dateKey.$ext');
 
     if (!isJson && !await file.exists()) {
       await file.writeAsString(
-        _fileHeader(now, category.folderName),
+        _fileHeader(local, category.folderName),
         mode: FileMode.write,
         encoding: utf8,
         flush: true,

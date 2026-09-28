@@ -5,6 +5,36 @@ import 'package:fincore_food_flutter/src/shared/services/dados_ordem_parser.dart
 import 'package:fincore_food_flutter/src/pedidos/controllers/central_pedidos_controller.dart';
 import 'package:intl/intl.dart';
 
+// Badge de origem Web — exibido quando canalOrigem == 'cardapio_web'
+Widget _buildWebBadge({bool isPendente = false}) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: isPendente ? const Color(0xFF7C2D12) : const Color(0xFF1E3A5F),
+      borderRadius: BorderRadius.circular(4),
+      border: Border.all(
+        color: isPendente ? const Color(0xFFF97316).withValues(alpha: 0.6) : const Color(0xFF3B82F6).withValues(alpha: 0.5),
+      ),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.language_rounded, size: 9, color: isPendente ? const Color(0xFFFDBA74) : const Color(0xFF93C5FD)),
+        const SizedBox(width: 3),
+        Text(
+          isPendente ? 'WEB · APROVAR' : 'WEB',
+          style: TextStyle(
+            color: isPendente ? const Color(0xFFFDBA74) : const Color(0xFF93C5FD),
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.6,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Card compacto do Kanban para uma [OrdemPreparo], focado puramente em dados operacionais.
 class PedidoCard extends StatelessWidget {
   final OrdemPreparo ordem;
@@ -25,6 +55,7 @@ class PedidoCard extends StatelessWidget {
 
   final VoidCallback? onImprimir;
   final VoidCallback? onCancelar;
+  final VoidCallback? onWhatsApp;
 
   const PedidoCard({
     super.key,
@@ -39,6 +70,7 @@ class PedidoCard extends StatelessWidget {
     this.acaoRapidaLabel,
     this.onImprimir,
     this.onCancelar,
+    this.onWhatsApp,
   });
 
   String get _friendlyId {
@@ -68,6 +100,9 @@ class PedidoCard extends StatelessWidget {
 
   IconData _getActionIcon(String label) {
     final l = label.toLowerCase();
+    if (l.contains('aprovar') || l.contains('aceitar')) {
+      return Icons.verified_outlined;
+    }
     if (l.contains('preparar') || l.contains('iniciar')) {
       return Icons.play_arrow_rounded;
     }
@@ -83,11 +118,16 @@ class PedidoCard extends StatelessWidget {
   String _getStatusLabel(StatusOrdemPreparo status) {
     switch (status) {
       case StatusOrdemPreparo.pendente:
-        return 'Pendente';
+        if (controller.isPedidoAguardandoAprovacao(ordem)) {
+          return 'Aguardando Aprovação';
+        }
+        return 'Pendente (Na Fila)';
       case StatusOrdemPreparo.emPreparo:
         return 'Em Preparo';
       case StatusOrdemPreparo.pronto:
         return 'Pronto';
+      case StatusOrdemPreparo.saiuParaEntrega:
+        return 'Saiu p/ Entrega';
       case StatusOrdemPreparo.entregue:
         return 'Entregue';
       case StatusOrdemPreparo.cancelado:
@@ -208,7 +248,7 @@ class PedidoCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
 
-                    // Row 2: Pedido ID + Status Atrasado + Status Badge
+                    // Row 2: Pedido ID + Badge Web (se origem = cardapio_web) + Status Badge
                     Row(
                       children: [
                         Text(
@@ -219,6 +259,11 @@ class PedidoCard extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
+                        // Badge 🌐 WEB — pedidos vindos do cardápio digital
+                        if (pedidoRow?.canalOrigem == 'cardapio_web') ...[
+                          const SizedBox(width: 6),
+                          _buildWebBadge(isPendente: controller.isPedidoAguardandoAprovacao(ordem)),
+                        ],
                         const Spacer(),
 
                         Container(
@@ -424,37 +469,90 @@ class PedidoCard extends StatelessWidget {
                       ],
                     ),
 
-                    // Row 6: Botão de Ação Rápida Único e Destacada
-                    if (mostrarAcaoRapida && onAcaoRapida != null && acaoRapidaLabel != null) ...[
+                    // Row 6: Botão de Ação Rápida Único e Reimpressão Direta
+                    if ((mostrarAcaoRapida && onAcaoRapida != null && acaoRapidaLabel != null) || onImprimir != null) ...[
                       const SizedBox(height: 12),
-                      GestureDetector(
-                        onTap: onAcaoRapida,
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: BoxDecoration(
-                            color: accentColor,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Center(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(_getActionIcon(acaoRapidaLabel!), color: Colors.white, size: 16),
-                                const SizedBox(width: 6),
-                                Text(
-                                  acaoRapidaLabel!.toUpperCase(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 0.6,
+                      Row(
+                        children: [
+                          if (mostrarAcaoRapida && onAcaoRapida != null && acaoRapidaLabel != null)
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: onAcaoRapida,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: accentColor,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Center(
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(_getActionIcon(acaoRapidaLabel!), color: Colors.white, size: 16),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          acaoRapidaLabel!.toUpperCase(),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.6,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
-                        ),
+                          if (onImprimir != null) ...[
+                            if (mostrarAcaoRapida && onAcaoRapida != null && acaoRapidaLabel != null)
+                              const SizedBox(width: 8),
+                            InkWell(
+                              onTap: onImprimir,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: FincoreColors.surfaceElevated,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: FincoreColors.border),
+                                ),
+                                child: Tooltip(
+                                  message: 'Reimprimir Pedido',
+                                  child: Icon(
+                                    Icons.print_outlined,
+                                    size: 18,
+                                    color: FincoreColors.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (onWhatsApp != null) ...[
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: onWhatsApp,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF25D366).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.4)),
+                                ),
+                                child: const Tooltip(
+                                  message: 'WhatsApp',
+                                  child: Icon(
+                                    Icons.chat_bubble_outline_rounded,
+                                    size: 18,
+                                    color: Color(0xFF25D366),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ],

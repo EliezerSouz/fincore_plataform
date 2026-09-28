@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
 import 'database_connection.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
@@ -22,6 +24,7 @@ import 'package:fincore_core/repository/print_job_repository.dart';
 import 'package:fincore_food_flutter/src/cap/printing/usecases/print_use_case.dart';
 import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
 import 'package:fincore_food_flutter/src/estoque/controllers/planejamento_controller.dart';
+import 'package:fincore_food_flutter/src/financeiro/controllers/contas_receber_controller.dart';
 
 import 'package:fincore_food_flutter/src/shared/services/dpapi_env_service.dart';
 
@@ -130,6 +133,68 @@ class DatabaseInitializer {
       await (db.delete(db.outboxSync)
             ..where((t) => t.entity.equals('audit_log') & t.entityId.like('AUD-%')))
           .go();
+
+      // Auto-heal: reparar sessao_avulsa% em lancamentos_financeiros e outboxSync
+      final defaultTenant = '65109ff8-443f-41ce-94c8-8311dfc79764';
+      final defaultUser = '00000000-0000-0000-0000-000000000000';
+      
+      var sessaoAtiva = await (db.select(db.sessoesCaixaTable)
+            ..where((t) => t.status.equals('aberta') & t.deletedAt.isNull())
+            ..limit(1))
+          .getSingleOrNull();
+      
+      if (sessaoAtiva == null) {
+        final newSessaoId = const Uuid().v4();
+        final now = DateTime.now().toUtc();
+        await db.into(db.sessoesCaixaTable).insert(
+          SessoesCaixaTableCompanion.insert(
+            id: newSessaoId,
+            tenantId: defaultTenant,
+            operadorId: defaultUser,
+            operadorNome: const Value('Operador Caixa'),
+            dataAbertura: now,
+            status: const Value('aberta'),
+            valorAberturaCentavos: const Value(0),
+            syncVersion: const Value(1),
+            syncStatus: SyncStatus.pending,
+            createdAt: now,
+            updatedAt: now,
+            createdBy: defaultUser,
+            updatedBy: defaultUser,
+          ),
+        );
+        sessaoAtiva = await (db.select(db.sessoesCaixaTable)..where((t) => t.id.equals(newSessaoId))).getSingle();
+      }
+
+      final validSessaoId = sessaoAtiva.id;
+
+      // 2. Reparar lançamentos financeiros locais com sessao_avulsa%
+      await db.customUpdate(
+        "UPDATE lancamentos_financeiros SET sessao_caixa_id = ? WHERE sessao_caixa_id LIKE 'sessao_avulsa%'",
+        variables: [Variable.withString(validSessaoId)],
+        updates: {db.lancamentosFinanceirosTable},
+      );
+
+      // 3. Reparar payloads no Outbox com sessao_avulsa%
+      final outboxEntries = await (db.select(db.outboxSync)
+            ..where((t) => t.entity.equals('lancamento_financeiro') & t.payload.like('%sessao_avulsa%')))
+          .get();
+
+      for (final entry in outboxEntries) {
+        try {
+          final payload = jsonDecode(entry.payload) as Map<String, dynamic>;
+          payload['sessaoCaixaId'] = validSessaoId;
+          final newPayloadJson = jsonEncode(payload);
+          await (db.update(db.outboxSync)..where((t) => t.id.equals(entry.id))).write(
+            OutboxSyncCompanion(
+              payload: Value(newPayloadJson),
+              status: const Value('pending'),
+              attemptsCount: const Value(0),
+              errorMessage: const Value(null),
+            ),
+          );
+        } catch (_) {}
+      }
     } catch (_) {}
 
     // ──────────────────────────────────────────────────────────────
@@ -224,6 +289,14 @@ class DatabaseInitializer {
             );
       context.setContext(empresa: emp, usuario: usr);
     }
+
+    // Garante cliente Consumidor Final padrão para todas as empresas registradas
+    for (final emp in coreEmpresas) {
+      try {
+        await clienteRepo.ensureConsumidorFinalForTenant(emp.id);
+      } catch (_) {}
+    }
+
     final membroRepo = MembroEmpresaRepository(db: db, context: context);
     final empresaConviteRepo = EmpresaConviteRepository(db: db, context: context);
     final ordemPreparoRepo = OrdemPreparoRepository(db: db, context: context);
@@ -333,6 +406,13 @@ class DatabaseInitializer {
     di.register<DashboardRepository>(dashboardRepo);
     di.register<DashboardService>(dashboardService);
     di.register<DashboardController>(dashboardController);
+
+    // FINANCEIRO.CONTAS_RECEBER
+    try {
+      final oldContas = di.get<ContasReceberController>();
+      oldContas.dispose();
+    } catch (_) {}
+    di.register<ContasReceberController>(ContasReceberController());
 
     // ──────────────────────────────────────────────────────────────
     // 8. Inicializar Supabase SDK + SupabaseSyncService

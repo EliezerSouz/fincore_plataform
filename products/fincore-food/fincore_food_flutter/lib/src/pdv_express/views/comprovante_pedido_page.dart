@@ -61,41 +61,7 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
   @override
   void initState() {
     super.initState();
-    _loadConfig().then((_) {
-      _mostrarDialogoConfirmacaoImpressao();
-    });
-  }
-
-  void _mostrarDialogoConfirmacaoImpressao() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Confirmar Impressão'),
-          content: const Text('Deseja imprimir as vias deste pedido agora?'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                if (mounted) Navigator.of(context).pop();
-              },
-              child: const Text('Não'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _imprimirCupomCompleto().then((_) {
-                  if (mounted) Navigator.of(context).pop();
-                });
-              },
-              child: const Text('Sim, Imprimir'),
-            ),
-          ],
-        ),
-      );
-    });
+    _loadConfig();
   }
 
   Future<void> _loadConfig() async {
@@ -103,13 +69,14 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
     final impConfig = await FincoreImpressaoConfig.carregar();
 
     final db = DependencyInjection().get<FincoreDatabase>();
-    DateTime dataHoraCarregada = DateTime.now();
+    DateTime dataHoraCarregada = widget.entrega.dataHora.toLocal();
     try {
       final pedidoRow = await (db.select(db.pedidosTable)
             ..where((t) => t.id.equals(widget.pedidoId)))
           .getSingleOrNull();
       if (pedidoRow != null) {
-        dataHoraCarregada = pedidoRow.dataHoraEntregaPrevista ?? pedidoRow.dataHoraCriacao;
+        dataHoraCarregada = pedidoRow.dataHoraEntregaPrevista?.toLocal()
+            ?? widget.entrega.dataHora.toLocal();
       }
     } catch (_) {}
 
@@ -138,10 +105,6 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
       _isPrinting = true;
       _lastMessage = null;
     });
-
-    final enderecoStr = widget.entrega.tipo == 'Entrega'
-        ? '${widget.entrega.logradouro}, ${widget.entrega.numero} - ${widget.entrega.bairro}'
-        : '';
 
     final useCase = DependencyInjection().get<PrintUseCase>();
 
@@ -322,6 +285,16 @@ class _ComprovantePedidoPageState extends State<ComprovantePedidoPage> {
                               // Total
                               _CupomLinhaChaveValor('TOTAL', totalFmt, bold: true),
                               _CupomLinhaChaveValor('PAGTO', widget.formaPagamento),
+                              if (widget.formaPagamento.toLowerCase().contains('pix'))
+                                _CupomLinhaChaveValor('SITUAÇÃO', 'PAGO (PIX)', bold: true)
+                              else if (widget.formaPagamento.toLowerCase().contains('déb') || widget.formaPagamento.toLowerCase().contains('deb'))
+                                _CupomLinhaChaveValor('SITUAÇÃO', 'PAGO (DÉBITO)', bold: true)
+                              else if (widget.formaPagamento.toLowerCase().contains('créd') || widget.formaPagamento.toLowerCase().contains('cred'))
+                                _CupomLinhaChaveValor('SITUAÇÃO', 'PAGO (CRÉDITO)', bold: true)
+                              else if (widget.formaPagamento.toLowerCase().contains('dinheiro'))
+                                _CupomLinhaChaveValor('SITUAÇÃO', 'PAGO (DINHEIRO)', bold: true)
+                              else if (widget.formaPagamento.toLowerCase().contains('prazo'))
+                                _CupomLinhaChaveValor('SITUAÇÃO', 'NOTA A PRAZO', bold: true),
                               if (widget.formaPagamento.toLowerCase().contains('dinheiro') &&
                                   widget.entrega.trocoParaCentavos != null &&
                                   widget.entrega.trocoParaCentavos! > 0) ...[

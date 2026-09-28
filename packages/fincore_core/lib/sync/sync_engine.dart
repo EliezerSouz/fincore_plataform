@@ -550,6 +550,10 @@ class SyncEngine {
       case 'EstoqueProduto':
       case 'estoque_produto':
         return 13;
+      case 'sessao_caixa':
+      case 'SessaoCaixa':
+      case 'sessoes_caixa':
+        return 14; // PAI de LancamentoFinanceiro — enviado ANTES dos lançamentos!
       case 'LocalEntrega':
       case 'local_entrega':
       case 'locais_entrega':
@@ -582,6 +586,10 @@ class SyncEngine {
       case 'MovimentacaoEstoque':
       case 'movimentacao_estoque':
         return 43;
+      case 'lancamento_financeiro':
+      case 'LancamentoFinanceiro':
+      case 'lancamentos_financeiros':
+        return 44; // FILHO de SessaoCaixa e Pedido — DEVE ser enviado DEPOIS!
       default:
         return 50;
     }
@@ -647,12 +655,21 @@ class SyncEngine {
       }
     }
 
+    if (entry.entity == 'lancamento_financeiro' || entry.entity == 'LancamentoFinanceiro' || entry.entity == 'lancamentos_financeiros') {
+      for (final key in failedEntityKeys) {
+        if (key.startsWith('sessao_caixa:') || key.startsWith('SessaoCaixa:') || key.startsWith('sessoes_caixa:')) {
+          final parentId = key.split(':').last;
+          if (payload.contains(parentId)) return true;
+        }
+      }
+    }
+
     return false;
   }
 
   /// Auto-recuperação de entidade pai ausente na nuvem.
-  /// Quando um filho (ex: item_pedido) falha com erro de FK (23503),
-  /// este método verifica se o pai (ex: Pedido) existe no SQLite local
+  /// Quando um filho (ex: item_pedido, lancamento_financeiro) falha com erro de FK (23503),
+  /// este método verifica se o pai (ex: Pedido, SessaoCaixa) existe no SQLite local
   /// e o re-enfileira no Outbox para subir no próximo ciclo.
   Future<void> _autoHealMissingParent(OutboxEntry entry) async {
     try {
@@ -705,6 +722,49 @@ class SyncEngine {
             LogService.instance.info(
               LogModule.sync,
               '[AUTO-HEAL] Re-enfileirado Pedido pai (ID: ${parentRow.id.length > 8 ? parentRow.id.substring(0, 8) : parentRow.id}...) no Outbox para resolver pendencia de itens.',
+            );
+          }
+        }
+      }
+
+      if (entityLower.contains('lancamento_financeiro')) {
+        final sessaoId = payloadMap['sessaoCaixaId'] as String?;
+        if (sessaoId != null && sessaoId.isNotEmpty) {
+          final sessaoRow = await (db.select(db.sessoesCaixaTable)
+                ..where((t) => t.id.equals(sessaoId)))
+              .getSingleOrNull();
+
+          if (sessaoRow != null) {
+            await outboxService.enqueue(
+              entity: 'sessao_caixa',
+              entityId: sessaoRow.id,
+              action: 'UPSERT',
+              payload: {
+                'id': sessaoRow.id,
+                'tenantId': sessaoRow.tenantId,
+                'operadorId': sessaoRow.operadorId,
+                'operadorNome': sessaoRow.operadorNome,
+                'status': sessaoRow.status,
+                'dataAbertura': sessaoRow.dataAbertura.toIso8601String(),
+                if (sessaoRow.dataFechamento != null)
+                  'dataFechamento': sessaoRow.dataFechamento!.toIso8601String(),
+                'valorAberturaCentavos': sessaoRow.valorAberturaCentavos,
+                'valorFechamentoCentavos': sessaoRow.valorFechamentoCentavos,
+                'totalVendasCentavos': sessaoRow.totalVendasCentavos,
+                'totalDespesasCentavos': sessaoRow.totalDespesasCentavos,
+                'diferencaCentavos': sessaoRow.diferencaCentavos,
+                'observacoes': sessaoRow.observacoes,
+                'syncVersion': sessaoRow.syncVersion,
+                'createdAt': sessaoRow.createdAt.toIso8601String(),
+                'updatedAt': sessaoRow.updatedAt.toIso8601String(),
+                'createdBy': sessaoRow.createdBy,
+                'updatedBy': sessaoRow.updatedBy,
+              },
+              version: sessaoRow.syncVersion,
+            );
+            LogService.instance.info(
+              LogModule.sync,
+              '[AUTO-HEAL] Re-enfileirada SessaoCaixa pai (ID: ${sessaoRow.id.length > 8 ? sessaoRow.id.substring(0, 8) : sessaoRow.id}...) no Outbox para resolver FK de lancamento financeiro.',
             );
           }
         }

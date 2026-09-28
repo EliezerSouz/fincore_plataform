@@ -477,7 +477,56 @@ class _EstoquePageState extends State<EstoquePage> {
         _buildChip('Com produção (${ctrl.itensComProducao.length})', 'PRODUCAO', badgeColor: const Color(0xFF3B82F6)),
         const SizedBox(width: 6),
         _buildChip('Precisa de ação (${ctrl.itensPrecisamAcao.length})', 'ACAO', badgeColor: const Color(0xFFEC4899)),
+        const Spacer(),
+        // Janela de Projeção de Reservas
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: FincoreColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.date_range_rounded, size: 14, color: FincoreColors.primary),
+              const SizedBox(width: 6),
+              const Text('Janela de Reservas:', style: TextStyle(color: FincoreColors.textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 6),
+              _buildJanelaChip(ctrl, 7, '7 dias'),
+              const SizedBox(width: 4),
+              _buildJanelaChip(ctrl, 14, '14 dias'),
+              const SizedBox(width: 4),
+              _buildJanelaChip(ctrl, 30, '30 dias'),
+              const SizedBox(width: 4),
+              _buildJanelaChip(ctrl, 0, 'Tudo'),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildJanelaChip(EstoqueController ctrl, int dias, String label) {
+    final bool isSelected = ctrl.janelaProjecaoDias == dias;
+    return InkWell(
+      onTap: () => ctrl.setJanelaProjecaoDias(dias),
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: isSelected ? FincoreColors.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : FincoreColors.textMuted,
+            fontSize: 10,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
     );
   }
 
@@ -2555,8 +2604,9 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
     final numPedStr = widget.numeroPedido ?? (ped?.numeroPedido != null ? '#${ped!.numeroPedido.toString().padLeft(4, "0")}' : '#${widget.pedidoId.substring(0, 4).toUpperCase()}');
     final statusStr = (ped?.status ?? 'ENTREGUE').toUpperCase();
     final clienteStr = ped?.clienteNomeAvulso ?? 'Balcão / Consumidor';
-    final dataStr = ped?.dataHoraCriacao != null
-        ? DateFormat('dd/MM/yyyy HH:mm').format(ped!.dataHoraCriacao.toLocal())
+    final dtRef = ped?.dataHoraEntregaPrevista ?? ped?.dataHoraCriacao;
+    final dataStr = dtRef != null
+        ? DateFormat('dd/MM/yyyy HH:mm').format(dtRef.toLocal())
         : 'Data não informada';
 
     final isEntregue = statusStr.contains('ENTREGUE') || statusStr.contains('CONCLUIDO');

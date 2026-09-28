@@ -5,11 +5,12 @@ import 'package:fincore_core/common/domain_primitives.dart';
 // ────────────────────────────────────────────────────────────────────
 
 enum StatusOrdemPreparo {
-  pendente,    // Ordem criada, aguardando início
-  emPreparo,   // Cozinheiro iniciou o preparo (timer ativo)
-  pronto,      // Preparo concluído, aguardando retirada/entrega
-  entregue,    // Pedido retirado / saiu para entrega
-  cancelado,   // Cancelado antes ou durante o preparo
+  pendente,         // Ordem criada, aguardando início
+  emPreparo,        // Cozinheiro iniciou o preparo (timer ativo)
+  pronto,           // Preparo concluído, aguardando saída/retirada
+  saiuParaEntrega,  // Saiu para entrega (Em trânsito)
+  entregue,         // Pedido entregue / concluído
+  cancelado,        // Cancelado antes ou durante o preparo
 }
 
 enum PrioridadeOrdem {

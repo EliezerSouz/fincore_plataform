@@ -13,6 +13,8 @@ import 'package:fincore_food_flutter/src/shared/services/dados_ordem_parser.dart
 import '../../shared/services/permissao_service.dart';
 import '../../estoque/controllers/estoque_controller.dart';
 import '../../shared/data/sync/supabase_sync_service.dart';
+import '../../shared/services/sound_service.dart';
+import '../../cap/printing/print_capability.dart';
 
 class DeadlineInfo {
   final DateTime horarioEntrega;
@@ -59,6 +61,25 @@ class ItemProducaoNecessaria {
   });
 }
 
+/// Estatísticas de pedidos para exibição nos dias do calendário
+class EstatisticasDiaCalendario {
+  final int total;
+  final int atrasados;
+  final int finalizados;
+  final int emAberto;
+
+  const EstatisticasDiaCalendario({
+    this.total = 0,
+    this.atrasados = 0,
+    this.finalizados = 0,
+    this.emAberto = 0,
+  });
+
+  bool get temAtraso => atrasados > 0;
+  bool get todosFinalizados => total > 0 && finalizados == total;
+  bool get temEmAberto => emAberto > 0;
+}
+
 /// Controller do estado da Central de Pedidos.
 ///
 /// Responsabilidades:
@@ -87,17 +108,130 @@ class CentralPedidosController extends ChangeNotifier {
   Timer? _refreshTimer;
   StreamSubscription? _syncSub;
 
+  Set<String> _knownOrderIds = {};
+  bool _isFirstLoadCompleted = false;
+  OrdemPreparo? _lastNewOrder;
+  OrdemPreparo? get lastNewOrder => _lastNewOrder;
+
   CentralPedidosController({OrdemPreparoRepository? ordemRepo})
       : _ordemRepo =
             ordemRepo ?? DependencyInjection().get<OrdemPreparoRepository>() {
     carregarOrdens();
-    // Atualização automática a cada 15s (fallback) + escuta instantânea de eventos Realtime
+    // Refresh automático a cada 15s (fallback) + escuta instantânea de eventos Realtime
     _refreshTimer =
         Timer.periodic(const Duration(seconds: 15), (_) => carregarOrdens());
     try {
       final syncService = DependencyInjection().get<SupabaseSyncService>();
       _syncSub = syncService.onDataSynced.listen((_) => carregarOrdens());
     } catch (_) {}
+  }
+
+  List<OrdemPreparo> get ordensWebAguardandoAprovacao {
+    return _todasOrdens
+        .where((o) => isPedidoAguardandoAprovacao(o))
+        .toList();
+  }
+
+  void _checkNewOrders(List<OrdemPreparo> list) {
+    final currentIds = list.map((o) => o.id).toSet();
+    if (_isFirstLoadCompleted) {
+      final newOrders = list.where((o) =>
+        !_knownOrderIds.contains(o.id) &&
+        o.status != StatusOrdemPreparo.cancelado
+      ).toList();
+
+      if (newOrders.isNotEmpty) {
+        _lastNewOrder = newOrders.first;
+        final temWeb = newOrders.any((o) => isPedidoAguardandoAprovacao(o));
+        if (temWeb) {
+          SoundService.playUrgentSound();
+        } else {
+          SoundService.playNewOrderSound();
+        }
+      }
+    } else {
+      _isFirstLoadCompleted = true;
+    }
+    _knownOrderIds = currentIds;
+  }
+
+  final Set<String> _alertedAttentionOrders = {};
+  final Set<String> _alertedUrgentOrders = {};
+
+  void checkProximityAudioAlerts() {
+    if (!SoundService.enabled) return;
+    final now = DateTime.now();
+
+    final activeOrdens = _filteredOrdens.where((o) =>
+        o.status == StatusOrdemPreparo.pendente ||
+        o.status == StatusOrdemPreparo.emPreparo ||
+        o.status == StatusOrdemPreparo.pronto).toList();
+
+    for (final o in activeOrdens) {
+      final deadline = calculateDeadline(o);
+      final remainingMins = deadline.horarioEntrega.difference(now).inMinutes;
+
+      if (remainingMins <= 15 && !_alertedUrgentOrders.contains(o.id)) {
+        _alertedUrgentOrders.add(o.id);
+        _alertedAttentionOrders.add(o.id);
+        SoundService.playUrgentSound();
+      } else if (remainingMins <= 30 && !_alertedAttentionOrders.contains(o.id)) {
+        _alertedAttentionOrders.add(o.id);
+        SoundService.playAttentionSound();
+      }
+    }
+  }
+
+  /// Imprime em lote todos os pedidos da data selecionada
+  Future<int> imprimirPedidosDoDia({
+    required PrintUseCase printUseCase,
+  }) async {
+    int count = 0;
+    final ordensDoDia = _filteredOrdens.where((o) => o.status != StatusOrdemPreparo.cancelado).toList();
+
+    for (final o in ordensDoDia) {
+      final pRow = _pedidosMap[o.pedidoId];
+      final parsed = DadosOrdemKanban.fromOrdem(o);
+      final numeroPedido = getNumeroPedido(o.pedidoId) ?? pRow?.numeroPedido;
+
+      if (pRow != null) {
+        try {
+          final printData = PrintData(
+            pedidoId: pRow.id,
+            numeroPedido: numeroPedido,
+            clienteNome: parsed.cliente,
+            clienteTelefone: parsed.telefone,
+            tipoLogistica: pRow.tipoLogistica,
+            endereco: parsed.endereco,
+            bairro: parsed.bairro,
+            formaPagamento: parsed.pagamento,
+            totalCentavos: pRow.valorTotalCentavos,
+            taxaEntregaCentavos: pRow.valorTaxaEntregaCentavos,
+            trocoParaCentavos: pRow.trocoParaCentavos,
+            itens: o.itens.map((item) {
+              final unitPrice = _precosProdutosMap[item.produtoId] ?? 0;
+              return PrintDataItem(
+                nome: item.nomeProduto,
+                quantidade: item.quantidade,
+                precoUnitarioCentavos: unitPrice,
+                totalCentavos: (unitPrice * item.quantidade).toInt(),
+              );
+            }).toList(),
+            dataHora: pRow.dataHoraEntregaPrevista?.toLocal()
+                ?? parsed.dataAgendada
+                ?? pRow.dataHoraCriacao.toLocal(),
+            observacao: parsed.observacoesLimpa,
+            status: pRow.status,
+          );
+
+          await printUseCase.imprimirPedido(data: printData, usuario: 'lote_dia');
+          count++;
+        } catch (e) {
+          debugPrint('[imprimirPedidosDoDia] Erro ao imprimir pedido ${pRow.id}: $e');
+        }
+      }
+    }
+    return count;
   }
 
   // ── Getters públicos ────────────────────────────────────────────────
@@ -130,6 +264,9 @@ class CentralPedidosController extends ChangeNotifier {
 
   List<OrdemPreparo> get prontos =>
       _filteredOrdens.where((o) => o.status == StatusOrdemPreparo.pronto).toList();
+
+  List<OrdemPreparo> get saiuParaEntrega =>
+      _filteredOrdens.where((o) => o.status == StatusOrdemPreparo.saiuParaEntrega).toList();
 
   List<OrdemPreparo> get entregues =>
       _filteredOrdens.where((o) => o.status == StatusOrdemPreparo.entregue).toList();
@@ -247,6 +384,7 @@ class CentralPedidosController extends ChangeNotifier {
         await carregarListaPedidos();
         if (_isDisposed) return;
         _todasOrdens = list;
+        _checkNewOrders(list);
         _applyFilters();
         notifyListeners();
       } catch (e) {
@@ -264,6 +402,7 @@ class CentralPedidosController extends ChangeNotifier {
       await carregarListaPedidos();
       if (_isDisposed) return;
       _todasOrdens = list;
+      _checkNewOrders(list);
       _applyFilters();
     } catch (e) {
       if (_isDisposed) return;
@@ -317,7 +456,7 @@ class CentralPedidosController extends ChangeNotifier {
       final pedidoIds = ordens.map((o) => o.pedidoId).toSet().toList();
       if (pedidoIds.isNotEmpty) {
         final pedidosRows = await (db.select(db.pedidosTable)
-              ..where((t) => t.id.isIn(pedidoIds)))
+              ..where((t) => t.id.isIn(pedidoIds) & t.deletedAt.isNull().equals(true)))
             .get();
         _pedidosMap = {for (final row in pedidosRows) row.id: row};
       } else {
@@ -487,11 +626,15 @@ class CentralPedidosController extends ChangeNotifier {
     String tempoRestanteLabel = '';
 
     // ── Pedidos Concluídos / Cancelados ─────────────────────────────────
-    if (o.status == StatusOrdemPreparo.entregue ||
-        o.status == StatusOrdemPreparo.cancelado) {
-      statusLabel = o.status == StatusOrdemPreparo.cancelado ? 'Cancelado' : 'Entregue';
+    final isFinalizado = o.status == StatusOrdemPreparo.entregue ||
+        (pedido != null && {'entregue', 'concluido', 'concluído', 'finalizado'}.contains(pedido.status.toLowerCase().trim()));
+    final isCancelado = o.status == StatusOrdemPreparo.cancelado ||
+        (pedido != null && pedido.status.toLowerCase() == 'cancelado');
+
+    if (isFinalizado || isCancelado) {
+      statusLabel = isCancelado ? 'Cancelado' : 'Entregue';
       statusColor = const Color(0xFF6B7280);
-      tempoRestanteLabel = o.status == StatusOrdemPreparo.cancelado
+      tempoRestanteLabel = isCancelado
           ? 'Pedido cancelado'
           : 'Pedido entregue';
 
@@ -609,8 +752,14 @@ class CentralPedidosController extends ChangeNotifier {
 
   void _applyFilters() {
     final filtradas = _todasOrdens.where((o) {
+      if (o.status == StatusOrdemPreparo.cancelado) return false;
+      final pRow = _pedidosMap[o.pedidoId];
+      if (pRow != null && pRow.status.toLowerCase() == 'cancelado') return false;
+
       final parsed = DadosOrdemKanban.fromOrdem(o);
-      final dataOperacional = parsed.dataAgendada ?? o.criadaEm.toLocal();
+      final dataOperacional = parsed.dataAgendada
+          ?? pRow?.dataHoraEntregaPrevista?.toLocal()
+          ?? o.criadaEm.toLocal();
       final matchesDate = dataOperacional.year == _selectedDate.year &&
           dataOperacional.month == _selectedDate.month &&
           dataOperacional.day == _selectedDate.day;
@@ -652,6 +801,80 @@ class CentralPedidosController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Retorna um mapa com a contagem de pedidos operacionais/agendados por dia (DateTime sem hora -> quantidade)
+  Map<DateTime, int> getContagemPedidosPorDia() {
+    final Map<DateTime, int> counts = {};
+    for (final o in _todasOrdens) {
+      if (o.status == StatusOrdemPreparo.cancelado) continue;
+      final pRow = _pedidosMap[o.pedidoId];
+      if (pRow != null && pRow.status.toLowerCase() == 'cancelado') continue;
+
+      final parsed = DadosOrdemKanban.fromOrdem(o);
+      final dataOperacional = parsed.dataAgendada
+          ?? pRow?.dataHoraEntregaPrevista?.toLocal()
+          ?? o.criadaEm.toLocal();
+      final key = DateTime(dataOperacional.year, dataOperacional.month, dataOperacional.day);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  /// Retorna estatísticas detalhadas de pedidos por dia (total, atrasados, finalizados, em aberto)
+  Map<DateTime, EstatisticasDiaCalendario> getEstatisticasPedidosPorDia() {
+    final Map<DateTime, List<OrdemPreparo>> ordensPorDia = {};
+    for (final o in _todasOrdens) {
+      if (o.status == StatusOrdemPreparo.cancelado) continue;
+      final pRow = _pedidosMap[o.pedidoId];
+      if (pRow != null && pRow.status.toLowerCase() == 'cancelado') continue;
+
+      final parsed = DadosOrdemKanban.fromOrdem(o);
+      final dataOperacional = parsed.dataAgendada
+          ?? pRow?.dataHoraEntregaPrevista?.toLocal()
+          ?? o.criadaEm.toLocal();
+      final key = DateTime(dataOperacional.year, dataOperacional.month, dataOperacional.day);
+      ordensPorDia.putIfAbsent(key, () => []).add(o);
+    }
+
+    final Map<DateTime, EstatisticasDiaCalendario> stats = {};
+    for (final entry in ordensPorDia.entries) {
+      final date = entry.key;
+      final list = entry.value;
+
+      int atrasados = 0;
+      int finalizados = 0;
+      int emAberto = 0;
+
+      for (final o in list) {
+        final pRow = _pedidosMap[o.pedidoId];
+        final isFinalizado = o.status == StatusOrdemPreparo.entregue ||
+            (pRow != null && {'entregue', 'concluido', 'concluído', 'finalizado'}.contains(pRow.status.toLowerCase().trim()));
+
+        if (isFinalizado) {
+          finalizados++;
+        } else {
+          final dl = calculateDeadline(o);
+          final isAtrasado = dl.statusColor == const Color(0xFFDC2626) ||
+              dl.statusColor == const Color(0xFFEF4444) ||
+              dl.statusLabel.toLowerCase().contains('atrasad');
+          if (isAtrasado) {
+            atrasados++;
+          } else {
+            emAberto++;
+          }
+        }
+      }
+
+      stats[date] = EstatisticasDiaCalendario(
+        total: list.length,
+        atrasados: atrasados,
+        finalizados: finalizados,
+        emAberto: emAberto,
+      );
+    }
+
+    return stats;
+  }
+
   // ── Transição de status ───────────────────────────────────────────────
 
   String statusLabel(StatusOrdemPreparo s) {
@@ -662,6 +885,8 @@ class CentralPedidosController extends ChangeNotifier {
         return 'Em Preparo';
       case StatusOrdemPreparo.pronto:
         return 'Pronto';
+      case StatusOrdemPreparo.saiuParaEntrega:
+        return 'Saiu p/ Entrega';
       case StatusOrdemPreparo.entregue:
         return 'Entregue';
       case StatusOrdemPreparo.cancelado:
@@ -685,10 +910,12 @@ class CentralPedidosController extends ChangeNotifier {
     final db = DependencyInjection().get<FincoreDatabase>();
     final now = DateTime.now().toUtc();
 
+    final sanitizedPedidoStatus = novoStatus;
+
     await (db.update(db.pedidosTable)
           ..where((t) => t.id.equals(pedidoId)))
         .write(PedidosTableCompanion(
-      status: Value(novoStatus),
+      status: Value(sanitizedPedidoStatus),
       updatedAt: Value(now),
       syncStatus: const Value(SyncStatus.pending),
     ));
@@ -700,14 +927,15 @@ class CentralPedidosController extends ChangeNotifier {
 
     if (matchingOrdem != null) {
       final statusEnum = switch (novoStatus.toLowerCase()) {
-        'confirmado' || 'pendente' => StatusOrdemPreparo.pendente,
-        'em_preparo' || 'empreparo' => StatusOrdemPreparo.emPreparo,
+        'confirmado' || 'pendente' || 'recebido' || 'rascunho' => StatusOrdemPreparo.pendente,
+        'em_preparo' || 'empreparo' || 'preparando' => StatusOrdemPreparo.emPreparo,
         'pronto' => StatusOrdemPreparo.pronto,
-        'entregue' => StatusOrdemPreparo.entregue,
+        'saiu_para_entrega' || 'saiuparaentrega' || 'em_transito' || 'emtransito' => StatusOrdemPreparo.saiuParaEntrega,
+        'entregue' || 'concluido' || 'finalizado' => StatusOrdemPreparo.entregue,
         'cancelado' => StatusOrdemPreparo.cancelado,
         _ => StatusOrdemPreparo.values.firstWhere(
             (s) => s.name.toLowerCase() == novoStatus.toLowerCase(),
-            orElse: () => StatusOrdemPreparo.cancelado,
+            orElse: () => StatusOrdemPreparo.pendente,
           ),
       };
       try {
@@ -720,6 +948,8 @@ class CentralPedidosController extends ChangeNotifier {
     try {
       final outboxService = DependencyInjection().get<OutboxService>();
       final tenantId = _ordemRepo.activeTenantId;
+      final pedRow = await (db.select(db.pedidosTable)..where((t) => t.id.equals(pedidoId))).getSingleOrNull();
+
       await outboxService.enqueue(
         entity: 'Pedido',
         entityId: pedidoId,
@@ -727,10 +957,16 @@ class CentralPedidosController extends ChangeNotifier {
         payload: {
           'id': pedidoId,
           'tenantId': tenantId,
-          'status': novoStatus,
+          'status': sanitizedPedidoStatus,
+          if (pedRow != null) ...{
+            'valorSubtotalCentavos': pedRow.valorSubtotalCentavos,
+            'valorTaxaEntregaCentavos': pedRow.valorTaxaEntregaCentavos,
+            'valorTaxaServicoCentavos': pedRow.valorTaxaServicoCentavos,
+            'valorTotalCentavos': pedRow.valorTotalCentavos,
+          },
           'updatedAt': now.toIso8601String(),
         },
-        version: 1,
+        version: (pedRow?.syncVersion ?? 1) + 1,
       );
     } catch (e) {
       debugPrint('[PEDIDOS] Erro ao enfileirar outbox em atualizarStatusPedidoDireto: $e');
@@ -784,19 +1020,21 @@ class CentralPedidosController extends ChangeNotifier {
       final db = DependencyInjection().get<FincoreDatabase>();
       final now = DateTime.now().toUtc();
       final statusStr = switch (novoStatus) {
-        StatusOrdemPreparo.pendente  => 'confirmado',
-        StatusOrdemPreparo.emPreparo => 'em_preparo',
-        StatusOrdemPreparo.pronto    => 'pronto',
-        StatusOrdemPreparo.entregue  => 'entregue',
-        StatusOrdemPreparo.cancelado => 'cancelado',
+        StatusOrdemPreparo.pendente        => 'confirmado',
+        StatusOrdemPreparo.emPreparo       => 'em_preparo',
+        StatusOrdemPreparo.pronto          => 'pronto',
+        StatusOrdemPreparo.saiuParaEntrega => 'saiu_para_entrega',
+        StatusOrdemPreparo.entregue        => 'entregue',
+        StatusOrdemPreparo.cancelado       => 'cancelado',
       };
 
       final statusOrdemStr = switch (novoStatus) {
-        StatusOrdemPreparo.pendente  => 'pendente',
-        StatusOrdemPreparo.emPreparo => 'em_preparo',
-        StatusOrdemPreparo.pronto    => 'pronto',
-        StatusOrdemPreparo.entregue  => 'entregue',
-        StatusOrdemPreparo.cancelado => 'cancelado',
+        StatusOrdemPreparo.pendente        => 'pendente',
+        StatusOrdemPreparo.emPreparo       => 'em_preparo',
+        StatusOrdemPreparo.pronto          => 'pronto',
+        StatusOrdemPreparo.saiuParaEntrega => 'saiu_para_entrega',
+        StatusOrdemPreparo.entregue        => 'entregue',
+        StatusOrdemPreparo.cancelado       => 'cancelado',
       };
 
       await (db.update(db.pedidosTable)
@@ -1026,14 +1264,19 @@ class CentralPedidosController extends ChangeNotifier {
 
     final isRev = isReversao(ordem, novoStatus);
     final isCancelamento = novoStatus == StatusOrdemPreparo.cancelado;
+    final isAprovacao = ordem.status == StatusOrdemPreparo.pendente && !isCancelamento;
     final titulo = isCancelamento
         ? 'Pedido Cancelado'
-        : (isRev ? 'Status Revertido' : 'Status Atualizado');
+        : (isAprovacao
+            ? 'Pedido Aprovado'
+            : (isRev ? 'Status Revertido' : 'Status Atualizado'));
     final descricao = isCancelamento
-        ? 'Cancelado por "${operadorNome ?? 'Operador'}". Motivo: ${motivo ?? 'N\u00e3o informado'}'
-        : (isRev
-            ? 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}". Motivo: $motivo'
-            : 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}"');
+        ? 'Cancelado por "${operadorNome ?? 'Operador'}". Motivo: ${motivo ?? 'Não informado'}'
+        : (isAprovacao
+            ? 'Pedido online aprovado por "${operadorNome ?? 'Operador'}" e encaminhado para preparação.'
+            : (isRev
+                ? 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}". Motivo: $motivo'
+                : 'Passou de "${statusLabel(ordem.status)}" para "${statusLabel(novoStatus)}"'));
 
     await _ordemRepo.registrarHistorico(
       ordem.id,
@@ -1095,6 +1338,104 @@ class CentralPedidosController extends ChangeNotifier {
     }
 
     _applyFilters();
+    notifyListeners();
+  }
+
+  bool isPedidoAguardandoAprovacao(OrdemPreparo o) {
+    if (o.status != StatusOrdemPreparo.pendente) return false;
+    final pedido = _pedidosMap[o.pedidoId];
+    if (pedido != null) {
+      final isOrigemWeb = pedido.canalOrigem == 'cardapio_web' || o.observacoes?.contains('cardapio_web') == true;
+      final isStatusPendente = pedido.status == 'aguardando_aprovacao' || pedido.status == 'pendente';
+      return isOrigemWeb && isStatusPendente;
+    }
+    final obs = o.observacoes ?? '';
+    final isObsWeb = obs.contains('cardapio_web') || obs.contains('🌐');
+    return isObsWeb;
+  }
+
+  Future<void> aprovarPedidoWeb(OrdemPreparo ordem) async {
+    final now = DateTime.now().toUtc();
+    final db = DependencyInjection().get<FincoreDatabase>();
+    final outboxService = DependencyInjection().get<OutboxService>();
+
+    String? operadorNome;
+    try {
+      final tenantCtx = DependencyInjection().get<TenantContext>();
+      if (tenantCtx.hasContext) {
+        operadorNome = tenantCtx.usuario.nome;
+      }
+    } catch (_) {}
+
+    // 1. Atualiza a tabela 'pedido' localmente para status 'confirmado'
+    final pedidoRow = await (db.select(db.pedidosTable)
+          ..where((t) => t.id.equals(ordem.pedidoId)))
+        .getSingleOrNull();
+
+    final pedidoSyncVersion = (pedidoRow?.syncVersion ?? 0) + 1;
+
+    if (pedidoRow != null) {
+      await (db.update(db.pedidosTable)
+            ..where((t) => t.id.equals(ordem.pedidoId)))
+          .write(PedidosTableCompanion(
+        status: const Value('confirmado'),
+        syncVersion: Value(pedidoSyncVersion),
+        updatedAt: Value(now),
+      ));
+    }
+
+    // 2. Envia para o Outbox do Supabase
+    try {
+      await outboxService.enqueue(
+        entity: 'Pedido',
+        entityId: ordem.pedidoId,
+        action: 'update',
+        payload: {
+          'id': ordem.pedidoId,
+          'tenantId': ordem.tenantId,
+          'status': 'confirmado',
+          'syncVersion': pedidoSyncVersion,
+          'updatedAt': now.toIso8601String(),
+        },
+        version: pedidoSyncVersion,
+      );
+
+      final syncEngine = DependencyInjection().get<SyncEngine>();
+      unawaited(syncEngine.processPendingQueue().catchError((_) => const SyncResult(
+            successCount: 0,
+            failureCount: 0,
+            hasPendingAfter: true,
+          )));
+    } catch (e) {
+      debugPrint('[PEDIDOS] Erro ao colocar aprovação de pedido no outbox: $e');
+    }
+
+    // 3. Registra no histórico de auditoria
+    const titulo = 'Pedido Web Aprovado';
+    final descricao = 'Pedido online aprovado e aceito por "${operadorNome ?? 'Operador'}". Pedido liberado na fila de produção.';
+
+    await _ordemRepo.registrarHistorico(
+      ordem.id,
+      titulo,
+      descricao,
+      operadorNome: operadorNome,
+    );
+
+    // 4. Atualiza o cache local de pedidosMap
+    if (pedidoRow != null) {
+      final updatedPedido = pedidoRow.copyWith(
+        status: 'confirmado',
+        syncVersion: pedidoSyncVersion,
+        updatedAt: now,
+      );
+      _pedidosMap[ordem.pedidoId] = updatedPedido;
+      
+      final hIdx = _historicoPedidos.indexWhere((p) => p.id == ordem.pedidoId);
+      if (hIdx != -1) {
+        _historicoPedidos[hIdx] = updatedPedido;
+      }
+    }
+
     notifyListeners();
   }
 
