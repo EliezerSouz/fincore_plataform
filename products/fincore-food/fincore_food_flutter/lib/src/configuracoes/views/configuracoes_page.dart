@@ -682,6 +682,16 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         _syncStatus = SyncStatus.synced;
         _syncMessage = 'Sincronizado agora';
       });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Configurações salvas e sincronizadas com sucesso!'),
+            backgroundColor: Color(0xFF16A34A),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint('Erro ao salvar: $e');
       setState(() {
@@ -689,6 +699,16 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         _syncStatus = SyncStatus.failed;
         _syncMessage = 'Erro ao salvar';
       });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Erro ao salvar configurações: $e'),
+            backgroundColor: FincoreColors.danger,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 
@@ -761,12 +781,76 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                desc,
-                style: const TextStyle(fontSize: 12.5, color: FincoreColors.textMuted),
+              Expanded(
+                child: Text(
+                  desc,
+                  style: const TextStyle(fontSize: 12.5, color: FincoreColors.textMuted),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (_syncMessage.isNotEmpty) ...[
+                    Icon(
+                      _syncStatus == SyncStatus.synced || _syncStatus == SyncStatus.resolved
+                          ? Icons.cloud_done_outlined
+                          : _syncStatus == SyncStatus.processing
+                              ? Icons.sync
+                              : Icons.cloud_off_outlined,
+                      size: 15,
+                      color: _syncStatus == SyncStatus.synced || _syncStatus == SyncStatus.resolved
+                          ? const Color(0xFF16A34A)
+                          : _syncStatus == SyncStatus.processing
+                              ? FincoreColors.primary
+                              : FincoreColors.textMuted,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _syncMessage,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _syncStatus == SyncStatus.synced || _syncStatus == SyncStatus.resolved
+                            ? const Color(0xFF16A34A)
+                            : _syncStatus == SyncStatus.processing
+                                ? FincoreColors.primary
+                                : FincoreColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  // Botão Salvar Principal no Topo (Sempre visível e liberado)
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: !_isSaving ? FincoreColors.primaryGradient : null,
+                      color: !_isSaving ? null : FincoreColors.border,
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: !_isSaving
+                          ? FincoreShadows.glow(FincoreColors.primary, intensity: 0.2)
+                          : null,
+                    ),
+                    child: ElevatedButton.icon(
+                      onPressed: !_isSaving ? _saveConfig : null,
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.save_rounded, size: 16, color: Colors.white),
+                      label: Text(
+                        _isSaving ? 'Salvando...' : 'Salvar Alterações',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   if (kDebugMode)
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, color: FincoreColors.textMuted, size: 20),
@@ -1095,19 +1179,15 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
             // Botão Salvar Alterações (gradiente laranja)
             Container(
               decoration: BoxDecoration(
-                gradient: (_hasUnsavedChanges && !_isSaving)
-                    ? FincoreColors.primaryGradient
-                    : null,
-                color: (_hasUnsavedChanges && !_isSaving)
-                    ? null
-                    : FincoreColors.border,
+                gradient: !_isSaving ? FincoreColors.primaryGradient : null,
+                color: !_isSaving ? null : FincoreColors.border,
                 borderRadius: BorderRadius.circular(10),
-                boxShadow: (_hasUnsavedChanges && !_isSaving)
+                boxShadow: !_isSaving
                     ? FincoreShadows.glow(FincoreColors.primary, intensity: 0.25)
                     : null,
               ),
               child: ElevatedButton(
-                onPressed: (_hasUnsavedChanges && !_isSaving) ? _saveConfig : null,
+                onPressed: !_isSaving ? _saveConfig : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.transparent,
                   shadowColor: Colors.transparent,

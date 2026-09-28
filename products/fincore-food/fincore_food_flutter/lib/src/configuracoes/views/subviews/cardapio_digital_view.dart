@@ -242,6 +242,7 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
         );
       }
     });
+    widget.onChanged?.call();
   }
 
   Future<void> _checkConnectivity() async {
@@ -574,7 +575,10 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
               FincoreTextField(
                 controller: _baseUrlCtrl,
                 hintText: 'https://fincore-cardapio-web.vercel.app ou https://cardapio.minhaloja.com.br',
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) {
+                  setState(() {});
+                  widget.onChanged?.call();
+                },
               ),
               const SizedBox(height: 14),
               const FincoreFieldLabel(label: 'Link Público Completo da Empresa:'),
@@ -844,6 +848,7 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
                   controller: _prazoMinimoCtrl,
                   keyboardType: TextInputType.number,
                   hintText: '120',
+                  onChanged: (_) => widget.onChanged?.call(),
                 ),
               ),
               const SizedBox(width: 10),
@@ -940,6 +945,7 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
                                     nome: dia.nome,
                                   );
                                 });
+                                widget.onChanged?.call();
                               },
                             ),
                             const SizedBox(width: 6),
@@ -974,6 +980,7 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
                                   nome: dia.nome,
                                 );
                               });
+                              widget.onChanged?.call();
                             },
                           ),
                         ),
@@ -993,6 +1000,7 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
                                   nome: dia.nome,
                                 );
                               });
+                              widget.onChanged?.call();
                             },
                           ),
                         ),
@@ -1047,6 +1055,7 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
           FincoreTextField(
             controller: _mensagemFechadoCtrl,
             hintText: 'Estamos fora do horário de atendimento. Faça seu pedido para o próximo turno!',
+            onChanged: (_) => widget.onChanged?.call(),
           ),
         ],
       ),
@@ -1061,7 +1070,10 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
   }) {
     final isSelected = _lojaOnlineStatus == value;
     return InkWell(
-      onTap: () => setState(() => _lojaOnlineStatus = value),
+      onTap: () {
+        setState(() => _lojaOnlineStatus = value);
+        widget.onChanged?.call();
+      },
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
