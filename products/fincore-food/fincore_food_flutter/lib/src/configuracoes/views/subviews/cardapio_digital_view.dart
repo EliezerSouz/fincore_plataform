@@ -27,10 +27,10 @@ class CardapioDigitalView extends StatefulWidget {
   });
 
   @override
-  State<CardapioDigitalView> createState() => _CardapioDigitalViewState();
+  State<CardapioDigitalView> createState() => CardapioDigitalViewState();
 }
 
-class _CardapioDigitalViewState extends State<CardapioDigitalView> {
+class CardapioDigitalViewState extends State<CardapioDigitalView> {
   final _baseUrlCtrl = TextEditingController(text: 'https://fincore-cardapio-web.vercel.app');
   bool _isCheckingStatus = false;
   bool? _isOnline;
@@ -41,10 +41,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
   final _prazoMinimoCtrl = TextEditingController(text: '120');
   final _mensagemFechadoCtrl = TextEditingController(text: 'Estamos fora do horário de atendimento. Faça seu pedido agendado!');
   List<Map<String, dynamic>> _bloqueiosAgendamento = [];
-
-  // Estado Unificado de Salvamento
-  bool _isSaving = false;
-  String _saveMessage = '';
 
   final Map<String, ({bool ativo, String abertura, String fechamento, String nome})> _diasSemana = {
     'dom': (ativo: true, abertura: '08:00', fechamento: '22:00', nome: 'Domingo'),
@@ -178,13 +174,9 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
   }
 
   /// Salva todas as configurações do cardápio digital (URL, status, prazos, horários e bloqueios)
-  Future<void> _salvarTudo() async {
+  Future<void> salvar() async {
     final tId = _tenantId;
     if (tId.isEmpty) return;
-    setState(() {
-      _isSaving = true;
-      _saveMessage = '';
-    });
 
     try {
       final prazoMin = int.tryParse(_prazoMinimoCtrl.text.trim()) ?? 120;
@@ -229,17 +221,9 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
         }).eq('tenantId', tId);
       }
 
-      if (mounted) {
-        setState(() {
-          _saveMessage = '✅ Configurações do Cardápio Digital salvas com sucesso!';
-        });
-        widget.onChanged?.call();
-        _checkConnectivity();
-      }
+      _checkConnectivity();
     } catch (e) {
-      if (mounted) setState(() => _saveMessage = 'Erro ao salvar configurações: $e');
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
+      debugPrint('Erro ao salvar cardápio digital: $e');
     }
   }
 
@@ -699,65 +683,6 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                       ],
                     );
             },
-          ),
-        ),
-
-        const SizedBox(height: 24),
-
-        // ─── 5. BARRA UNIFICADA DE SALVAMENTO ────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: FincoreColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 2)),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Salvar Alterações do Cardápio Digital',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: FincoreColors.textPrimary),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _saveMessage.isNotEmpty
-                          ? _saveMessage
-                          : 'Grava o link, horários de atendimento, prazo mínimo e bloqueios de data em um único clique.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _saveMessage.contains('Erro')
-                            ? FincoreColors.danger
-                            : (_saveMessage.isNotEmpty ? const Color(0xFF16A34A) : FincoreColors.textSecondary),
-                        fontWeight: _saveMessage.isNotEmpty ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 16),
-              FilledButton.icon(
-                onPressed: _isSaving ? null : _salvarTudo,
-                icon: _isSaving
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.save_rounded, size: 18),
-                label: Text(
-                  _isSaving ? 'Salvando...' : 'Salvar Configurações do Cardápio',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: FincoreColors.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ],
           ),
         ),
 
@@ -1314,6 +1239,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                     setState(() {
                       _bloqueiosAgendamento.removeAt(idx);
                     });
+                    widget.onChanged?.call();
                   },
                 ),
               ],
@@ -1459,6 +1385,7 @@ class _CardapioDigitalViewState extends State<CardapioDigitalView> {
                       'motivo': motivoCtrl.text.trim(),
                     });
                   });
+                  widget.onChanged?.call();
                   Navigator.of(ctx).pop();
                 },
                 child: const Text('Adicionar Bloqueio'),

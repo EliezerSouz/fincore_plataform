@@ -51,6 +51,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
   int _operacaoSubSection = 0; // 0: Regional, 1: Fiscal, 2: PIX
 
   final _personalizacaoKey = GlobalKey<PersonalizacaoViewState>();
+  final _cardapioDigitalKey = GlobalKey<CardapioDigitalViewState>();
 
   Timer? _debounceTimer;
   String _syncMessage = '';
@@ -499,6 +500,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
     try {
       if (_selectedSection == 9 || _personalizacaoKey.currentState != null) {
         await _personalizacaoKey.currentState?.salvar();
+      }
+      if (_selectedSection == 3 || _cardapioDigitalKey.currentState != null) {
+        await _cardapioDigitalKey.currentState?.salvar();
       }
 
       final principalPix = _pixKeys.firstWhere(
@@ -1142,6 +1146,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       case 2: return _buildSectionOperacao();
       case 3:
         return CardapioDigitalView(
+          key: _cardapioDigitalKey,
           empresa: _empresa,
           onChanged: () {
             if (!_hasUnsavedChanges) setState(() => _hasUnsavedChanges = true);
