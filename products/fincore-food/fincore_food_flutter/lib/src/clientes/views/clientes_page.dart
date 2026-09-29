@@ -2681,7 +2681,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                           ),
                         ),
                         child: Text(
-                          (p.status ?? 'Confirmado').toUpperCase(),
+                          (p.status.isEmpty ? 'Confirmado' : p.status).toUpperCase(),
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.bold,
@@ -3135,13 +3135,13 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                 ? todosTitulos.where((t) => t.isNotaPrazo).toList()
                 : todosTitulos;
 
-            // O saldo devedor pendente do cliente compreende APENAS pendências em Nota a Prazo (fiado/faturado).
+            // Pendências em aberto (Notas a Prazo / Fiado pendente + PIX aguardando validação de conta)
             final totalAReceberCentavos = todosTitulos
-                .where((t) => t.isNotaPrazo && t.status != StatusTituloReceber.recebido && t.status != StatusTituloReceber.cancelado)
+                .where((t) => !t.isPagoPeloCliente && t.status != StatusTituloReceber.cancelado)
                 .fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
 
             final totalRecebidoCentavos = todosTitulos
-                .where((t) => t.status == StatusTituloReceber.recebido || !t.isNotaPrazo)
+                .where((t) => t.isPagoPeloCliente && t.status != StatusTituloReceber.cancelado)
                 .fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
 
             final totalAtrasadoCentavos = todosTitulos
@@ -3285,7 +3285,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'TOTAL QUITADO / PAGO',
+                              'TOTAL QUITADO / VALIDADO',
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
@@ -3304,7 +3304,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '${todosTitulos.where((t) => t.status == StatusTituloReceber.recebido).length} pedido(s) pagos',
+                              '${todosTitulos.where((t) => t.isPagoPeloCliente).length} pedido(s) liquidados',
                               style: const TextStyle(fontSize: 10, color: FincoreColors.textMuted),
                             ),
                           ],
@@ -3348,22 +3348,37 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   }
 
   Widget _buildClienteTituloCard(TituloReceber t, Cliente c, ContasReceberController contasCtrl) {
-    // Para o cliente, o pagamento só é pendente se for Nota a Prazo (fiado) não quitada.
-    // Cartões, PIX e Dinheiro são quitados pelo cliente no ato da venda.
-    final isPagoPeloCliente = t.isPagoPeloCliente;
-    final isAtrasado = t.isNotaPrazo && t.status == StatusTituloReceber.atrasado;
+    final isPixAguardando = t.isPix && !t.isRecebido;
+    final isFiadoAtrasado = t.isNotaPrazo && t.status == StatusTituloReceber.atrasado;
+    final isFiadoPendente = t.isNotaPrazo && !t.isRecebido;
 
-    final Color statusColor = isPagoPeloCliente
-        ? const Color(0xFF10B981)
-        : isAtrasado
-            ? const Color(0xFFEF4444)
-            : const Color(0xFFF59E0B);
+    final Color statusColor;
+    final String statusLabel;
 
-    final String statusLabel = isPagoPeloCliente
-        ? 'PAGO'
-        : isAtrasado
-            ? 'ATRASADO (FIADO)'
-            : 'A RECEBER (FIADO)';
+    if (t.isPix) {
+      if (t.isRecebido) {
+        statusColor = const Color(0xFF10B981);
+        statusLabel = 'PIX VALIDADO';
+      } else {
+        statusColor = const Color(0xFF0284C7);
+        statusLabel = 'PIX A VALIDAR EM CONTA';
+      }
+    } else if (t.isNotaPrazo) {
+      if (t.isRecebido) {
+        statusColor = const Color(0xFF10B981);
+        statusLabel = 'QUITADO / PAGO';
+      } else if (isFiadoAtrasado) {
+        statusColor = const Color(0xFFEF4444);
+        statusLabel = 'ATRASADO (FIADO)';
+      } else {
+        statusColor = const Color(0xFFF59E0B);
+        statusLabel = 'A RECEBER (FIADO)';
+      }
+    } else {
+      // Cartão, Dinheiro, etc.
+      statusColor = const Color(0xFF10B981);
+      statusLabel = 'PAGO PELO CLIENTE';
+    }
 
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
 
@@ -3374,8 +3389,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
         color: FincoreColors.surfaceElevated,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isPagoPeloCliente ? FincoreColors.border : statusColor.withValues(alpha: 0.4),
-          width: 1,
+          color: (isPixAguardando || isFiadoPendente) ? statusColor.withValues(alpha: 0.45) : FincoreColors.border,
+          width: (isPixAguardando || isFiadoPendente) ? 1.2 : 1,
         ),
       ),
       child: Column(
@@ -3446,7 +3461,11 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
           const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.payment_outlined, size: 14, color: FincoreColors.textSecondary),
+              Icon(
+                t.isPix ? Icons.pix_rounded : Icons.payment_outlined,
+                size: 14,
+                color: t.isPix ? const Color(0xFF32BCAD) : FincoreColors.textSecondary,
+              ),
               const SizedBox(width: 4),
               Text(
                 t.formaPagamentoNome,
@@ -3474,32 +3493,67 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
             ],
           ),
           const SizedBox(height: 3),
-          if (isPagoPeloCliente) ...[
+          if (t.isPix) ...[
+            if (t.isRecebido) ...[
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_outline_rounded, size: 12, color: Color(0xFF10B981)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'PIX Validado em conta em: ${dateFormat.format(t.dataRecebimento ?? t.dataEmissao)}',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ] else ...[
+              Row(
+                children: [
+                  const Icon(Icons.pending_actions_rounded, size: 12, color: Color(0xFF0284C7)),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Aguardando conferência de comprovante / crédito em conta',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF0284C7), fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ],
+          ] else if (t.isNotaPrazo) ...[
+            if (t.isRecebido) ...[
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_outline_rounded, size: 12, color: Color(0xFF10B981)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Fiado quitado em: ${dateFormat.format(t.dataRecebimento ?? t.dataEmissao)}',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ] else ...[
+              Text(
+                'Vencimento do Fiado: ${dateFormat.format(t.dataVencimento)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isFiadoAtrasado ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+                  fontWeight: isFiadoAtrasado ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ] else ...[
             Row(
               children: [
                 const Icon(Icons.check_circle_outline_rounded, size: 12, color: Color(0xFF10B981)),
                 const SizedBox(width: 4),
                 Text(
-                  t.isNotaPrazo
-                      ? 'Quitado em: ${dateFormat.format(t.dataRecebimento ?? t.dataEmissao)}'
-                      : t.isCartao
-                          ? 'Pago no ato · Repasse Adquirente: ${t.isRecebido ? "Liquidado" : "Previsão ${dateFormat.format(t.dataVencimento)}"}'
-                          : 'Pago no ato · ${dateFormat.format(t.dataEmissao)}',
+                  t.isCartao
+                      ? 'Pago no ato · Repasse Adquirente: ${t.isRecebido ? "Liquidado" : "Previsão ${dateFormat.format(t.dataVencimento)}"}'
+                      : 'Pago no ato · ${dateFormat.format(t.dataEmissao)}',
                   style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
                 ),
               ],
             ),
-          ] else ...[
-            Text(
-              'Vencimento do Fiado: ${dateFormat.format(t.dataVencimento)}',
-              style: TextStyle(
-                fontSize: 11,
-                color: isAtrasado ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
-                fontWeight: isAtrasado ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
           ],
-          if (!isPagoPeloCliente) ...[
+          if (isPixAguardando || isFiadoPendente) ...[
             const Divider(height: 14, color: FincoreColors.border),
             Row(
               children: [
@@ -3514,24 +3568,24 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                       if (ok && mounted) {
                         setState(() {});
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
+                          SnackBar(
                             backgroundColor: FincoreColors.success,
-                            content: Text('Baixa confirmada com sucesso!'),
+                            content: Text(t.isPix ? 'PIX validado e confirmado em conta!' : 'Baixa de fiado confirmada com sucesso!'),
                           ),
                         );
                       }
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
+                      backgroundColor: isPixAguardando ? const Color(0xFF0284C7) : const Color(0xFF10B981),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
-                    icon: const Icon(Icons.price_check_rounded, size: 16),
-                    label: const Text('Dar Baixa', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    icon: Icon(isPixAguardando ? Icons.verified_user_rounded : Icons.price_check_rounded, size: 16),
+                    label: Text(isPixAguardando ? 'Validar PIX em Conta' : 'Dar Baixa no Fiado', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                   ),
                 ),
-                if (c.telefone.isNotEmpty && c.telefone != '00000000000') ...[
+                if (t.isNotaPrazo && c.telefone.isNotEmpty && c.telefone != '00000000000') ...[
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: () => _abrirWhatsAppCobrancaTitulo(t, c),

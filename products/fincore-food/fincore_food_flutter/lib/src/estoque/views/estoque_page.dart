@@ -1387,6 +1387,13 @@ class EstoqueProcessoData {
   final int impactoFisicoTotal;
   final TipoProcessoEstoque tipoProcesso;
 
+  final String? canalOrigem;
+  final String? tipoLogistica;
+  final String? clienteNome;
+  final String? clienteTelefone;
+  final DateTime? dataHoraCriacao;
+  final DateTime? dataHoraEntregaPrevista;
+
   EstoqueProcessoData({
     required this.key,
     this.pedidoId,
@@ -1403,7 +1410,42 @@ class EstoqueProcessoData {
     required this.reservaAtiva,
     required this.impactoFisicoTotal,
     required this.tipoProcesso,
+    this.canalOrigem,
+    this.tipoLogistica,
+    this.clienteNome,
+    this.clienteTelefone,
+    this.dataHoraCriacao,
+    this.dataHoraEntregaPrevista,
   });
+
+  bool get isOrigemWeb {
+    final c = (canalOrigem ?? '').toLowerCase();
+    return c.contains('web') || c.contains('cardapio');
+  }
+
+  String get canalFormatado {
+    if (pedidoId == null || pedidoId!.isEmpty) return '';
+    final canal = (canalOrigem ?? '').toLowerCase();
+    final tipo = tipoLogistica ?? '';
+
+    String cStr;
+    if (canal.contains('web') || canal.contains('cardapio')) {
+      cStr = '🌐 Web (Cardápio Digital)';
+    } else if (canal.contains('balcao') || canal.contains('balcão')) {
+      cStr = '🏪 Balcão / Caixa';
+    } else if (canal.contains('delivery')) {
+      cStr = '🛵 Delivery';
+    } else if (canal.contains('mesa') || canal.contains('comanda')) {
+      cStr = '🍽️ Mesa / Comanda';
+    } else {
+      cStr = '⚡ PDV Express';
+    }
+
+    if (tipo.isNotEmpty && !cStr.contains(tipo)) {
+      return '$cStr • $tipo';
+    }
+    return cStr;
+  }
 
   /// Título de Negócio do Processo
   String get titulo {
@@ -1523,6 +1565,8 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
   List<ProdutoData> _produtosList = [];
   Map<String, String> _produtosNomes = {};
   Map<String, String> _pedidosNumeros = {};
+  Map<String, PedidoData> _pedidosMap = {};
+  Map<String, ClienteData> _clientesMap = {};
 
   // Filtros & Ordenação
   String _filtroTipo = 'TODOS'; // 'TODOS', 'PRODUCAO', 'EXPEDICAO', 'RESERVA', 'AJUSTE', 'PERDA'
@@ -1635,6 +1679,18 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
           ..where((t) => t.tenantId.equals(tenantId)))
         .get();
 
+    final clientes = await (db.select(db.clientesTable)
+          ..where((t) => t.tenantId.equals(tenantId)))
+        .get();
+
+    final Map<String, ClienteData> clientesMap = {
+      for (final c in clientes) c.id: c,
+    };
+
+    final Map<String, PedidoData> pedidosMap = {
+      for (final p in pedidos) p.id: p,
+    };
+
     final Map<String, String> pedidosNumeros = {
       for (final p in pedidos)
         p.id: p.numeroPedido != null
@@ -1728,6 +1784,8 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
         _produtosList = prods;
         _produtosNomes = nomes;
         _pedidosNumeros = pedidosNumeros;
+        _pedidosMap = pedidosMap;
+        _clientesMap = clientesMap;
         _loading = false;
       });
     }
@@ -1759,6 +1817,28 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
       final nomeProd = _produtosNomes[prodId] ?? 'Produto Removido';
       final pedId = prime.pedidoId;
       final numPed = pedId != null ? _pedidosNumeros[pedId] : null;
+      final ped = pedId != null ? _pedidosMap[pedId] : null;
+
+      String? clienteNome;
+      String? clienteTelefone;
+      String? canalOrigem;
+      String? tipoLogistica;
+      DateTime? dtCriacao;
+      DateTime? dtEntrega;
+
+      if (ped != null) {
+        final c = ped.clienteId != null ? _clientesMap[ped.clienteId] : null;
+        clienteNome = ped.clienteNomeAvulso?.trim().isNotEmpty == true
+            ? ped.clienteNomeAvulso
+            : (c != null && c.nome.trim().isNotEmpty ? c.nome : 'Consumidor Avulso');
+        clienteTelefone = ped.clienteTelefoneAvulso?.trim().isNotEmpty == true
+            ? ped.clienteTelefoneAvulso
+            : c?.telefone;
+        canalOrigem = ped.canalOrigem;
+        tipoLogistica = ped.tipoLogistica;
+        dtCriacao = ped.dataHoraCriacao.toLocal();
+        dtEntrega = ped.dataHoraEntregaPrevista?.toLocal();
+      }
 
       int resTotal = 0;
       int expTotal = 0;
@@ -1766,11 +1846,11 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
       int prodTotal = 0;
 
       for (final m in list) {
-        final tipo = (m.tipo ?? '').toLowerCase();
+        final tipo = m.tipo.toLowerCase();
         final isReserva = tipo.contains('reserva') && !tipo.contains('liberacao');
         final isExpedicao = tipo.contains('expedicao') || tipo.contains('saida');
         final isLiberacao = tipo.contains('liberacao') || tipo.contains('cancelamento');
-        final isProducao = tipo.contains('producao') || (m.motivo?.contains('producao') ?? false);
+        final isProducao = tipo.contains('producao') || m.motivo.contains('producao');
 
         if (isReserva) resTotal += m.quantidade;
         if (isExpedicao && !tipo.contains('perda') && !tipo.contains('descarte')) expTotal += m.quantidade;
@@ -1801,7 +1881,7 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
           impactoFisico = -expTotal;
         }
       } else {
-        final tipoRaw = (prime.tipo ?? '').toLowerCase();
+        final tipoRaw = prime.tipo.toLowerCase();
         if (tipoRaw.contains('producao')) {
           tipoProc = TipoProcessoEstoque.producao;
           impactoFisico = prime.quantidade;
@@ -1833,6 +1913,12 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
         reservaAtiva: resAtiva,
         impactoFisicoTotal: impactoFisico,
         tipoProcesso: tipoProc,
+        canalOrigem: canalOrigem,
+        tipoLogistica: tipoLogistica,
+        clienteNome: clienteNome,
+        clienteTelefone: clienteTelefone,
+        dataHoraCriacao: dtCriacao,
+        dataHoraEntregaPrevista: dtEntrega,
       ));
     }
 
@@ -2443,6 +2529,86 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
                       ),
                     ],
                   ),
+
+                  // Linha extra de metadados reais de pedido (Canal, Cliente e Agendamento)
+                  if (proc.pedidoId != null) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        // Chip do Canal de Venda
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: proc.isOrigemWeb
+                                ? const Color(0xFF0284C7).withValues(alpha: 0.15)
+                                : FincoreColors.surfaceElevated,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: proc.isOrigemWeb
+                                  ? const Color(0xFF0284C7).withValues(alpha: 0.4)
+                                  : FincoreColors.border,
+                            ),
+                          ),
+                          child: Text(
+                            proc.canalFormatado,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.bold,
+                              color: proc.isOrigemWeb ? const Color(0xFF38BDF8) : FincoreColors.textSecondary,
+                            ),
+                          ),
+                        ),
+
+                        // Chip do Cliente
+                        if (proc.clienteNome != null && proc.clienteNome!.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: FincoreColors.surfaceElevated,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: FincoreColors.border),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.person_outline_rounded, size: 10, color: FincoreColors.textMuted),
+                                const SizedBox(width: 3),
+                                Text(
+                                  proc.clienteNome!,
+                                  style: const TextStyle(fontSize: 9.5, color: FincoreColors.textPrimary, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        // Chip de Previsão/Agendamento se houver
+                        if (proc.dataHoraEntregaPrevista != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.alarm_rounded, size: 10, color: Color(0xFFF59E0B)),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'Agendado: ${DateFormat("dd/MM HH:mm").format(proc.dataHoraEntregaPrevista!)}',
+                                  style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+
                   const SizedBox(height: 8),
 
                   // Produto e Detalhes do Fluxo
@@ -2541,10 +2707,14 @@ class _HistoricoLancamentosModalState extends State<_HistoricoLancamentosModal> 
 class _ConsultaPedidoModal extends StatefulWidget {
   final String pedidoId;
   final String? numeroPedido;
+  final String? destaqueProdutoId;
+  final String? destaqueProdutoNome;
 
   const _ConsultaPedidoModal({
     required this.pedidoId,
     this.numeroPedido,
+    this.destaqueProdutoId,
+    this.destaqueProdutoNome,
   });
 
   @override
@@ -2554,6 +2724,7 @@ class _ConsultaPedidoModal extends StatefulWidget {
 class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
   bool _loading = true;
   PedidoData? _pedido;
+  ClienteData? _cliente;
   List<ItemPedidoData> _itens = [];
   Map<String, String> _produtosNomes = {};
 
@@ -2573,6 +2744,13 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
             ..where((t) => t.id.equals(widget.pedidoId) & t.tenantId.equals(tenantId)))
           .getSingleOrNull();
 
+      ClienteData? cli;
+      if (ped?.clienteId != null && ped!.clienteId!.isNotEmpty) {
+        cli = await (db.select(db.clientesTable)
+              ..where((t) => t.id.equals(ped.clienteId!) & t.tenantId.equals(tenantId)))
+            .getSingleOrNull();
+      }
+
       final itemRows = await (db.select(db.itensPedidoTable)
             ..where((t) => t.pedidoId.equals(widget.pedidoId) & t.deletedAt.isNull()))
           .get();
@@ -2588,6 +2766,7 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
       if (mounted) {
         setState(() {
           _pedido = ped;
+          _cliente = cli;
           _itens = itemRows;
           _produtosNomes = nomes;
           _loading = false;
@@ -2603,11 +2782,41 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
     final ped = _pedido;
     final numPedStr = widget.numeroPedido ?? (ped?.numeroPedido != null ? '#${ped!.numeroPedido.toString().padLeft(4, "0")}' : '#${widget.pedidoId.substring(0, 4).toUpperCase()}');
     final statusStr = (ped?.status ?? 'ENTREGUE').toUpperCase();
-    final clienteStr = ped?.clienteNomeAvulso ?? 'Balcão / Consumidor';
-    final dtRef = ped?.dataHoraEntregaPrevista ?? ped?.dataHoraCriacao;
-    final dataStr = dtRef != null
-        ? DateFormat('dd/MM/yyyy HH:mm').format(dtRef.toLocal())
-        : 'Data não informada';
+
+    // Resolução de Nome e Telefone reais do Cliente
+    final clienteNome = ped?.clienteNomeAvulso?.trim().isNotEmpty == true
+        ? ped!.clienteNomeAvulso!
+        : (_cliente != null && _cliente!.nome.trim().isNotEmpty ? _cliente!.nome : 'Consumidor Avulso');
+    final clienteTel = ped?.clienteTelefoneAvulso?.trim().isNotEmpty == true
+        ? ped!.clienteTelefoneAvulso!
+        : (_cliente?.telefone ?? '');
+
+    // Formatação de Horários Reais
+    final dataCriacaoStr = ped != null
+        ? DateFormat('dd/MM/yyyy HH:mm').format(ped.dataHoraCriacao.toLocal())
+        : 'Não informada';
+    final dataEntregaStr = ped?.dataHoraEntregaPrevista != null
+        ? DateFormat('dd/MM/yyyy HH:mm').format(ped!.dataHoraEntregaPrevista!.toLocal())
+        : null;
+
+    // Resolução do Canal e Modalidade
+    final canalLower = (ped?.canalOrigem ?? '').toLowerCase();
+    final obsLower = (ped?.observacoes ?? '').toLowerCase();
+    final isWeb = canalLower.contains('web') || canalLower.contains('cardapio') || obsLower.contains('cardapio_web') || obsLower.contains('web') || obsLower.contains('🌐');
+
+    String canalNome;
+    if (isWeb) {
+      canalNome = '🌐 Cardápio Digital (Web)';
+    } else if (canalLower.contains('balcao') || canalLower.contains('balcão')) {
+      canalNome = '🏪 Frente de Caixa (Balcão)';
+    } else if (canalLower.contains('delivery')) {
+      canalNome = '🛵 Central Delivery';
+    } else if (canalLower.contains('mesa') || canalLower.contains('comanda')) {
+      canalNome = '🍽️ Mesa / Comanda';
+    } else {
+      canalNome = '⚡ PDV Express';
+    }
+    final logisticaStr = ped?.tipoLogistica ?? 'Retirada';
 
     final isEntregue = statusStr.contains('ENTREGUE') || statusStr.contains('CONCLUIDO');
     final isCancelado = statusStr.contains('CANCEL');
@@ -2631,11 +2840,23 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
     final totalQtdStr = (totalQtd % 1 == 0) ? totalQtd.toInt().toString() : totalQtd.toStringAsFixed(1);
     final totalExpedidaStr = isEntregue ? totalQtdStr : '0';
 
+    // Item em Foco na Consulta
+    ItemPedidoData? itemEmFoco;
+    if (widget.destaqueProdutoId != null) {
+      itemEmFoco = _itens.cast<ItemPedidoData?>().firstWhere(
+            (i) => i?.produtoId == widget.destaqueProdutoId,
+            orElse: () => null,
+          );
+    }
+    final qtdFoco = itemEmFoco?.quantidade ?? 0;
+    final qtdFocoStr = (qtdFoco % 1 == 0) ? qtdFoco.toInt().toString() : qtdFoco.toStringAsFixed(1);
+    final focoNome = widget.destaqueProdutoNome ?? (itemEmFoco != null ? (_produtosNomes[itemEmFoco.produtoId] ?? 'Produto') : null);
+
     return Dialog(
       backgroundColor: FincoreColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        width: 700,
+        width: 760,
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.88,
         ),
@@ -2668,6 +2889,19 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
+                          color: isWeb ? const Color(0xFF0284C7).withValues(alpha: 0.15) : FincoreColors.background,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: isWeb ? const Color(0xFF0284C7).withValues(alpha: 0.4) : FincoreColors.border),
+                        ),
+                        child: Text(
+                          canalNome,
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isWeb ? const Color(0xFF38BDF8) : FincoreColors.textSecondary),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
                           color: FincoreColors.background,
                           borderRadius: BorderRadius.circular(4),
                           border: Border.all(color: FincoreColors.border),
@@ -2692,7 +2926,45 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 2. Cliente / Data / Origem
+                          // Banner de Item em Foco quando a consulta é aberta a partir de um produto específico
+                          if (focoNome != null && itemEmFoco != null) ...[
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.4)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.gps_fixed_rounded, color: Color(0xFF38BDF8), size: 18),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: RichText(
+                                      text: TextSpan(
+                                        style: const TextStyle(fontSize: 12, color: FincoreColors.textPrimary),
+                                        children: [
+                                          const TextSpan(text: 'Item em Foco: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          TextSpan(
+                                            text: '$focoNome ($qtdFocoStr un.)',
+                                            style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF38BDF8)),
+                                          ),
+                                          TextSpan(
+                                            text: ' • O pedido completo contém ${_itens.length} produto(s) somando $totalQtdStr un. no total.',
+                                            style: const TextStyle(color: FincoreColors.textMuted),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+
+                          // 2. Metadados Completos: Cliente / Data Criação / Previsão Agendada / Canal
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
@@ -2701,34 +2973,81 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(color: FincoreColors.border),
                             ),
-                            child: Row(
+                            child: Column(
                               children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('Cliente', style: TextStyle(fontSize: 10, color: FincoreColors.textMuted)),
-                                      Text(clienteStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
-                                    ],
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('Data do Pedido', style: TextStyle(fontSize: 10, color: FincoreColors.textMuted)),
-                                      Text(dataStr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
-                                    ],
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('Origem / Canal', style: TextStyle(fontSize: 10, color: FincoreColors.textMuted)),
-                                      const Text('Balcão / POS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
-                                    ],
-                                  ),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Cliente', style: TextStyle(fontSize: 10, color: FincoreColors.textMuted)),
+                                          Text(
+                                            clienteNome,
+                                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
+                                          ),
+                                          if (clienteTel.isNotEmpty)
+                                            Text(
+                                              clienteTel,
+                                              style: const TextStyle(fontSize: 10.5, color: FincoreColors.textMuted),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Data/Hora de Emissão', style: TextStyle(fontSize: 10, color: FincoreColors.textMuted)),
+                                          Text(
+                                            dataCriacaoStr,
+                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Agendamento / Previsão', style: TextStyle(fontSize: 10, color: FincoreColors.textMuted)),
+                                          if (dataEntregaStr != null) ...[
+                                            Row(
+                                              children: [
+                                                const Icon(Icons.alarm_rounded, size: 12, color: Color(0xFFF59E0B)),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  dataEntregaStr,
+                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                                                ),
+                                              ],
+                                            ),
+                                          ] else ...[
+                                            const Text(
+                                              'Atendimento Imediato',
+                                              style: TextStyle(fontSize: 11.5, color: FincoreColors.textSecondary, fontWeight: FontWeight.w600),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Origem & Logística', style: TextStyle(fontSize: 10, color: FincoreColors.textMuted)),
+                                          Text(
+                                            '$canalNome • $logisticaStr',
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.bold,
+                                              color: isWeb ? const Color(0xFF38BDF8) : FincoreColors.textPrimary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
@@ -2761,13 +3080,41 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                                   ],
                                 ),
                                 ..._itens.map((item) {
+                                  final isFoco = widget.destaqueProdutoId == item.produtoId;
                                   final nomeProd = _produtosNomes[item.produtoId] ?? 'Produto';
                                   final unitReais = (item.valorUnitarioCentavos / 100.0).toStringAsFixed(2).replaceAll('.', ',');
                                   final subtotalReais = ((item.quantidade * item.valorUnitarioCentavos) / 100.0).toStringAsFixed(2).replaceAll('.', ',');
                                   return TableRow(
+                                    decoration: isFoco ? BoxDecoration(color: const Color(0xFF0284C7).withValues(alpha: 0.12)) : null,
                                     children: [
-                                      Padding(padding: const EdgeInsets.all(8), child: Text(nomeProd, style: const TextStyle(fontSize: 11, color: FincoreColors.textPrimary))),
-                                      Padding(padding: const EdgeInsets.all(8), child: Text('${(item.quantidade % 1 == 0) ? item.quantidade.toInt() : item.quantidade} un', style: const TextStyle(fontSize: 11, color: FincoreColors.textPrimary))),
+                                      Padding(
+                                        padding: const EdgeInsets.all(8),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                nomeProd,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: isFoco ? FontWeight.bold : FontWeight.normal,
+                                                  color: isFoco ? const Color(0xFF38BDF8) : FincoreColors.textPrimary,
+                                                ),
+                                              ),
+                                            ),
+                                            if (isFoco) ...[
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF0284C7),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: const Text('EM FOCO', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.white)),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                      Padding(padding: const EdgeInsets.all(8), child: Text('${(item.quantidade % 1 == 0) ? item.quantidade.toInt() : item.quantidade} un', style: TextStyle(fontSize: 11, fontWeight: isFoco ? FontWeight.bold : FontWeight.normal, color: isFoco ? const Color(0xFF38BDF8) : FincoreColors.textPrimary))),
                                       Padding(padding: const EdgeInsets.all(8), child: Text('R\$ $unitReais', style: const TextStyle(fontSize: 11, color: FincoreColors.textPrimary))),
                                       Padding(padding: const EdgeInsets.all(8), child: Text('R\$ $subtotalReais', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary))),
                                     ],
@@ -2786,7 +3133,7 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                           ),
                           const SizedBox(height: 20),
 
-                          // 4. Linha do Tempo Operacional
+                          // 4. Linha do Tempo Operacional (4 etapas concisas)
                           const Text('Linha do Tempo Operacional', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
                           const SizedBox(height: 8),
                           Row(
@@ -2796,24 +3143,22 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                               _buildCheckstep('Reserva', true),
                               _buildStepConnector(true),
                               _buildCheckstep('Preparação', true),
-                              _buildStepConnector(!isCancelado),
-                              _buildCheckstep('Expedição', !isCancelado),
                               _buildStepConnector(isEntregue),
-                              _buildCheckstep('Entregue', isEntregue),
+                              _buildCheckstep('Expedição & Entrega', isEntregue),
                             ],
                           ),
                           const SizedBox(height: 16),
 
-                          // 5. Explicação Detalhada das Etapas
+                          // 5. Explicação Detalhada das Etapas (Sem saídas duplicadas)
                           const Text('Detalhamento das Etapas', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textMuted)),
                           const SizedBox(height: 8),
                           _buildStepDetailCard(
                             icon: Icons.check_circle_rounded,
                             iconColor: const Color(0xFF10B981),
                             title: '✓ CRIADO',
-                            subtitle: dataStr,
-                            description: 'Pedido registrado no sistema.',
-                            impactText: 'Impacto: Nenhum impacto no estoque.',
+                            subtitle: dataCriacaoStr,
+                            description: 'Pedido registrado no sistema (${_itens.length} produto(s) somando $totalQtdStr un.).',
+                            impactText: 'Impacto: Nenhum impacto imediato no estoque físico.',
                             impactBgColor: FincoreColors.background,
                           ),
                           const SizedBox(height: 8),
@@ -2821,8 +3166,10 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                             icon: Icons.bookmark_added_rounded,
                             iconColor: const Color(0xFFF59E0B),
                             title: '🟡 RESERVA',
-                            subtitle: dataStr,
-                            description: '$totalQtdStr un. de produtos foram comprometidas para este pedido.',
+                            subtitle: dataCriacaoStr,
+                            description: focoNome != null
+                                ? '$qtdFocoStr un. de $focoNome foram reservadas ($totalQtdStr un. no total do pedido).'
+                                : '$totalQtdStr un. de produtos foram comprometidas para este pedido.',
                             impactText: 'Impacto: Físico: não altera  |  Reservado: +$totalQtdStr un.  |  Disponível: -$totalQtdStr un.',
                             impactBgColor: const Color(0xFFF59E0B).withValues(alpha: 0.1),
                           ),
@@ -2838,23 +3185,17 @@ class _ConsultaPedidoModalState extends State<_ConsultaPedidoModal> {
                           ),
                           const SizedBox(height: 8),
                           _buildStepDetailCard(
-                            icon: Icons.local_shipping_rounded,
-                            iconColor: const Color(0xFFEF4444),
-                            title: '🔴 EXPEDIÇÃO',
-                            subtitle: dataStr,
-                            description: '$totalExpedidaStr un. foram retiradas fisicamente do estoque.',
-                            impactText: 'Impacto: Físico: -$totalExpedidaStr un.  |  Reserva: -$totalExpedidaStr un. (Reserva consumida)',
-                            impactBgColor: const Color(0xFFEF4444).withValues(alpha: 0.1),
-                          ),
-                          const SizedBox(height: 8),
-                          _buildStepDetailCard(
-                            icon: isEntregue ? Icons.task_alt_rounded : Icons.pending_actions_rounded,
+                            icon: isEntregue ? Icons.local_shipping_rounded : Icons.pending_actions_rounded,
                             iconColor: isEntregue ? const Color(0xFFEF4444) : FincoreColors.textMuted,
-                            title: '✓ ENTREGUE',
-                            subtitle: isEntregue ? dataStr : 'Pendente',
-                            description: isEntregue ? 'Pedido concluído com sucesso.' : 'Aguardando entrega.',
+                            title: isEntregue ? '🔴 EXPEDIÇÃO & ENTREGA' : '⏳ AGUARDANDO EXPEDIÇÃO',
+                            subtitle: isEntregue ? (dataEntregaStr ?? dataCriacaoStr) : 'Pendente',
+                            description: isEntregue
+                                ? (focoNome != null
+                                    ? 'Saída física única de $qtdFocoStr un. de $focoNome ($totalExpedidaStr un. no total do pedido). Pedido concluído e reservas zeradas.'
+                                    : 'Saída física única de $totalExpedidaStr un. e conclusão do pedido. Reservas zeradas.')
+                                : 'Aguardando saída física e entrega do pedido.',
                             impactText: isEntregue
-                                ? 'Resultado: $totalQtdStr un. reservadas  →  $totalExpedidaStr un. expedidas  →  0 un. de reserva ativa'
+                                ? 'Impacto Físico Real: -$totalExpedidaStr un. (Reserva consumida e finalizada)'
                                 : 'Resultado: Reserva permanece ativa até a expedição.',
                             impactBgColor: isEntregue ? const Color(0xFFEF4444).withValues(alpha: 0.1) : FincoreColors.background,
                           ),
@@ -3304,6 +3645,8 @@ class _DetalhesProcessoModal extends StatelessWidget {
                         builder: (_) => _ConsultaPedidoModal(
                           pedidoId: p.pedidoId!,
                           numeroPedido: numPed,
+                          destaqueProdutoId: p.produtoId,
+                          destaqueProdutoNome: p.nomeProduto,
                         ),
                       );
                     },

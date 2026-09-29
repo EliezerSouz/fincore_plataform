@@ -988,7 +988,7 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
                   labelText: 'Motivo do Estorno *',
                   labelStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 13),
                   hintText: 'Ex: Pagamento duplicado / Cliente desistiu',
-                  hintStyle: TextStyle(color: FincoreColors.textMuted.withOpacity(0.5), fontSize: 12),
+                  hintStyle: TextStyle(color: FincoreColors.textMuted.withValues(alpha: 0.5), fontSize: 12),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                   filled: true,
                   fillColor: FincoreColors.background,

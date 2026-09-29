@@ -144,12 +144,6 @@ class _FincoreShellState extends State<FincoreShell>
       label: 'OPERAÇÃO',
       items: [
         _NavItem(
-          id: 'kds',
-          label: 'Cozinha (KDS)',
-          icon: Icons.kitchen_outlined,
-          iconSelected: Icons.kitchen,
-        ),
-        _NavItem(
           id: 'producao',
           label: 'Produção',
           icon: Icons.factory_outlined,

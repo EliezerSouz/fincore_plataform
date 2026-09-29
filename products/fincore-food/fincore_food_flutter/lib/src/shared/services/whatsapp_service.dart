@@ -2,6 +2,92 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// Modelo de Template de Mensagem Rápida do WhatsApp
+class WhatsAppTemplate {
+  final String id;
+  final String titulo;
+  final String emoji;
+  final String descricao;
+  final String conteudo;
+  final String categoria; // 'atendimento', 'pedido', 'entrega', 'financeiro', 'marketing', 'custom'
+  final bool ativo;
+  final bool isPadrao;
+  final List<String> variaveisSugeridas;
+
+  const WhatsAppTemplate({
+    required this.id,
+    required this.titulo,
+    required this.emoji,
+    required this.descricao,
+    required this.conteudo,
+    this.categoria = 'custom',
+    this.ativo = true,
+    this.isPadrao = false,
+    this.variaveisSugeridas = const [
+      '{cliente}',
+      '{loja}',
+      '{pedido}',
+      '{total}',
+      '{endereco}',
+      '{link_cardapio}',
+    ],
+  });
+
+  WhatsAppTemplate copyWith({
+    String? id,
+    String? titulo,
+    String? emoji,
+    String? descricao,
+    String? conteudo,
+    String? categoria,
+    bool? ativo,
+    bool? isPadrao,
+    List<String>? variaveisSugeridas,
+  }) {
+    return WhatsAppTemplate(
+      id: id ?? this.id,
+      titulo: titulo ?? this.titulo,
+      emoji: emoji ?? this.emoji,
+      descricao: descricao ?? this.descricao,
+      conteudo: conteudo ?? this.conteudo,
+      categoria: categoria ?? this.categoria,
+      ativo: ativo ?? this.ativo,
+      isPadrao: isPadrao ?? this.isPadrao,
+      variaveisSugeridas: variaveisSugeridas ?? this.variaveisSugeridas,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'titulo': titulo,
+        'emoji': emoji,
+        'descricao': descricao,
+        'conteudo': conteudo,
+        'categoria': categoria,
+        'ativo': ativo,
+        'isPadrao': isPadrao,
+        'variaveisSugeridas': variaveisSugeridas,
+      };
+
+  factory WhatsAppTemplate.fromJson(Map<String, dynamic> map) {
+    return WhatsAppTemplate(
+      id: map['id']?.toString() ?? '',
+      titulo: map['titulo']?.toString() ?? '',
+      emoji: map['emoji']?.toString() ?? '💬',
+      descricao: map['descricao']?.toString() ?? '',
+      conteudo: map['conteudo']?.toString() ?? '',
+      categoria: map['categoria']?.toString() ?? 'custom',
+      ativo: map['ativo'] == true,
+      isPadrao: map['isPadrao'] == true,
+      variaveisSugeridas: (map['variaveisSugeridas'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const ['{cliente}', '{loja}', '{pedido}', '{total}', '{endereco}', '{link_cardapio}'],
+    );
+  }
+}
 
 /// Modo de envio do WhatsApp
 enum WhatsAppApiMode {
@@ -345,4 +431,197 @@ class WhatsAppService {
     buffer.writeln('Agradecemos imensamente pela prefer\u00EAncia! \u{2728}');
     return buffer.toString();
   }
+
+  // ── GERENCIAMENTO DE TEMPLATES DINÂMICOS & CONFIGURÁVEIS ──────────────────
+
+  static const String _storageKeyPrefix = 'fincore_whatsapp_templates_';
+
+  /// Retorna os templates padrão do sistema com textos ricos, emojis e variáveis dinâmicas
+  static List<WhatsAppTemplate> getTemplatesPadrao({
+    String? nomeEmpresa,
+    String? linkCardapio,
+  }) {
+    final emp = (nomeEmpresa != null && nomeEmpresa.isNotEmpty) ? nomeEmpresa : '{loja}';
+    final cardapio = (linkCardapio != null && linkCardapio.isNotEmpty) ? linkCardapio : '{link_cardapio}';
+
+    return [
+      WhatsAppTemplate(
+        id: 'saudacao',
+        titulo: 'Saudação & Atendimento',
+        emoji: '👋',
+        descricao: 'Mensagem calorosa de boas-vindas e atendimento geral ao cliente.',
+        categoria: 'atendimento',
+        isPadrao: true,
+        conteudo: '👋 *Olá, {cliente}!* Tudo bem com você? 😊✨\n\n'
+            'Aqui é da equipe da *$emp*!\n'
+            'Passando para saber como podemos te atender hoje ou se gostaria de ver nossas delícias fresquinhas! 🍕🍔\n\n'
+            'Estamos à sua total disposição! 🚀',
+      ),
+      WhatsAppTemplate(
+        id: 'contato_pedido',
+        titulo: 'Acompanhamento do Pedido',
+        emoji: '🛎️',
+        descricao: 'Informações sobre status e acompanhamento de pedido em andamento.',
+        categoria: 'pedido',
+        isPadrao: true,
+        conteudo: '👋 *Olá, {cliente}!* Tudo bem? 😊\n\n'
+            'Aqui é da equipe da *$emp* referente ao seu pedido *#{pedido}*. ✨\n'
+            'Estamos acompanhando a sua solicitação com todo o carinho e dedicação!\n\n'
+            'Se precisar de alguma informação, alteração ou suporte, basta nos responder por aqui! 💬',
+      ),
+      WhatsAppTemplate(
+        id: 'pedido_pronto',
+        titulo: 'Pedido Pronto (Retirada Balcão)',
+        emoji: '🛍️',
+        descricao: 'Avisa o cliente que o pedido está pronto para ser retirado na loja.',
+        categoria: 'pedido',
+        isPadrao: true,
+        conteudo: '🛍️ *SEU PEDIDO ESTÁ PRONTO!* 🎉✨\n\n'
+            '👋 Olá, *{cliente}*!\n'
+            'O seu pedido *#{pedido}* já foi preparado e está prontinho esperando por você no balcão da *$emp*! 😋🔥\n\n'
+            'Pode vir retirar quando quiser. Estamos te esperando com tudo fresquinho! 🚀',
+      ),
+      WhatsAppTemplate(
+        id: 'saiu_entrega',
+        titulo: 'Saiu para Entrega (Delivery)',
+        emoji: '🛵',
+        descricao: 'Notifica que o entregador saiu com o pedido.',
+        categoria: 'entrega',
+        isPadrao: true,
+        conteudo: '🛵 *SEU PEDIDO SAIU PARA ENTREGA!* 🎉🚀\n\n'
+            '👋 Olá, *{cliente}*!\n'
+            'Boas notícias: o seu pedido *#{pedido}* acabou de sair e está a caminho com o nosso entregador! 😍✨\n\n'
+            '📍 *Endereço de Entrega:* {endereco}\n\n'
+            'Por favor, fique atento(a) à campainha, interfone ou portaria.\n'
+            'Qualquer orientação para o entregador, pode nos avisar aqui! 💬\n\n'
+            'Agradecemos a preferência na *$emp*! Tenha um excelente momento! ❤️',
+      ),
+      WhatsAppTemplate(
+        id: 'cobranca_pix',
+        titulo: 'Lembrete de Pagamento & PIX',
+        emoji: '💳',
+        descricao: 'Envio de detalhes de pagamento e chave PIX com cordialidade.',
+        categoria: 'financeiro',
+        isPadrao: true,
+        conteudo: '👋 *Olá, {cliente}!* Tudo bem? 😊\n\n'
+            'Aqui é da equipe de atendimento da *$emp*.\n\n'
+            '📄 *Informações de Pagamento — Pedido #{pedido}*\n'
+            '💰 *Valor Total:* R\$ {total}\n'
+            '💳 *Forma:* {forma_pagamento}\n\n'
+            'Para sua maior comodidade, disponibilizamos pagamento rápido via PIX! 👇\n'
+            'Basta utilizar a chave ou código copia e cola enviado.\n\n'
+            'Assim que efetuar o pagamento, por gentileza nos envie o comprovante por aqui. Muito obrigado! ✨',
+      ),
+      WhatsAppTemplate(
+        id: 'cardapio_digital',
+        titulo: 'Cardápio Digital & Novidades',
+        emoji: '✨',
+        descricao: 'Divulga o link do cardápio digital oficial para o cliente.',
+        categoria: 'marketing',
+        isPadrao: true,
+        conteudo: '✨ *Olá, {cliente}!* Bateu aquela fome? 😋🔥\n\n'
+            'Confira o nosso cardápio digital completo com fotos, promoções e novidades fresquinhas da *$emp*:\n\n'
+            '🌐 *Acesse o link e faça seu pedido direto por aqui:*\n'
+            '$cardapio\n\n'
+            'É super rápido, fácil e você acompanha o preparo em tempo real! 🚀🍔',
+      ),
+      WhatsAppTemplate(
+        id: 'confirmar_endereco',
+        titulo: 'Confirmação de Endereço',
+        emoji: '📍',
+        descricao: 'Confirma o local de entrega antes do envio.',
+        categoria: 'entrega',
+        isPadrao: true,
+        conteudo: '📍 *Olá, {cliente}!* Tudo bem? 😊\n\n'
+            'Por favor, confirme se o endereço de entrega do seu pedido *#{pedido}* está correto:\n\n'
+            '🏠 *{endereco}*\n\n'
+            'Podemos despachar para este endereço? Agradecemos a confirmação rápida! 🛵✨',
+      ),
+      WhatsAppTemplate(
+        id: 'avaliacao_pos_venda',
+        titulo: 'Avaliação & Pós-Venda',
+        emoji: '⭐',
+        descricao: 'Agradecimento pós-entrega solicitando feedback do cliente.',
+        categoria: 'marketing',
+        isPadrao: true,
+        conteudo: '❤️ *Olá, {cliente}!* Esperamos que sua experiência tenha sido incrível! ✨\n\n'
+            'Como estava o seu pedido da *$emp*? A sua opinião é muito valiosa para continuarmos melhorando cada vez mais! ⭐⭐⭐⭐⭐\n\n'
+            'Se puder nos contar o que achou, ficaremos muito felizes. Até o próximo pedido! 🚀😊',
+      ),
+    ];
+  }
+
+  /// Carrega a lista de templates salvos pelo usuário para a empresa ativa (ou os padrões se não houver)
+  static Future<List<WhatsAppTemplate>> getTemplates({
+    String? tenantId,
+    String? nomeEmpresa,
+    String? linkCardapio,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_storageKeyPrefix${tenantId ?? 'default'}';
+      final rawJson = prefs.getString(key);
+
+      if (rawJson != null && rawJson.isNotEmpty) {
+        final decoded = jsonDecode(rawJson) as List<dynamic>;
+        final templates = decoded
+            .map((item) => WhatsAppTemplate.fromJson(item as Map<String, dynamic>))
+            .toList();
+
+        if (templates.isNotEmpty) return templates;
+      }
+    } catch (e) {
+      debugPrint('[WhatsAppService] Erro ao carregar templates salvos: $e');
+    }
+
+    return getTemplatesPadrao(nomeEmpresa: nomeEmpresa, linkCardapio: linkCardapio);
+  }
+
+  /// Salva a lista de templates customizados do usuário
+  static Future<bool> salvarTemplates(
+    List<WhatsAppTemplate> templates, {
+    String? tenantId,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_storageKeyPrefix${tenantId ?? 'default'}';
+      final jsonList = templates.map((t) => t.toJson()).toList();
+      await prefs.setString(key, jsonEncode(jsonList));
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsAppService] Erro ao salvar templates: $e');
+      return false;
+    }
+  }
+
+  /// Redefine todos os templates para a configuração padrão recomendada
+  static Future<void> resetarTemplatesPadrao({
+    String? tenantId,
+    String? nomeEmpresa,
+    String? linkCardapio,
+  }) async {
+    final padroes = getTemplatesPadrao(nomeEmpresa: nomeEmpresa, linkCardapio: linkCardapio);
+    await salvarTemplates(padroes, tenantId: tenantId);
+  }
+
+  /// Substitui as tags dinâmicas `{cliente}`, `{loja}`, `{pedido}`, `{total}`, `{endereco}`, `{link_cardapio}`, etc.
+  static String interpolarTemplate(
+    String template,
+    Map<String, String> variaveis,
+  ) {
+    String resultado = template;
+    variaveis.forEach((tag, valor) {
+      if (tag == '{pedido}') {
+        final numLimpo = valor.startsWith('#') ? valor.substring(1) : valor;
+        resultado = resultado.replaceAll('#{pedido}', '#$numLimpo');
+        resultado = resultado.replaceAll('{pedido}', valor);
+      } else {
+        resultado = resultado.replaceAll(tag, valor);
+      }
+    });
+    // Remove qualquer duplicidade acidental de ##
+    resultado = resultado.replaceAll('##', '#');
+    return resultado;
+  }
 }
+

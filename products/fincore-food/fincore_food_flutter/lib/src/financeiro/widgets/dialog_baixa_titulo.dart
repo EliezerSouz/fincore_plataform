@@ -142,24 +142,30 @@ class _DialogBaixaTituloState extends State<DialogBaixaTitulo> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+              color: (item.isPix ? const Color(0xFF0284C7) : const Color(0xFF10B981)).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.price_check_rounded, color: Color(0xFF10B981), size: 22),
+            child: Icon(
+              item.isPix ? Icons.pix_rounded : Icons.price_check_rounded,
+              color: item.isPix ? const Color(0xFF0284C7) : const Color(0xFF10B981),
+              size: 22,
+            ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Confirmar Liquidação de Título',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
+                  item.isPix ? 'Validar Recebimento PIX em Conta' : 'Confirmar Liquidação de Título',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(
-                  'Registrar recebimento financeiro no caixa',
-                  style: TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
+                  item.isPix
+                      ? 'Confirmar entrada dos fundos no extrato bancário'
+                      : 'Registrar recebimento financeiro no caixa',
+                  style: const TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
                 ),
               ],
             ),
@@ -423,14 +429,14 @@ class _DialogBaixaTituloState extends State<DialogBaixaTitulo> {
                   }
                 },
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: item.isPix ? const Color(0xFF0284C7) : const Color(0xFF10B981),
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: _loading
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Confirmar Baixa', style: TextStyle(fontWeight: FontWeight.bold)),
+              : Text(item.isPix ? 'Validar e Baixar PIX' : 'Confirmar Baixa', style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
       ],
     );

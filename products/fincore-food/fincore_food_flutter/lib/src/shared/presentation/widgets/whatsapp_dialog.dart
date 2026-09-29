@@ -107,6 +107,9 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
     return 'Nossa Loja';
   }
 
+  List<WhatsAppTemplate> _customTemplates = [];
+  String? _selectedTemplateOption;
+
   @override
   void initState() {
     super.initState();
@@ -133,6 +136,25 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
         'Estamos \u00E0 sua total disposi\u00E7\u00E3o! \u{1F680}';
 
     _messageController = TextEditingController(text: defaultMessage);
+    _carregarTemplatesConfigurados();
+  }
+
+  Future<void> _carregarTemplatesConfigurados() async {
+    String? tenantId;
+    try {
+      if (TenantContext().hasContext) {
+        tenantId = TenantContext().tenantId;
+      }
+    } catch (_) {}
+
+    final list = await WhatsAppService.getTemplates(
+      tenantId: tenantId,
+      nomeEmpresa: _resolvedNomeEmpresa,
+    );
+
+    if (mounted) {
+      setState(() => _customTemplates = list.where((t) => t.ativo).toList());
+    }
   }
 
   @override
@@ -730,9 +752,9 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
 
                     const SizedBox(height: 16),
 
-                    // Mensagens Rápidas (Templates)
+                    // ── Seletor Compacto de Mensagens Rápidas (Combobox) ──
                     const Text(
-                      'MENSAGENS RÁPIDAS:',
+                      'MENSAGEM RÁPIDA / MODELO:',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
@@ -742,114 +764,103 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
                     ),
                     const SizedBox(height: 6),
 
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        // Saudação padrão (com número de pedido quando disponível)
-                        ActionChip(
-                          avatar: const Icon(Icons.waving_hand_rounded, size: 14, color: Colors.amber),
-                          label: const Text('Saudação Padrão', style: TextStyle(fontSize: 11.5)),
-                          backgroundColor: FincoreColors.surfaceElevated,
-                          side: const BorderSide(color: FincoreColors.border),
-                          onPressed: () {
-                            final pedidoStr = widget.numeroPedido != null
-                                ? ' referente ao seu pedido *$numPedido*'
-                                : '';
-                            _setTemplate(
-                              // \u{1F44B}=👋 \u{1F60A}=😊 \u{2728}=✨ \u{1F680}=🚀
-                              '\u{1F44B} *Ol\u00E1, $_clienteNomeLimpo!* Tudo bem? \u{1F60A}\n\n'
-                              'Aqui \u00E9 da equipe da *$_resolvedNomeEmpresa*! \u{2728}\n'
-                              'Passando para falar com voc\u00EA$pedidoStr e ver como posso te ajudar.\n\n'
-                              'Estamos \u00E0 sua total disposi\u00E7\u00E3o! \u{1F680}',
+                    Container(
+                      decoration: BoxDecoration(
+                        color: FincoreColors.surfaceElevated,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: FincoreColors.border),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedTemplateOption,
+                          hint: Row(
+                            children: const [
+                              Icon(Icons.bolt_rounded, size: 18, color: Color(0xFFF59E0B)),
+                              SizedBox(width: 8),
+                              Text(
+                                'Selecione um modelo de mensagem rápida...',
+                                style: TextStyle(fontSize: 13, color: FincoreColors.textMuted),
+                              ),
+                            ],
+                          ),
+                          isExpanded: true,
+                          dropdownColor: FincoreColors.surfaceElevated,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: FincoreColors.textMuted),
+                          style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
+                          onChanged: (novoId) {
+                            if (novoId == null) return;
+                            setState(() => _selectedTemplateOption = novoId);
+
+                            if (novoId == 'comprovante' && widget.initialMessage != null) {
+                              _setTemplate(widget.initialMessage!);
+                              return;
+                            }
+
+                            final templatesLista = (_customTemplates.isNotEmpty
+                                ? _customTemplates
+                                : WhatsAppService.getTemplatesPadrao(nomeEmpresa: _resolvedNomeEmpresa));
+                            final match = templatesLista.firstWhere(
+                              (t) => t.id == novoId,
+                              orElse: () => templatesLista.first,
                             );
+
+                            final dadosInterpolar = {
+                              '{cliente}': _clienteNomeLimpo,
+                              '{loja}': _resolvedNomeEmpresa,
+                              '{pedido}': numPedido,
+                              '{total}': '0,00',
+                              '{forma_pagamento}': 'PIX / Dinheiro / Cartão',
+                              '{endereco}': widget.enderecoCliente ?? 'Conforme cadastro',
+                              '{link_cardapio}': 'https://cardapio.fincore.app',
+                              '{chave_pix}': widget.pixInfo?.chaveDisplay ?? '',
+                            };
+                            final textoInterpolado = WhatsAppService.interpolarTemplate(
+                              match.conteudo,
+                              dadosInterpolar,
+                            );
+                            _setTemplate(textoInterpolado);
                           },
+                          items: [
+                            if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty)
+                              const DropdownMenuItem<String>(
+                                value: 'comprovante',
+                                child: Row(
+                                  children: [
+                                    Text('🧾', style: TextStyle(fontSize: 14)),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Comprovante do Pedido (Completo)',
+                                      style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF25D366)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ...(_customTemplates.isNotEmpty
+                                    ? _customTemplates
+                                    : WhatsAppService.getTemplatesPadrao(nomeEmpresa: _resolvedNomeEmpresa))
+                                .where((t) => t.ativo)
+                                .map((t) {
+                              return DropdownMenuItem<String>(
+                                value: t.id,
+                                child: Row(
+                                  children: [
+                                    Text(t.emoji, style: const TextStyle(fontSize: 14)),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        t.titulo,
+                                        style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ],
                         ),
-                        // Contato sobre Pedido específico (usa gerarTextoContatoKanban)
-                        if (widget.numeroPedido != null)
-                          ActionChip(
-                            avatar: const Icon(Icons.support_agent_rounded, size: 14, color: Color(0xFF818CF8)),
-                            label: const Text('Contato sobre Pedido', style: TextStyle(fontSize: 11.5)),
-                            backgroundColor: FincoreColors.surfaceElevated,
-                            side: const BorderSide(color: FincoreColors.border),
-                            onPressed: () => _setTemplate(
-                              WhatsAppService.gerarTextoContatoKanban(
-                                nomeCliente: _clienteNomeLimpo,
-                                numeroPedidoOuId: numPedido,
-                                nomeEmpresa: _resolvedNomeEmpresa,
-                              ),
-                            ),
-                          ),
-                        // Cardápio / Novidades
-                        ActionChip(
-                          avatar: const Icon(Icons.restaurant_menu_rounded, size: 14, color: Color(0xFFF97316)),
-                          label: const Text('Card\u00E1pio / Novidades', style: TextStyle(fontSize: 11.5)),
-                          backgroundColor: FincoreColors.surfaceElevated,
-                          side: const BorderSide(color: FincoreColors.border),
-                          onPressed: () => _setTemplate(
-                            // \u{2728}=✨ \u{1F360}=🍠 \u{1F525}=🔥 \u{1F60D}=😍
-                            '\u{2728} *Ol\u00E1, $_clienteNomeLimpo!*\n\n'
-                            'Temos novidades incr\u00EDveis e del\u00EDcias fresquinhas saindo hoje na *$_resolvedNomeEmpresa*! \u{1F360}\u{1F525}\n\n'
-                            'Quer conferir o nosso card\u00E1pio completo e fazer o seu pedido? \u{1F60D}\n'
-                            'Aqui voc\u00EA escolhe, n\u00F3s cuidamos do resto! \u{1F680}',
-                          ),
-                        ),
-                        // Saiu para entrega (se tiver número de pedido)
-                        if (widget.numeroPedido != null)
-                          ActionChip(
-                            avatar: const Icon(Icons.delivery_dining_rounded, size: 14, color: Color(0xFF06B6D4)),
-                            label: const Text('Saiu p/ Entrega', style: TextStyle(fontSize: 11.5)),
-                            backgroundColor: FincoreColors.surfaceElevated,
-                            side: const BorderSide(color: FincoreColors.border),
-                            onPressed: () => _setTemplate(
-                              WhatsAppService.gerarTextoSaiuParaEntrega(
-                                nomeCliente: _clienteNomeLimpo,
-                                numeroPedidoOuId: numPedido,
-                                nomeEmpresa: _resolvedNomeEmpresa,
-                              ),
-                            ),
-                          ),
-                        // Lembrete de Pagamento / Cobrança PIX
-                        if (widget.numeroPedido != null || widget.pixInfo != null)
-                          ActionChip(
-                            avatar: const Icon(Icons.pix, size: 14, color: Color(0xFF32BCAD)),
-                            label: const Text('Lembrete de Pagamento', style: TextStyle(fontSize: 11.5)),
-                            backgroundColor: FincoreColors.surfaceElevated,
-                            side: const BorderSide(color: FincoreColors.border),
-                            onPressed: () => _setTemplate(
-                              WhatsAppService.gerarTextoLembretePagamento(
-                                nomeCliente: _clienteNomeLimpo,
-                                numeroPedidoOuId: numPedido,
-                                valor: 0.0, // Preenchido no resumo ou editável
-                                nomeEmpresa: _resolvedNomeEmpresa,
-                              ),
-                            ),
-                          ),
-                        // Confirmar Endereço
-                        if (widget.enderecoCliente != null && widget.enderecoCliente!.isNotEmpty)
-                          ActionChip(
-                            avatar: const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFF38BDF8)),
-                            label: const Text('Confirmar Endere\u00E7o', style: TextStyle(fontSize: 11.5)),
-                            backgroundColor: FincoreColors.surfaceElevated,
-                            side: const BorderSide(color: FincoreColors.border),
-                            // \u{1F4CD}=📍 \u{1F3E0}=🏠 \u{1F60A}=😊
-                            onPressed: () => _setTemplate(
-                              '\u{1F4CD} *Olá, $_clienteNomeLimpo!*\n\n'
-                              'Confirmando o endereço de entrega do seu pedido *$numPedido*:\n'
-                              '\u{1F3E0} *${widget.enderecoCliente}*\n\n'
-                              'Está correto? Confirmando, seguimos com a entrega! \u{1F60A}',
-                            ),
-                          ),
-                        // Comprovante do Pedido (se initialMessage fornecido)
-                        if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty)
-                          ActionChip(
-                            avatar: const Icon(Icons.receipt_long_rounded, size: 14, color: whatsappGreen),
-                            label: const Text('Comprovante do Pedido', style: TextStyle(fontSize: 11.5)),
-                            backgroundColor: FincoreColors.surfaceElevated,
-                            side: const BorderSide(color: FincoreColors.border),
-                            onPressed: () => _setTemplate(widget.initialMessage!),
-                          ),
-                      ],
+                      ),
                     ),
 
                     const SizedBox(height: 14),

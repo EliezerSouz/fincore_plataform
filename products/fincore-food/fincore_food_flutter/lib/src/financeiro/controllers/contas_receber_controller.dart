@@ -84,9 +84,14 @@ class TituloReceber {
       formaPagamentoNome.toLowerCase().contains('prazo') ||
       formaPagamentoNome.toLowerCase().contains('faturad');
 
-  /// Indica se, do ponto de vista do cliente, o valor já foi quitado no ato da compra.
-  /// (PIX, Dinheiro, Cartão de Crédito/Débito são pagos pelo cliente no ato; apenas Nota a Prazo gera dívida pendente do cliente).
-  bool get isPagoPeloCliente => !isNotaPrazo || isRecebido;
+  /// Indica se a transação do PIX ainda aguarda conferência de comprovante / validação de crédito em conta
+  bool get isPixPendenteValidacao => isPix && !isRecebido;
+
+  /// Do ponto de vista do cliente:
+  /// - Nota a Prazo: só está quitada se houver baixa.
+  /// - PIX: só está 100% quitado e liberado se for validado em conta (se não validado, fica pendente de conferência).
+  /// - Cartão e Dinheiro: pagos no ato da compra.
+  bool get isPagoPeloCliente => isNotaPrazo ? isRecebido : (isPix ? isRecebido : true);
 
   /// Valor estimado retido pela operadora da maquininha (MDR)
   int get valorTaxaCentavos => taxaMdrPercentual > 0 ? ((valorTotalCentavos * taxaMdrPercentual) / 100.0).round() : 0;
@@ -400,7 +405,7 @@ class ContasReceberController extends ChangeNotifier {
             (forma?.descricao != null &&
              forma!.descricao!.toLowerCase().contains('prazo'));
 
-        // ── PIX: Liquidação instantânea no ato da compra (D+0) ───────────────
+        // ── PIX: Transação eletrônica que exige validação de comprovante e crédito em conta ───
         final isPix = fpTipo == 'pix' || fpNomeLower.contains('pix');
 
         // Formas que NÃO devem gerar título de contas a receber:
@@ -412,18 +417,21 @@ class ContasReceberController extends ChangeNotifier {
             fpNomeLower.contains('interno');
         if (isConsumoOuCortesia) continue;
 
-        // Determina se já está quitado/recebido:
+        // Determina se já está quitado/recebido/validado:
         final lancamentos = lancamentosPorPedido[ped.id] ?? [];
 
-        // Para PIX: Liquidação instantânea D+0. Se o pedido foi realizado e confirmado, já é recebido.
+        // Para PIX: Só é considerado recebido/validado se houver lançamento financeiro de receita
+        // (ou seja, quando o operador confere o extrato bancário/comprovante e valida no sistema).
         // Para Cartão ou Nota a Prazo: quitado via baixa explícita ou lançamento de receita.
-        final temReceita = isPix
-            ? true
-            : (isNotaPrazo || isCartao)
-                ? lancamentos.any((l) =>
-                    l.tipo == 'receita' &&
-                    l.descricao.toLowerCase().contains('baixa'))
-                : lancamentos.any((l) => l.tipo == 'receita');
+        final temReceita = (isNotaPrazo || isCartao || isPix)
+            ? lancamentos.any((l) =>
+                l.tipo == 'receita' &&
+                (l.descricao.toLowerCase().contains('baixa') ||
+                 l.descricao.toLowerCase().contains('pix') ||
+                 l.descricao.toLowerCase().contains('validad') ||
+                 l.descricao.toLowerCase().contains('recebimento') ||
+                 l.descricao.toLowerCase().contains('venda')))
+            : lancamentos.any((l) => l.tipo == 'receita');
 
         // Data do Pedido e Data da Entrega
         final dataEntrega = ped.dataHoraEntregaPrevista?.toLocal() ?? ped.dataHoraCriacao.toLocal();

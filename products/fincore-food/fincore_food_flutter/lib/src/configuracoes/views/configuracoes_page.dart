@@ -27,6 +27,7 @@ import 'package:fincore_food_flutter/src/shared/presentation/widgets/log_explore
 import 'package:fincore_food_flutter/src/configuracoes/views/subviews/personalizacao_view.dart';
 import 'package:fincore_food_flutter/src/configuracoes/views/subviews/formas_pagamento_view.dart';
 import 'package:fincore_food_flutter/src/configuracoes/views/subviews/cardapio_digital_view.dart';
+import 'package:fincore_food_flutter/src/configuracoes/views/subviews/mensagens_whatsapp_view.dart';
 import 'package:fincore_food_flutter/src/cap/printing/print_capability.dart';
 
 
@@ -52,6 +53,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
 
   final _personalizacaoKey = GlobalKey<PersonalizacaoViewState>();
   final _cardapioDigitalKey = GlobalKey<CardapioDigitalViewState>();
+  final _mensagensWhatsAppKey = GlobalKey<MensagensWhatsAppViewState>();
 
   Timer? _debounceTimer;
   String _syncMessage = '';
@@ -504,6 +506,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       if (_selectedSection == 3 || _cardapioDigitalKey.currentState != null) {
         await _cardapioDigitalKey.currentState?.salvar();
       }
+      if (_selectedSection == 10 || _mensagensWhatsAppKey.currentState != null) {
+        await _mensagensWhatsAppKey.currentState?.salvar();
+      }
 
       final principalPix = _pixKeys.firstWhere(
         (x) => x.isPrincipal,
@@ -761,6 +766,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                 const SizedBox(width: 12),
                 _buildSubTab('Cardápio Digital', Icons.restaurant_menu_rounded, 3),
                 const SizedBox(width: 12),
+                _buildSubTab('WhatsApp & Mensagens', Icons.chat_rounded, 10),
+                const SizedBox(width: 12),
                 _buildSubTab('Formas de Pagamento', Icons.payments_outlined, 4),
                 const SizedBox(width: 12),
                 _buildSubTab('Impressoras', Icons.print_outlined, 5),
@@ -817,41 +824,9 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                                 : FincoreColors.textMuted,
                       ),
                     ),
-                    const SizedBox(width: 12),
                   ],
-                  // Botão Salvar Principal no Topo (Sempre visível e liberado)
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: !_isSaving ? FincoreColors.primaryGradient : null,
-                      color: !_isSaving ? null : FincoreColors.border,
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: !_isSaving
-                          ? FincoreShadows.glow(FincoreColors.primary, intensity: 0.2)
-                          : null,
-                    ),
-                    child: ElevatedButton.icon(
-                      onPressed: !_isSaving ? _saveConfig : null,
-                      icon: _isSaving
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Icon(Icons.save_rounded, size: 16, color: Colors.white),
-                      label: Text(
-                        _isSaving ? 'Salvando...' : 'Salvar Alterações',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (kDebugMode)
+                  if (kDebugMode) ...[
+                    const SizedBox(width: 8),
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, color: FincoreColors.textMuted, size: 20),
                       tooltip: 'Opções de Desenvolvedor',
@@ -876,6 +851,7 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
                         PopupMenuItem(value: 'logs', child: Row(children: [Icon(Icons.analytics_outlined, size: 18), SizedBox(width: 8), Text('Central de Logs')])),
                       ],
                     ),
+                  ],
                 ],
               ),
             ],
@@ -996,6 +972,8 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
         return (['Infraestrutura', 'Auditoria'], 'Auditoria', 'Rastreabilidade de eventos e logs do sistema.');
       case 9:
         return (['Personalização', 'Aparência'], 'Aparência & Marca', 'Personalização de tema (Claro/Escuro), cor primária da marca, densidade, bordas e marca da empresa.');
+      case 10:
+        return (['Vendas & Comunicação', 'WhatsApp & Mensagens Rápidas'], 'Modelos & Mensagens do WhatsApp', 'Personalização de templates, textos rápidos, tags dinâmicas e simulador live preview de atendimento.');
       default:
         return (['Configurações'], 'Configurações', 'Configurações do sistema.');
     }
@@ -1040,6 +1018,12 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
               label: 'Cardápio Digital',
               isSelected: _selectedSection == 3,
               onTap: () => setState(() => _selectedSection = 3),
+            ),
+            _buildSideNavItem(
+              icon: Icons.chat_rounded,
+              label: 'WhatsApp & Mensagens',
+              isSelected: _selectedSection == 10,
+              onTap: () => setState(() => _selectedSection = 10),
             ),
             const SizedBox(height: 16),
             _buildGroupHeader('PAGAMENTOS'),
@@ -1245,6 +1229,13 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
       case 9:
         return PersonalizacaoView(
           key: _personalizacaoKey,
+          onChanged: () {
+            if (!_hasUnsavedChanges) setState(() => _hasUnsavedChanges = true);
+          },
+        );
+      case 10:
+        return MensagensWhatsAppView(
+          key: _mensagensWhatsAppKey,
           onChanged: () {
             if (!_hasUnsavedChanges) setState(() => _hasUnsavedChanges = true);
           },
