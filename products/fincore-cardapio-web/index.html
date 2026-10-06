@@ -8,6 +8,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+
   <!-- SEO -->
   <title id="page-title">Cardápio & Encomendas Online</title>
   <meta name="description" id="page-desc" content="Faça seu pedido ou agende sua encomenda de salgados para festas e eventos com praticidade e segurança." />
@@ -24,7 +28,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- Estilos -->
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2.8.0" />
 </head>
 <body>
 
@@ -89,85 +93,127 @@
   <!-- Área de Boas-vindas / Central de Ações -->
   <section class="home-hero">
     <div class="home-hero-content">
-      <div class="home-greeting-block">
-        <h1 class="home-greeting-title">
-          <span id="home-welcome-badge">Olá!</span> <span class="home-greeting-wave">👋</span>
-        </h1>
-        <p class="home-greeting-sub" id="home-greeting-sub">O que você deseja fazer hoje?</p>
+      
+      <!-- Saudação Personalizada & Status da Loja -->
+      <div class="home-greeting-row">
+        <div class="home-avatar-wrap">
+          <div class="home-store-avatar" id="home-store-avatar" title="Seu Perfil">👋</div>
+        </div>
+        <div class="home-greeting-block">
+          <div class="home-greeting-meta">
+            <span class="home-welcome-badge" id="home-welcome-badge">Bem-vindo</span>
+          </div>
+          <h1 class="home-greeting-title" id="home-greeting-name">Olá! O que vamos pedir hoje?</h1>
+          <p class="home-store-tagline" id="home-store-tagline">Salgados fresquinhos para pronta entrega ou encomendas agendadas para festas e eventos com pontualidade garantida.</p>
+        </div>
       </div>
 
-      <!-- Barra de Busca Rápida -->
-      <div class="home-search-box">
-        <span class="search-icon">🔍</span>
-        <input type="text" class="home-search-input" id="home-search-input"
-          placeholder="Buscar produtos, salgados, kits..." autocomplete="off" />
-        <button type="button" class="btn btn-primary btn-sm home-search-btn" id="home-search-btn">Buscar</button>
+      <!-- Barra de Busca Protagonista -->
+      <div class="home-super-search-wrap">
+        <div class="home-search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="home-search-input" id="home-search-input"
+            placeholder="Buscar salgados, coxinhas, kits, combos..." autocomplete="off" />
+          <button type="button" class="search-clear-btn" id="home-search-clear-btn" style="display:none" aria-label="Limpar busca">&times;</button>
+          <button type="button" class="btn btn-primary home-search-btn" id="home-search-btn">Buscar</button>
+        </div>
       </div>
 
-      <!-- Atalhos Rápidos (Central de Ações com alta usabilidade) -->
-      <div class="home-shortcuts-grid">
-        <button type="button" class="action-shortcut-card" id="shortcut-cardapio">
-          <div class="asc-icon-box">🍽️</div>
-          <div class="asc-text-wrap">
-            <strong class="asc-title">Ver Cardápio</strong>
-            <span class="asc-desc">Catálogo completo de produtos</span>
-          </div>
-          <span class="asc-arrow">→</span>
-        </button>
-
-        <button type="button" class="action-shortcut-card" id="shortcut-encomenda">
-          <div class="asc-icon-box">📅</div>
-          <div class="asc-text-wrap">
-            <strong class="asc-title">Fazer Encomenda</strong>
-            <span class="asc-desc">Agendar data e horário para festas</span>
-          </div>
-          <span class="asc-arrow">→</span>
-        </button>
-
-        <button type="button" class="action-shortcut-card" id="shortcut-pedidos">
-          <div class="asc-icon-box">📦</div>
-          <div class="asc-text-wrap">
-            <strong class="asc-title">Meus Pedidos</strong>
-            <span class="asc-desc">Histórico e acompanhamento</span>
-          </div>
-          <span class="asc-arrow">→</span>
-        </button>
-
-        <button type="button" class="action-shortcut-card" id="shortcut-tabela">
-          <div class="asc-icon-box">💰</div>
-          <div class="asc-text-wrap">
-            <strong class="asc-title">Preços por Lote</strong>
-            <span class="asc-desc">Descontos progressivos por quantidade</span>
-          </div>
-          <span class="asc-arrow">→</span>
-        </button>
-      </div>
     </div>
   </section>
 
   <!-- Container Principal de Conteúdo da Home -->
   <div class="home-main-container">
 
-    <!-- 1. PEDIDO EM ANDAMENTO — só aparece se houver pedido ativo real -->
+    <!-- 1. CATEGORIAS HORIZONTAIS EM CARROSSEL (Acesso Imediato) -->
+    <section class="home-section home-categories-carousel-section" id="home-categories-section">
+      <div class="home-categories-scroll-wrapper">
+        <div class="home-categories-carousel" id="home-categories-carousel" role="tablist">
+          <!-- Renderizado dinamicamente via JS com categorias reais do banco -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. PEDIDO EM ANDAMENTO (MÁXIMA PRIORIDADE — só aparece se houver pedido ativo real) -->
     <section class="home-section" id="home-active-order-container" style="display:none">
       <div class="section-header">
         <div>
-          <h2 class="section-title">⚡ Pedido em Andamento</h2>
-          <p class="section-subtitle">Acompanhamento em tempo real</p>
+          <h2 class="section-title">⚡ Acompanhe seu Pedido</h2>
+          <p class="section-subtitle">Atualização em tempo real da cozinha à sua porta</p>
         </div>
         <span class="section-badge-live"><span class="pulse-dot"></span> Ao Vivo</span>
       </div>
       <div id="home-active-order-card" class="active-order-card">
-        <!-- Renderizado dinamicamente via JS -->
+        <!-- Renderizado dinamicamente com stepper Kanban real via JS -->
       </div>
     </section>
 
-    <!-- 2. PRÓXIMAS ENCOMENDAS (AGENDADAS FUTURAS) — só aparece se houver encomendas futuras -->
+    <!-- 3. ESCOLHA RÁPIDA (Ações por Intenção) -->
+    <section class="home-section" id="home-quick-intent-section">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">⚡ Escolha Rápida</h2>
+          <p class="section-subtitle">O que você gostaria de fazer agora?</p>
+        </div>
+      </div>
+      <div class="home-quick-intent-grid">
+        <button type="button" class="intent-shortcut-card" id="shortcut-salgados">
+          <div class="isc-icon-box">🥟</div>
+          <div class="isc-content">
+            <strong class="isc-title">Quero alguns salgados</strong>
+            <span class="isc-desc">Ver cardápio para pedir agora</span>
+          </div>
+          <span class="isc-arrow">→</span>
+        </button>
+
+        <button type="button" class="intent-shortcut-card" id="shortcut-festa">
+          <div class="isc-icon-box">🎉</div>
+          <div class="isc-content">
+            <strong class="isc-title">Tenho uma festa</strong>
+            <span class="isc-desc">Monte sua encomenda com data</span>
+          </div>
+          <span class="isc-arrow">→</span>
+        </button>
+
+        <button type="button" class="intent-shortcut-card" id="shortcut-repetir">
+          <div class="isc-icon-box">🔁</div>
+          <div class="isc-content">
+            <strong class="isc-title">Quero pedir igual</strong>
+            <span class="isc-desc">Repetir pedido anterior</span>
+          </div>
+          <span class="isc-arrow">→</span>
+        </button>
+
+        <button type="button" class="intent-shortcut-card" id="shortcut-pedidos">
+          <div class="isc-icon-box">📦</div>
+          <div class="isc-content">
+            <strong class="isc-title">Ver meus pedidos</strong>
+            <span class="isc-desc">Acompanhar histórico de compras</span>
+          </div>
+          <span class="isc-arrow">→</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 4. COMPRE NOVAMENTE (RECOMPRA — se houver histórico de pedidos concluídos) -->
+    <section class="home-section" id="home-reorder-section" style="display:none">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">🔁 Compre Novamente</h2>
+          <p class="section-subtitle">Seu último pedido está a um clique de distância</p>
+        </div>
+      </div>
+      <div class="reorder-card-wrapper" id="home-reorder-card">
+        <!-- Renderizado dinamicamente via JS com itens reais do último pedido -->
+      </div>
+    </section>
+
+    <!-- 5. PRÓXIMAS ENCOMENDAS (AGENDADAS FUTURAS — se houver) -->
     <section class="home-section" id="home-scheduled-orders-container" style="display:none">
       <div class="section-header">
         <div>
           <h2 class="section-title">📅 Suas Próximas Encomendas</h2>
-          <p class="section-subtitle">Pedidos agendados para datas futuras</p>
+          <p class="section-subtitle">Pedidos confirmados para datas futuras</p>
         </div>
         <button type="button" class="section-link-btn" id="home-view-all-scheduled-btn">Ver Todas →</button>
       </div>
@@ -176,66 +222,43 @@
       </div>
     </section>
 
-    <!-- 3. COMPRE NOVAMENTE (RECOMPRA) — só aparece se houver histórico de pedidos concluídos -->
-    <section class="home-section" id="home-reorder-section" style="display:none">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">🔄 Compre Novamente</h2>
-          <p class="section-subtitle">Repita seu último pedido com praticidade</p>
-        </div>
-      </div>
-      <div class="reorder-card-wrapper" id="home-reorder-card">
-        <!-- Renderizado dinamicamente com os itens reais do último pedido -->
-      </div>
-    </section>
-
-    <!-- 4. BANNER: ENCOMENDAS PARA FESTAS E EVENTOS -->
-    <section class="home-section home-party-section" id="home-party-orders-banner">
-      <div class="party-banner-card">
-        <div class="party-banner-content">
-          <div class="party-banner-badge">🎉 Encomendas para Festas & Eventos</div>
-          <h3 class="party-banner-title">Planeje sua comemoração com mini salgados fresquinhos</h3>
-          <p class="party-banner-desc">
-            Monte sua encomenda escolhendo as quantidades e agende a data e o horário ideal para entrega ou retirada no balcão.
-          </p>
-          <div class="party-banner-actions">
-            <button type="button" class="btn btn-primary" id="btn-party-order-cta">
-              📅 Montar Encomenda
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 5. MAIS PEDIDOS (PRODUTOS DO CARDÁPIO) -->
+    <!-- 6. CARDÁPIO EM DESTAQUE (VITRINE COMERCIAL COM COMPRA RÁPIDA) -->
     <section class="home-section" id="home-featured-section">
       <div class="section-header">
         <div>
-          <h2 class="section-title">🔥 Mais Pedidos</h2>
-          <p class="section-subtitle">Itens em destaque para seu pedido</p>
+          <h2 class="section-title">🥟 Do Nosso Cardápio</h2>
+          <p class="section-subtitle">Escolha os itens e adicione ao seu pedido</p>
         </div>
         <button type="button" class="section-link-btn" id="home-view-all-prods-btn">Ver Cardápio Completo →</button>
       </div>
       <div class="featured-products-grid" id="home-featured-grid">
-        <!-- Renderizado via JS com fotos reais e preços em lote -->
+        <!-- Renderizado dinamicamente com fotos grandes, estoque real e botão de compra rápida -->
       </div>
     </section>
 
-    <!-- 6. CATEGORIAS DO CARDÁPIO -->
-    <section class="home-section" id="home-categories-section">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">🍽️ Categorias</h2>
-          <p class="section-subtitle" id="home-cats-subtitle">Navegue pelas opções do cardápio</p>
+    <!-- 7. DESTAQUE COMPACTO: ENCOMENDAS PARA FESTAS & EVENTOS -->
+    <section class="home-section home-party-section" id="home-party-orders-banner">
+      <div class="party-banner-card">
+        <div class="party-banner-content">
+          <div class="party-banner-badge">🎉 Encomendas para Festas & Eventos</div>
+          <h3 class="party-banner-title">Mini salgados e porções sob encomenda</h3>
+          <p class="party-banner-desc">
+            Escolha as quantidades para a sua comemoração e agende a data e o horário da entrega com pontualidade.
+          </p>
+          <div class="party-banner-actions">
+            <button type="button" class="btn btn-primary" id="btn-party-order-cta">
+              📅 Montar Encomenda →
+            </button>
+            <span class="party-banner-tier-tag" id="party-banner-tier-tag" style="display:none">🛒 Preços especiais por lote</span>
+          </div>
         </div>
-        <button type="button" class="section-link-btn" id="home-view-all-cats-btn">Ver Todas →</button>
-      </div>
-      <div class="home-categories-grid" id="home-categories-grid">
-        <!-- Renderizado dinamicamente com dados reais -->
+        <div class="party-banner-visual" id="party-banner-visual">
+          <span class="party-visual-emoji">🥟</span>
+        </div>
       </div>
     </section>
 
-    <!-- 7. PREÇOS POR QUANTIDADE (TABELA DE LOTES) -->
+    <!-- 8. PREÇOS POR QUANTIDADE (TABELA DE LOTES) -->
     <section class="home-section" id="home-pricing-tiers-section" style="display:none">
       <div class="section-header">
         <div>
@@ -248,7 +271,7 @@
       </div>
     </section>
 
-    <!-- 8. INFORMAÇÕES DO ESTABELECIMENTO — somente dados reais do cadastro -->
+    <!-- 9. INFORMAÇÕES DO ESTABELECIMENTO -->
     <section class="home-section" id="home-store-info-section" style="display:none">
       <div class="store-info-box" id="home-store-info-box">
         <div class="store-info-header">
@@ -337,19 +360,19 @@
     </div>
   </div>
 
-  <!-- Stepper de Progresso Visual -->
-  <div class="checkout-stepper">
-    <div class="step-item active" id="step-ind-1">
+  <!-- Stepper de Progresso Visual Interativo -->
+  <div class="checkout-stepper" id="checkout-stepper">
+    <div class="step-item active" id="step-ind-1" data-step="1" role="button" tabindex="0">
       <div class="step-num">1</div>
       <div class="step-label">Itens</div>
     </div>
-    <div class="step-line active"></div>
-    <div class="step-item active" id="step-ind-2">
+    <div class="step-line" id="step-line-1"></div>
+    <div class="step-item" id="step-ind-2" data-step="2" role="button" tabindex="0">
       <div class="step-num">2</div>
-      <div class="step-label">Entrega / Data</div>
+      <div class="step-label">Entrega & Data</div>
     </div>
-    <div class="step-line active"></div>
-    <div class="step-item active" id="step-ind-3">
+    <div class="step-line" id="step-line-2"></div>
+    <div class="step-item" id="step-ind-3" data-step="3" role="button" tabindex="0">
       <div class="step-num">3</div>
       <div class="step-label">Pagamento</div>
     </div>
@@ -360,7 +383,7 @@
     <div class="alert alert-error" id="checkout-min-qty-alert" style="display:none;margin-bottom:14px"></div>
 
     <!-- Seção 1: Itens do carrinho -->
-    <div class="checkout-section card-box">
+    <div class="checkout-section card-box" id="checkout-sec-1">
       <div class="checkout-section-header">
         <div class="checkout-section-title">🛒 1. Itens Selecionados</div>
         <button type="button" class="btn btn-sm btn-ghost btn-danger-text" id="btn-limpar-carrinho" title="Limpar todos os itens">
@@ -386,8 +409,8 @@
       </div>
     </div>
 
-    <!-- Seção de Dados de Contato do Cliente (exibido apenas para visitante / não logado) -->
-    <div class="checkout-section card-box" id="checkout-contact-section">
+    <!-- Seção de Dados de Contato do Cliente (desativada: login é 100% obrigatório no checkout) -->
+    <div class="checkout-section card-box" id="checkout-contact-section" style="display:none !important">
       <div class="checkout-section-header">
         <div class="checkout-section-title">👤 2. Seus Dados de Contato</div>
       </div>
@@ -422,9 +445,9 @@
       </div>
     </div>
 
-    <!-- Seção 3: Tipo de logística / Como receber -->
-    <div class="checkout-section card-box">
-      <div class="checkout-section-title">🚚 3. Como e Quando Receber?</div>
+    <!-- Seção 2: Tipo de logística / Como receber -->
+    <div class="checkout-section card-box" id="checkout-sec-2">
+      <div class="checkout-section-title">🚚 2. Como e Quando Receber?</div>
       
       <div class="logistica-grid">
         <div class="logistica-card active" data-logistica="Entrega" id="tab-entrega" role="button" tabindex="0">
@@ -446,24 +469,40 @@
         </div>
       </div>
 
+      <!-- Informações de Retirada (visível apenas para Retirada no Local) -->
+      <div id="retirada-section" class="retirada-info-card" style="display:none;margin-top:16px">
+        <div class="retirada-header">
+          <span class="retirada-badge">🏪 Ponto de Retirada no Balcão</span>
+          <span class="text-success font-bold" style="font-size:12px">Taxa: Grátis</span>
+        </div>
+        <div class="retirada-body">
+          <strong class="retirada-store-name" id="retirada-store-name">FinCore Food</strong>
+          <p class="retirada-store-address" id="retirada-store-address">Endereço da Loja</p>
+          <div class="retirada-notice">
+            <span>ℹ️</span>
+            <span>Apresente o número do seu pedido ou nome no balcão no horário agendado.</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Endereço (visível apenas para Entrega) -->
       <div id="endereco-section" class="endereco-wrapper" style="margin-top:16px">
-        <!-- Card de Endereço Salvo / Cadastrado -->
+        <!-- Container de Endereços Cadastrados no ERP / Perfil -->
         <div id="checkout-saved-address-box" class="saved-address-card" style="display:none">
           <div class="saved-address-header">
-            <span class="saved-address-badge">📍 Endereço Principal Cadastrado</span>
+            <span class="saved-address-badge">📍 Selecione o Endereço de Entrega</span>
             <button type="button" class="btn btn-sm btn-secondary" id="btn-add-novo-endereco">
               ➕ Entregar em outro endereço
             </button>
           </div>
-          <div class="saved-address-text" id="checkout-saved-address-text">—</div>
+          <div id="checkout-saved-addresses-list" class="saved-addresses-list" style="display:flex;flex-direction:column;gap:10px;margin-top:12px"></div>
         </div>
 
         <div id="checkout-address-form-container">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div class="form-section-title" id="checkout-address-form-title">📍 Endereço de Entrega *</div>
             <button type="button" class="btn btn-sm btn-ghost" id="btn-voltar-endereco-salvo" style="display:none">
-              ↩️ Usar endereço cadastrado
+              ↩️ Usar endereços cadastrados
             </button>
           </div>
           
@@ -514,6 +553,16 @@
             </div>
           </div>
         </div>
+
+        <!-- Resumo da Rota Calculada (visível quando calculado com sucesso) -->
+        <div id="checkout-route-summary" class="route-summary-box" style="display:none;margin-top:12px">
+          <div class="route-summary-icon">🛵</div>
+          <div class="route-summary-content">
+            <div class="route-summary-title" id="route-summary-distance">Distância calculada: 0 km</div>
+            <div class="route-summary-desc" id="route-summary-rule">Regra de entrega aplicada</div>
+          </div>
+          <span class="route-badge" id="route-badge-fee">R$ 0,00</span>
+        </div>
       </div>
 
       <!-- Data e Horário Previstos / Agendamento de Encomenda -->
@@ -552,33 +601,11 @@
     </div>
 
     <!-- Seção 3: Forma de Pagamento -->
-    <div class="checkout-section card-box">
+    <div class="checkout-section card-box" id="checkout-sec-3">
       <div class="checkout-section-title">💳 3. Forma de Pagamento</div>
       
-      <div class="payment-grid">
-        <div class="payment-card active" data-payment="Pix" data-type="PIX" id="tab-pay-pix" role="button" tabindex="0">
-          <div class="payment-card-icon">⚡</div>
-          <div class="payment-card-title">Pix Instantâneo</div>
-          <div class="payment-card-desc">Copia e Cola Automático com valor</div>
-        </div>
-
-        <div class="payment-card" data-payment="Dinheiro" data-type="DINHEIRO" id="tab-pay-dinheiro" role="button" tabindex="0">
-          <div class="payment-card-icon">💵</div>
-          <div class="payment-card-title">Dinheiro</div>
-          <div class="payment-card-desc">Pagamento na entrega ou balcão</div>
-        </div>
-
-        <div class="payment-card" data-payment="Cartão de Crédito" data-type="CARTAO_CREDITO" id="tab-pay-credito" role="button" tabindex="0">
-          <div class="payment-card-icon">💳</div>
-          <div class="payment-card-title">Cartão de Crédito</div>
-          <div class="payment-card-desc">Maquininha na entrega/retirada</div>
-        </div>
-
-        <div class="payment-card" data-payment="Cartão de Débito" data-type="CARTAO_DEBITO" id="tab-pay-debito" role="button" tabindex="0">
-          <div class="payment-card-icon">💳</div>
-          <div class="payment-card-title">Cartão de Débito</div>
-          <div class="payment-card-desc">Maquininha na entrega/retirada</div>
-        </div>
+      <div class="payment-grid" id="checkout-payment-grid">
+        <!-- Renderizado dinamicamente pelo banco de dados -->
       </div>
 
       <!-- Campo de troco caso dinheiro seja selecionado -->
@@ -755,6 +782,10 @@
           <input class="form-input" type="text" id="account-referencia" placeholder="Próximo à padaria" />
         </div>
 
+        <!-- Lista de Endereços Cadastrados no ERP / Perfil -->
+        <div class="form-section-title" style="margin-top:22px">📍 Meus Endereços Cadastrados</div>
+        <div id="account-addresses-list" class="saved-addresses-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px"></div>
+
         <button type="submit" class="btn btn-primary btn-full btn-lg" id="account-save-btn">
           💾 Salvar Alterações
         </button>
@@ -768,14 +799,47 @@
   <div class="auth-card">
     <div class="auth-header">
       <div class="auth-icon">🔐</div>
-      <h2 class="auth-title">Bem-vindo!</h2>
+      <h2 class="auth-title" id="auth-main-title">Bem-vindo!</h2>
       <p class="auth-subtitle" id="auth-subtitle">
         Entre ou crie sua conta para acessar o cardápio e fazer seus pedidos.
       </p>
     </div>
 
+    <!-- Banner de Finalização de Pedido Pendente (exibido quando o cliente clica para finalizar o carrinho) -->
+    <div class="checkout-auth-notice" id="checkout-auth-notice" style="display:none;background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.35);border-radius:12px;padding:12px 14px;margin-bottom:16px;align-items:center;gap:12px">
+      <div style="font-size:24px">🛒</div>
+      <div style="flex:1;text-align:left">
+        <div style="font-size:13px;font-weight:700;color:var(--brand-400)">Você está a um passo de finalizar seu pedido!</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:2px" id="checkout-auth-notice-sub">Faça login ou crie sua conta para informar o endereço e concluir com segurança.</div>
+      </div>
+    </div>
+
+    <!-- Botão Continuar com Google (OAuth) -->
+    <div class="google-auth-container" id="google-auth-container">
+      <button type="button" class="btn btn-google-auth btn-full" id="btn-google-login">
+        <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+        </svg>
+        <span>Continuar com o Google</span>
+      </button>
+      <div class="auth-divider">
+        <span>ou utilize seu e-mail e senha</span>
+      </div>
+    </div>
+
+    <!-- Banner informativo quando autenticado via Google precisando completar cadastro -->
+    <div class="google-onboarding-banner" id="google-onboarding-banner" style="display:none">
+      <div class="gob-icon">🎉</div>
+      <div class="gob-text">
+        <strong id="gob-user-name">Olá!</strong> Sua conta Google foi conectada. Complete apenas seu <strong>WhatsApp</strong> e <strong>endereço de entrega</strong> para fazer pedidos!
+      </div>
+    </div>
+
     <!-- Tabs -->
-    <div class="auth-tabs" role="tablist">
+    <div class="auth-tabs" id="auth-tabs" role="tablist">
       <div class="auth-tab active" id="tab-login" role="tab" aria-selected="true">Entrar</div>
       <div class="auth-tab" id="tab-register" role="tab" aria-selected="false">Criar conta</div>
     </div>
@@ -908,7 +972,7 @@
         <input class="form-input" type="text" id="reg-referencia" placeholder="Próximo à padaria" />
       </div>
 
-      <div class="form-group">
+      <div class="form-group" id="reg-password-group">
         <label class="form-label" for="reg-password">Criar senha *</label>
         <input
           class="form-input"
@@ -925,7 +989,10 @@
       </button>
     </form>
 
-    <p style="text-align:center;margin-top:16px">
+    <p style="text-align:center;margin-top:16px;display:flex;flex-direction:column;gap:8px;align-items:center">
+      <button type="button" class="btn btn-ghost btn-sm" id="auth-back-to-cart-btn" style="display:none;color:var(--brand-400);font-weight:700">
+        ← Voltar e Continuar Comprando
+      </button>
       <button type="button" class="btn btn-ghost btn-sm" id="back-to-landing-btn">
         ← Voltar ao Início
       </button>
@@ -999,6 +1066,14 @@
         <button type="button" class="btn btn-secondary btn-full" id="btn-ver-pedidos">
           📦 Acompanhar em Meus Pedidos
         </button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-confirm-copy-link" style="border:1px dashed var(--surface-border);font-weight:700">
+            🔗 Copiar Rastreio
+          </button>
+          <a href="#" target="_blank" class="btn btn-ghost btn-sm" id="btn-confirm-whatsapp-store" style="border:1px dashed rgba(37,211,102,0.4);color:#25D366;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px">
+            💬 Loja no WhatsApp
+          </a>
+        </div>
       </div>
     </div>
   </div>
@@ -1053,7 +1128,10 @@
     <div id="modal-image-area" class="modal-image-container"></div>
     <div class="modal-content">
       <div class="modal-header-info">
-        <div class="modal-category-tag" id="modal-prod-cat">🥟 Salgados</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div class="modal-category-tag" id="modal-prod-cat">🥟 Salgados</div>
+          <div class="product-availability-badge available" id="modal-availability-badge">✅ Disponível</div>
+        </div>
         <h2 class="modal-title" id="modal-prod-name">—</h2>
         <div class="modal-price" id="modal-prod-price">R$ 0,00</div>
       </div>
@@ -1062,17 +1140,33 @@
       <!-- Container de Faixas de Precificação Comercial / Lote -->
       <div id="modal-pricing-tiers" class="pricing-tiers-container" style="display:none"></div>
 
+      <!-- Seletores Rápidos de Quantidade (Lote / Venda Rápida) -->
+      <div class="modal-quick-qty-wrapper" id="modal-quick-qty-wrapper">
+        <div class="quick-qty-label">Quantidades Rápidas:</div>
+        <div class="quick-qty-chips">
+          <button type="button" class="quick-qty-chip" data-qty="1">+1</button>
+          <button type="button" class="quick-qty-chip" data-qty="5">+5</button>
+          <button type="button" class="quick-qty-chip" data-qty="10">+10</button>
+          <button type="button" class="quick-qty-chip" data-qty="25">+25</button>
+          <button type="button" class="quick-qty-chip" data-qty="50">+50</button>
+          <button type="button" class="quick-qty-chip" data-qty="100">+100</button>
+        </div>
+      </div>
+
+      <!-- Aviso Informativo de Quantidade Mínima da Categoria -->
+      <div id="modal-cat-min-hint" class="modal-cat-min-hint" style="display:none"></div>
+
       <div class="modal-actions-wrapper">
         <div class="modal-qty-box">
           <span class="modal-qty-label">Quantidade:</span>
           <div class="qty-control editable">
             <button type="button" class="qty-btn minus" id="modal-qty-minus" aria-label="Diminuir">−</button>
-            <input type="number" class="qty-input" id="modal-qty-input" value="1" min="1" max="9999" aria-label="Quantidade" />
+            <input type="number" class="qty-input" id="modal-qty-input" value="0" min="0" max="9999" aria-label="Quantidade" />
             <button type="button" class="qty-btn plus" id="modal-qty-plus" aria-label="Aumentar">+</button>
           </div>
         </div>
-        <button type="button" class="btn btn-primary modal-submit-btn" id="modal-add-btn">
-          🛒 Adicionar ao Pedido
+        <button type="button" class="btn btn-primary modal-submit-btn" id="modal-add-btn" disabled style="opacity:0.6;cursor:not-allowed;">
+          🛒 Selecione a quantidade
         </button>
       </div>
     </div>
@@ -1166,9 +1260,19 @@
       </div>
     </div>
 
-    <div style="display:flex;gap:10px">
-      <button type="button" class="btn btn-secondary btn-full" id="detail-close-modal-btn">Fechar</button>
-      <button type="button" class="btn btn-primary btn-full" id="detail-reorder-btn" style="display:flex;align-items:center;justify-content:center;gap:6px">🔁 Pedir de Novo</button>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:10px">
+        <button type="button" class="btn btn-secondary btn-full" id="detail-close-modal-btn">Fechar</button>
+        <button type="button" class="btn btn-primary btn-full" id="detail-reorder-btn" style="display:flex;align-items:center;justify-content:center;gap:6px">🔁 Pedir de Novo</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-detail-copy-link" style="border:1px dashed var(--surface-border);font-size:11.5px;font-weight:700">
+          🔗 Copiar Rastreio
+        </button>
+        <a href="#" target="_blank" class="btn btn-ghost btn-sm" id="btn-detail-whatsapp-store" style="border:1px dashed rgba(37,211,102,0.4);color:#25D366;font-size:11.5px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px">
+          💬 Loja no WhatsApp
+        </a>
+      </div>
     </div>
   </div>
 </div>
@@ -1267,8 +1371,91 @@
   </div>
 </div>
 
+<!-- ─── MODAL DE IDENTIFICAÇÃO DE CLIENTE ("ENCONTRAMOS VOCÊ!") ─── -->
+<div class="modal-backdrop" id="modal-erp-customer-found" role="dialog" aria-modal="true">
+  <div class="modal-card found-customer-modal-card">
+    <button type="button" class="modal-close" id="modal-erp-found-close-btn" aria-label="Fechar">&times;</button>
+
+    <!-- Header com ícone animado e saudação cordial -->
+    <div class="found-customer-header">
+      <div class="found-customer-badge">
+        <span class="found-customer-sparkle">✨</span>
+      </div>
+      <h2 class="found-customer-title">Encontramos você!</h2>
+      <p class="found-customer-subtitle">
+        Já existe um cadastro associado a este WhatsApp.<br />
+        Confira seus dados antes de continuar o pedido.
+      </p>
+    </div>
+
+    <!-- Seção 1: Seus dados -->
+    <div class="found-customer-section">
+      <div class="found-section-label">Seus dados</div>
+      <div class="found-data-card">
+        <div class="found-data-row">
+          <span class="found-data-icon">👤</span>
+          <div class="found-data-content">
+            <span class="found-data-sublabel">Nome</span>
+            <span class="found-data-value" id="erp-found-client-name">—</span>
+          </div>
+        </div>
+        <div class="found-data-divider"></div>
+        <div class="found-data-row">
+          <span class="found-data-icon">📱</span>
+          <div class="found-data-content">
+            <span class="found-data-sublabel">WhatsApp</span>
+            <span class="found-data-value" id="erp-found-client-phone">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Seção 2: Endereço de entrega -->
+    <div class="found-customer-section" id="erp-found-address-section">
+      <div class="found-section-header">
+        <div class="found-section-label">📍 Endereço de entrega</div>
+        <button type="button" class="found-btn-link" id="btn-erp-found-edit-address">
+          Alterar endereço
+        </button>
+      </div>
+      <div class="found-data-card found-address-card">
+        <div id="erp-found-client-address" class="found-address-lines">
+          <div class="found-addr-line font-bold" id="erp-found-addr-street">—</div>
+          <div class="found-addr-line text-muted" id="erp-found-addr-bairro">—</div>
+          <div class="found-addr-line text-muted" id="erp-found-addr-city-uf">—</div>
+          <div class="found-addr-line text-muted" id="erp-found-addr-cep">—</div>
+        </div>
+        <div id="erp-found-no-address" class="found-no-address-msg" style="display:none">
+          Nenhum endereço principal gravado ainda. Você poderá definir seu endereço na etapa de entrega.
+        </div>
+      </div>
+    </div>
+
+    <!-- Explicação contextual discreta -->
+    <div class="found-customer-context-box">
+      <div class="found-context-title">
+        <span class="found-context-lock">🔐</span>
+        <span>Seu pedido será vinculado a este cadastro.</span>
+      </div>
+      <p class="found-context-desc">
+        Assim, seus pedidos ficam reunidos em um único histórico e você poderá acompanhar suas compras pela plataforma.
+      </p>
+    </div>
+
+    <!-- Ações de decisão -->
+    <div class="found-customer-actions">
+      <button type="button" class="btn btn-primary btn-full btn-found-confirm" id="btn-erp-found-confirm">
+        <span id="btn-confirm-text">Usar este cadastro e continuar</span>
+      </button>
+      <button type="button" class="btn btn-ghost btn-full btn-found-reject" id="btn-erp-found-reject">
+        Não sou eu
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- Script principal -->
-<script src="app.js?v=2.1.0"></script>
+<script src="app.js?v=2.9.1"></script>
 
 </body>
 </html>

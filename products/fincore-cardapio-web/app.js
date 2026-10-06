@@ -34,48 +34,282 @@ const state = {
   tipoLogistica:      'Entrega',
   formaPagamentoNome: 'Pix',
   formaPagamentoId:   null,
+  formaPagamentoTipo: 'pix',
+  formaPagamentoPermiteTroco: false,
+  formasPagamento:    [],
   customerOrders:     [],      // Histórico de pedidos do cliente logado
   activeOrder:        null,    // Pedido em andamento do cliente
+  customerAddresses:  [],      // Lista de múltiplos endereços cadastrados no ERP (local_entrega)
+  selectedAddressId:  null,    // ID do endereço atualmente selecionado para entrega
   searchTerm:         '',
   activeOrderFilter:  'all',
 };
 
-// ─── Horários de Funcionamento & Status da Loja ──────────────────────
-function isLojaAbertaAgora() {
-  const h = state.horariosAtendimento;
-  if (!h) return { isOpen: true, label: 'Aberto para pedidos', badgeClass: 'aberto', motivo: 'Recebendo pedidos normalmente' };
+// ─── Carregamento de Endereços Cadastrados do Cliente (local_entrega / perfil) ───
+async function loadCustomerAddresses() {
+  if (!state.session && !state.profile) {
+    state.customerAddresses = [];
+    return [];
+  }
+
+  const tenantId = state.tenantId || DEFAULT_TENANT_ID;
+  const clienteId = state.profile?.cliente_local_id;
+  const profileId = state.profile?.id;
+
+  try {
+    let enderecos = [];
+
+    // 1. Busca todos os endereços ativos do tenant em local_entrega
+    const { data: locais, error } = await sb
+      .from('local_entrega')
+      .select('*')
+      .eq('tenantId', tenantId)
+      .eq('ativo', true)
+      .is('deletedAt', null);
+
+    if (locais && locais.length > 0) {
+      enderecos = locais.filter(loc => {
+        if (clienteId && String(loc.clienteId) === String(clienteId)) return true;
+        if (profileId && String(loc.clienteId) === String(profileId)) return true;
+        return false;
+      });
+    }
+
+    // 2. Se o perfil em cardapio_clientes possui endereço e ele não está na lista, adiciona como opção
+    if (state.profile?.logradouro) {
+      const hasSimilar = enderecos.some(e => 
+        e.logradouro && e.logradouro.toLowerCase().trim() === state.profile.logradouro.toLowerCase().trim() &&
+        String(e.numero || '').trim() === String(state.profile.numero || '').trim()
+      );
+      if (!hasSimilar) {
+        enderecos.unshift({
+          id: 'profile_default',
+          nomeIdentificador: 'Cadastrado no Perfil',
+          logradouro: state.profile.logradouro,
+          numero: state.profile.numero || '',
+          bairro: state.profile.bairro || '',
+          cidade: state.profile.cidade || state.empresa?.cidade || 'Pouso Alegre',
+          uf: state.profile.uf || state.empresa?.estado || 'MG',
+          cep: state.profile.cep || '',
+          complemento: state.profile.complemento || '',
+          referencia: state.profile.referencia || '',
+          isPadrao: enderecos.length === 0
+        });
+      }
+    }
+
+    state.customerAddresses = enderecos;
+    return enderecos;
+  } catch (err) {
+    console.warn('Erro ao carregar endereços do cliente:', err);
+    return state.customerAddresses || [];
+  }
+}
+
+// ─── Helpers de Formatação de Horários ────────────────────────────────
+function formatHoraCurta(hStr) {
+  if (!hStr) return '';
+  const [h, m] = String(hStr).trim().split(':');
+  const numH = parseInt(h, 10);
+  if (!m || m === '00') return `${numH}h`;
+  return `${numH}h${m}`;
+}
+
+// ─── Cálculo Operacional: Primeiro Horário de Entrega Possível ───────
+// Considera aprovação prévia obrigatória e horário real de expediente da cozinha.
+function calcularPrimeiraEntregaPossivel(agora = new Date(), h = state.horariosAtendimento) {
+  const toYmdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const toHhMmLocal = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  if (!h) {
+    const prazoMin = 120;
+    const cand = new Date(agora.getTime() + prazoMin * 60000);
+    const rem = cand.getMinutes() % 15;
+    if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+    else cand.setSeconds(0, 0);
+    return {
+      canOrder: true,
+      data: cand,
+      dataStr: toYmdLocal(cand),
+      horaStr: toHhMmLocal(cand),
+      horaFmt: formatHoraCurta(toHhMmLocal(cand)),
+      isHoje: toYmdLocal(cand) === toYmdLocal(agora),
+      isAmanha: false,
+      motivo: 'Recebendo pedidos normalmente'
+    };
+  }
 
   if (h.status === 'fechado') {
     return {
-      isOpen: false,
-      label: 'Fechado no momento',
-      motivo: h.mensagemFechado || 'Pausado para novos pedidos',
-      badgeClass: 'fechado'
+      canOrder: false,
+      data: null,
+      motivo: h.mensagemFechado || 'Pausado para novos pedidos'
     };
   }
 
-  if (h.status === 'aberto') {
-    return {
-      isOpen: true,
-      label: 'Aberto para pedidos',
-      motivo: 'Recebendo pedidos normalmente',
-      badgeClass: 'aberto'
-    };
+  const prazoMin = Math.max(30, parseInt(h.prazoMinimoMinutos || 120, 10));
+  const dayKeys = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+  const dayNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+  function isBlockedDate(d) {
+    if (!Array.isArray(h.bloqueios) || h.bloqueios.length === 0) return false;
+    const dateStr = toYmdLocal(d);
+    return h.bloqueios.some(b => {
+      if (!b || !b.data) return false;
+      const bStr = String(b.data).split('T')[0];
+      return bStr === dateStr && (b.diaTodo === true || b.dia_todo === true || (!b.inicio && !b.fim));
+    });
   }
 
-  // Modo 'auto': verificar dia da semana e hora atual
+  // 1. Verificar se hoje está no horário de atendimento e há tempo para preparo e entrega hoje
+  const todayKey = dayKeys[agora.getDay()];
+  const diaHoje = h.dias ? h.dias[todayKey] : null;
+
+  if (diaHoje && diaHoje.ativo && !isBlockedDate(agora)) {
+    const [abH, abM] = (diaHoje.abertura || '08:00').split(':').map(Number);
+    const [feH, feM] = (diaHoje.fechamento || '22:00').split(':').map(Number);
+    const openMin = abH * 60 + abM;
+    const closeMin = feH * 60 + feM;
+    const nowMin = agora.getHours() * 60 + agora.getMinutes();
+
+    const isOpenNow = (h.status === 'aberto') || (nowMin >= openMin && nowMin < closeMin);
+
+    if (isOpenNow) {
+      const cand = new Date(agora.getTime() + prazoMin * 60000);
+      const rem = cand.getMinutes() % 15;
+      if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+      else cand.setSeconds(0, 0);
+
+      const candMin = cand.getHours() * 60 + cand.getMinutes();
+      if (candMin <= closeMin && toYmdLocal(cand) === toYmdLocal(agora)) {
+        return {
+          canOrder: true,
+          data: cand,
+          dataStr: toYmdLocal(cand),
+          horaStr: toHhMmLocal(cand),
+          horaFmt: formatHoraCurta(toHhMmLocal(cand)),
+          isHoje: true,
+          isAmanha: false,
+          diaNome: dayNames[cand.getDay()],
+          motivo: `Aprovação em horário de atendimento (entregas até ${formatHoraCurta(diaHoje.fechamento)})`
+        };
+      }
+    } else if (nowMin < openMin) {
+      // Antes de abrir hoje (ex: madrugada) - aprovação inicia na abertura
+      const cand = new Date(agora);
+      cand.setHours(abH, abM + prazoMin, 0, 0);
+      const rem = cand.getMinutes() % 15;
+      if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+
+      const candMin = cand.getHours() * 60 + cand.getMinutes();
+      if (candMin <= closeMin && toYmdLocal(cand) === toYmdLocal(agora)) {
+        return {
+          canOrder: true,
+          data: cand,
+          dataStr: toYmdLocal(cand),
+          horaStr: toHhMmLocal(cand),
+          horaFmt: formatHoraCurta(toHhMmLocal(cand)),
+          isHoje: true,
+          isAmanha: false,
+          diaNome: dayNames[cand.getDay()],
+          motivo: `Aprovação a partir das ${formatHoraCurta(diaHoje.abertura)}`
+        };
+      }
+    }
+  }
+
+  // 2. Se não foi viável hoje, buscar o próximo dia útil a partir de amanhã (offset = 1 .. 14)
+  for (let offset = 1; offset <= 14; offset++) {
+    const nextDate = new Date(agora);
+    nextDate.setDate(agora.getDate() + offset);
+    nextDate.setHours(0, 0, 0, 0);
+
+    const dKey = dayKeys[nextDate.getDay()];
+    const diaCfg = h.dias ? h.dias[dKey] : null;
+
+    if (!diaCfg || !diaCfg.ativo || isBlockedDate(nextDate)) continue;
+
+    const [abH, abM] = (diaCfg.abertura || '08:00').split(':').map(Number);
+    const [feH, feM] = (diaCfg.fechamento || '22:00').split(':').map(Number);
+    const closeMin = feH * 60 + feM;
+
+    const cand = new Date(nextDate);
+    cand.setHours(abH, abM + prazoMin, 0, 0);
+    const rem = cand.getMinutes() % 15;
+    if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+
+    const candMin = cand.getHours() * 60 + cand.getMinutes();
+    if (candMin <= closeMin) {
+      return {
+        canOrder: true,
+        data: cand,
+        dataStr: toYmdLocal(cand),
+        horaStr: toHhMmLocal(cand),
+        horaFmt: formatHoraCurta(toHhMmLocal(cand)),
+        isHoje: false,
+        isAmanha: offset === 1,
+        diaNome: dayNames[cand.getDay()],
+        motivo: `Aprovação a partir das ${formatHoraCurta(diaCfg.abertura)}`
+      };
+    }
+  }
+
+  return {
+    canOrder: false,
+    data: null,
+    motivo: 'Não há horários disponíveis para entrega no momento'
+  };
+}
+
+// ─── Horários de Funcionamento & Status da Loja ──────────────────────
+function isLojaAbertaAgora() {
+  const h = state.horariosAtendimento;
   const now = new Date();
+  const primEntrega = calcularPrimeiraEntregaPossivel(now, h);
+
+  if (!h) {
+    return {
+      isOpenImediato: true,
+      canSchedule: true,
+      labelHeader: 'Aberto para pedidos · Entregas até 22h',
+      labelHome: 'Aberto para pedidos · Entregas até 22h',
+      badgeClass: 'aberto',
+      motivo: 'Recebendo pedidos normalmente',
+      primeiraEntrega: primEntrega
+    };
+  }
+
+  if (h.status === 'fechado') {
+    return {
+      isOpenImediato: false,
+      canSchedule: false,
+      labelHeader: 'Fechado temporariamente',
+      labelHome: 'Loja fechada temporariamente',
+      motivo: h.mensagemFechado || 'Pausado para novos pedidos',
+      badgeClass: 'fechado',
+      primeiraEntrega: primEntrega
+    };
+  }
+
+  // Modo 'auto' ou 'aberto': verificar dia da semana e hora atual
   const dayIndex = now.getDay(); // 0 = dom, 1 = seg ...
   const dayKeys = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
   const currentKey = dayKeys[dayIndex];
   const diaConfig = h.dias ? h.dias[currentKey] : null;
 
   if (!diaConfig || !diaConfig.ativo) {
+    const quandoFmt = primEntrega.isAmanha 
+      ? `amanhã, ${primEntrega.horaFmt}` 
+      : `${primEntrega.diaNome || 'próximo dia útil'}, ${primEntrega.horaFmt}`;
     return {
-      isOpen: false,
-      label: 'Fechado hoje',
-      motivo: h.mensagemFechado || 'Não abrimos neste dia da semana',
-      badgeClass: 'fechado'
+      isOpenImediato: false,
+      canSchedule: true,
+      labelHeader: `Aberto para encomendas · Entregas a partir de ${quandoFmt}`,
+      labelHome: `Aberto para encomendas · Entregas a partir de ${quandoFmt}`,
+      motivo: h.mensagemFechado || `Não realizamos entregas neste dia. Faça sua encomenda para ${quandoFmt}.`,
+      badgeClass: 'agendando',
+      fechadoHoje: true,
+      primeiraEntrega: primEntrega
     };
   }
 
@@ -85,43 +319,100 @@ function isLojaAbertaAgora() {
   const openMinutes = abH * 60 + abM;
   const closeMinutes = feH * 60 + feM;
 
-  if (currentMinutes >= openMinutes && currentMinutes <= closeMinutes) {
+  let isOpenNow = false;
+  if (closeMinutes >= openMinutes) {
+    isOpenNow = currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+  } else {
+    // Horário que cruza meia-noite
+    isOpenNow = currentMinutes >= openMinutes || currentMinutes < closeMinutes;
+  }
+
+  if (h.status === 'aberto') {
+    isOpenNow = true;
+  }
+
+  const horaFechamentoFmt = formatHoraCurta(diaConfig.fechamento);
+
+  if (isOpenNow) {
+    if (primEntrega.isHoje) {
+      return {
+        isOpenImediato: true,
+        canSchedule: true,
+        labelHeader: `Aberto para pedidos · Entregas até ${horaFechamentoFmt}`,
+        labelHome: `Aberto para pedidos · Entregas até ${horaFechamentoFmt}`,
+        motivo: `Horário de atendimento hoje: ${diaConfig.abertura} às ${diaConfig.fechamento}`,
+        badgeClass: 'aberto',
+        primeiraEntrega: primEntrega
+      };
+    } else {
+      const quandoFmt = primEntrega.isAmanha 
+        ? `amanhã, ${primEntrega.horaFmt}` 
+        : `${primEntrega.diaNome || 'próximo dia útil'}, ${primEntrega.horaFmt}`;
+      return {
+        isOpenImediato: true,
+        canSchedule: true,
+        labelHeader: `Aberto para pedidos · Entregas a partir de ${quandoFmt}`,
+        labelHome: `Aberto para pedidos · Entregas a partir de ${quandoFmt}`,
+        motivo: `Horário de atendimento hoje até ${diaConfig.fechamento}. Novos pedidos têm entrega a partir de ${quandoFmt} devido ao tempo de preparo.`,
+        badgeClass: 'aviso',
+        primeiraEntrega: primEntrega
+      };
+    }
+  } else if (currentMinutes < openMinutes && closeMinutes >= openMinutes) {
+    const quandoFmt = primEntrega.isHoje 
+      ? primEntrega.horaFmt 
+      : (primEntrega.isAmanha ? `amanhã, ${primEntrega.horaFmt}` : `${primEntrega.diaNome}, ${primEntrega.horaFmt}`);
     return {
-      isOpen: true,
-      label: `Aberto · até ${diaConfig.fechamento}`,
-      motivo: `Horário de hoje: ${diaConfig.abertura} às ${diaConfig.fechamento}`,
-      badgeClass: 'aberto'
-    };
-  } else if (currentMinutes < openMinutes) {
-    return {
-      isOpen: false,
-      label: `Fechado · Abre às ${diaConfig.abertura}`,
-      motivo: `Abre hoje às ${diaConfig.abertura}`,
-      badgeClass: 'aviso'
+      isOpenImediato: false,
+      canSchedule: true,
+      labelHeader: `Aberto para pedidos · Entregas a partir de ${quandoFmt}`,
+      labelHome: `Abre hoje às ${diaConfig.abertura} · Entregas a partir de ${quandoFmt}`,
+      motivo: `Atendimento inicia hoje às ${diaConfig.abertura}. Pedidos são conferidos e aprovados na abertura, com entrega a partir das ${quandoFmt}.`,
+      badgeClass: 'aviso',
+      primeiraEntrega: primEntrega
     };
   } else {
+    const quandoFmt = primEntrega.isAmanha 
+      ? `amanhã, ${primEntrega.horaFmt}` 
+      : `${primEntrega.diaNome || 'próximo dia útil'}, ${primEntrega.horaFmt}`;
     return {
-      isOpen: false,
-      label: 'Fechado agora',
-      motivo: h.mensagemFechado || `Atendimento de hoje encerrado às ${diaConfig.fechamento}`,
-      badgeClass: 'fechado'
+      isOpenImediato: false,
+      canSchedule: true,
+      labelHeader: `Aberto para pedidos · Entregas a partir de ${quandoFmt}`,
+      labelHome: `Entregas de hoje encerradas · Próximas entregas a partir de ${quandoFmt}`,
+      motivo: h.mensagemFechado || `Atendimento de hoje encerrou às ${diaConfig.fechamento}. Pedidos enviados agora serão aprovados no próximo expediente (${quandoFmt}).`,
+      badgeClass: 'agendando',
+      primeiraEntrega: primEntrega
     };
   }
 }
 
 function updateStoreStatusUI() {
   const statusInfo = isLojaAbertaAgora();
+
+  const dotClass = statusInfo.isOpenImediato && statusInfo.badgeClass === 'aberto'
+    ? 'pulse-dot'
+    : (statusInfo.badgeClass === 'aviso' ? 'pulse-dot pulse-dot-amber' : 'pulse-dot pulse-dot-red');
+
+  // 1. Header status pill
   const headerPill = document.getElementById('header-status-pill');
   if (headerPill) {
-    headerPill.innerHTML = `<span class="pulse-dot ${statusInfo.isOpen ? '' : 'pulse-dot-red'}"></span> ${statusInfo.label}`;
+    headerPill.innerHTML = `<span class="${dotClass}"></span> <span class="header-store-pill-txt">${statusInfo.labelHeader}</span>`;
+    headerPill.className = `header-store-pill ${statusInfo.badgeClass}`;
     headerPill.style.cursor = 'pointer';
-    headerPill.title = 'Clique para ver os horários de atendimento';
+    headerPill.title = 'Clique para ver os horários de atendimento e regras de entrega';
   }
 
   const minPrazoEl = document.getElementById('checkout-min-prazo-txt');
-  if (minPrazoEl && state.horariosAtendimento) {
-    const prazo = state.horariosAtendimento.prazoMinimoMinutos || 120;
-    minPrazoEl.textContent = prazo >= 60 ? `${Math.round(prazo / 60)} hora(s) (${prazo} min)` : `${prazo} minutos`;
+  if (minPrazoEl) {
+    const pe = statusInfo.primeiraEntrega || calcularPrimeiraEntregaPossivel(new Date(), state.horariosAtendimento);
+    if (pe && pe.canOrder && pe.horaStr) {
+      const dataLabel = pe.isHoje ? 'hoje' : (pe.isAmanha ? 'amanhã' : pe.diaNome);
+      minPrazoEl.textContent = `${dataLabel} a partir das ${pe.horaStr}`;
+    } else {
+      const prazo = state.horariosAtendimento?.prazoMinimoMinutos || 120;
+      minPrazoEl.textContent = prazo >= 60 ? `${Math.round(prazo / 60)} hora(s)` : `${prazo} min`;
+    }
   }
 }
 
@@ -132,14 +423,15 @@ function openHorariosModal() {
   const statusInfo = isLojaAbertaAgora();
   const tagEl = document.getElementById('modal-horarios-status-tag');
   if (tagEl) {
-    tagEl.textContent = statusInfo.label;
-    tagEl.className = `order-status-pill ${statusInfo.isOpen ? 'status-confirmado' : 'status-cancelado'}`;
+    tagEl.textContent = statusInfo.isOpenImediato ? statusInfo.labelHeader : 'Aberto para Encomendas Agendadas';
+    tagEl.className = `order-status-pill ${statusInfo.isOpenImediato && statusInfo.badgeClass === 'aberto' ? 'status-confirmado' : 'status-preparando'}`;
   }
 
   const prazoEl = document.getElementById('modal-horarios-prazo-desc');
   if (prazoEl && state.horariosAtendimento) {
     const p = state.horariosAtendimento.prazoMinimoMinutos || 120;
-    prazoEl.textContent = `Antecedência mínima de ${p} minutos (${(p/60).toFixed(1).replace('.0','')}h) para envio de pedidos.`;
+    const horasFmt = p >= 60 ? `${Math.round(p / 60)}h (${p} min)` : `${p} minutos`;
+    prazoEl.textContent = `Prazo mínimo de produção de ${horasFmt} para entrega após aprovação do pedido. Pedidos feitos fora do horário de atendimento são conferidos e aprovados no início do próximo expediente.`;
   }
 
   const gridEl = document.getElementById('modal-horarios-grid');
@@ -210,6 +502,22 @@ function validateOrderSchedule(data, hora) {
     return { valid: false, message: h.mensagemFechado || 'A loja está fechada no momento para novos pedidos.' };
   }
 
+  // 1.1 Validar Primeiro Horário Viável (Considera aprovação prévia e expediente da cozinha)
+  const primEntrega = calcularPrimeiraEntregaPossivel(agora, h);
+  if (!primEntrega.canOrder) {
+    return { valid: false, message: primEntrega.motivo || 'A loja está fechada no momento para novos pedidos.' };
+  }
+
+  if (primEntrega.data && selectedDateTime < primEntrega.data) {
+    const dataFmt = primEntrega.isHoje 
+      ? 'hoje' 
+      : (primEntrega.isAmanha ? 'amanhã' : `${primEntrega.diaNome} (${primEntrega.data.toLocaleDateString('pt-BR')})`);
+    return {
+      valid: false,
+      message: `Horário mais próximo disponível para entrega: ${dataFmt} a partir das ${primEntrega.horaStr}. Pedidos realizados fora do expediente aguardam aprovação da cozinha na abertura.`
+    };
+  }
+
   // 2. Validar Bloqueios Específicos de Agendamento (Feriados / Compromissos / Datas Bloqueadas)
   if (Array.isArray(h.bloqueios) && h.bloqueios.length > 0) {
     const toIsoDate = (val) => {
@@ -256,22 +564,6 @@ function validateOrderSchedule(data, hora) {
           }
         }
       }
-    }
-  }
-
-  // 3. Validar Prazo Mínimo de Antecedência (em minutos)
-  const prazoMin = parseInt(h.prazoMinimoMinutos || 0, 10);
-  if (prazoMin > 0) {
-    const diffMs = selectedDateTime.getTime() - agora.getTime();
-    const diffMin = Math.floor(diffMs / (60 * 1000));
-    if (diffMin < prazoMin) {
-      const horasFmt = (prazoMin / 60).toFixed(1).replace('.0', '');
-      const dataSugerida = new Date(agora.getTime() + prazoMin * 60000);
-      const horaSugerida = dataSugerida.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      return {
-        valid: false,
-        message: `Prazo mínimo de antecedência exigido: ${prazoMin} min (${horasFmt}h). Horário mais próximo permitido: a partir das ${horaSugerida}.`
-      };
     }
   }
 
@@ -341,15 +633,27 @@ async function syncCustomerToErp(cust) {
       .eq('tenantId', tenantId);
 
     if (allClients && allClients.length > 0) {
-      if (cleanDigits && cleanDigits.length >= 8) {
-        existingCustomer = allClients.find(c => {
+      // 1.1 Se o perfil já tiver cliente_local_id salvo, verifica se existe
+      if (state.profile?.cliente_local_id) {
+        existingCustomer = allClients.find(c => c.id === state.profile.cliente_local_id);
+      }
+
+      // 1.2 Busca por dígitos de telefone (prefere o cadastro mais completo / oficial)
+      if (!existingCustomer && cleanDigits && cleanDigits.length >= 8) {
+        const matches = allClients.filter(c => {
           let cDigits = (c.telefone || '').replace(/\D/g, '');
           if (cDigits.length >= 12 && cDigits.startsWith('55')) cDigits = cDigits.substring(2);
           return cDigits === cleanDigits || (cDigits.length >= 10 && cleanDigits.length >= 10 && (cDigits.endsWith(cleanDigits) || cleanDigits.endsWith(cDigits)));
         });
+
+        if (matches.length > 0) {
+          // Ordena para priorizar o cadastro mais detalhado/completo
+          matches.sort((a, b) => (b.nome || '').length - (a.nome || '').length);
+          existingCustomer = matches[0];
+        }
       }
 
-      // Se não achou por telefone, tentar por email
+      // 1.3 Se não achou por telefone, tentar por email
       if (!existingCustomer && cust.email && cust.email.includes('@')) {
         existingCustomer = allClients.find(c => (c.email || '').trim().toLowerCase() === cust.email.trim().toLowerCase());
       }
@@ -484,6 +788,289 @@ function formatPhone(phoneStr) {
     return `(${clean}`;
   }
   return '';
+}
+
+function validatePhone(phoneStr) {
+  if (!phoneStr) return { valid: false, error: 'Por favor, informe seu WhatsApp / Telefone com DDD.' };
+  let clean = String(phoneStr).replace(/\D/g, '');
+  if (clean.length >= 12 && clean.startsWith('55')) {
+    clean = clean.substring(2);
+  }
+  if (clean.length < 10) {
+    return { valid: false, error: 'Telefone incompleto. Informe DDD + número (ex: 35 99999-9999).' };
+  }
+  if (clean.length > 11) {
+    return { valid: false, error: 'Telefone com dígitos a mais. Verifique o número informado.' };
+  }
+  const ddd = parseInt(clean.substring(0, 2), 10);
+  if (isNaN(ddd) || ddd < 11 || ddd > 99) {
+    return { valid: false, error: 'DDD inválido. Informe um DDD válido do Brasil (ex: 35, 11).' };
+  }
+  if (clean.length === 11 && clean[2] !== '9') {
+    return { valid: false, error: 'Celulares com 11 dígitos devem começar com 9 após o DDD.' };
+  }
+  return { valid: true, clean, formatted: formatPhone(clean) };
+}
+
+// ─── Busca e Amarração de Cliente pelo Telefone (Sistema Windows / ERP) ────
+async function findErpCustomerByPhone(phoneStr) {
+  const phoneVal = validatePhone(phoneStr);
+  if (!phoneVal.valid) return null;
+  const cleanDigits = phoneVal.clean;
+  const tenantId = state.tenantId || DEFAULT_TENANT_ID;
+
+  try {
+    const { data: allClients, error } = await sb
+      .from('cliente')
+      .select('id, nome, telefone, email, observacoes')
+      .eq('tenantId', tenantId);
+
+    if (error || !allClients || allClients.length === 0) return null;
+
+    const matched = allClients.find(c => {
+      let cDigits = (c.telefone || '').replace(/\D/g, '');
+      if (cDigits.length >= 12 && cDigits.startsWith('55')) cDigits = cDigits.substring(2);
+      return cDigits === cleanDigits || (cDigits.length >= 10 && cleanDigits.length >= 10 && (cDigits.endsWith(cleanDigits) || cleanDigits.endsWith(cDigits)));
+    });
+
+    if (!matched) return null;
+
+    // Se encontrou o cliente no ERP, busca endereços cadastrados no local_entrega
+    const { data: locais } = await sb
+      .from('local_entrega')
+      .select('*')
+      .eq('tenantId', tenantId)
+      .eq('clienteId', matched.id)
+      .eq('ativo', true)
+      .limit(1);
+
+    const mainEndereco = (locais && locais.length > 0) ? locais[0] : null;
+
+    return {
+      cliente: matched,
+      endereco: mainEndereco
+    };
+  } catch (err) {
+    console.warn('Aviso ao buscar cliente do ERP por telefone:', err);
+    return null;
+  }
+}
+
+// ─── Modal de Confirmação de Cadastro Localizado no ERP ("Encontramos você!") ──
+let currentErpFoundContext = {
+  cliente: null,
+  endereco: null,
+  inputEl: null,
+  prefix: 'account',
+  previousName: '',
+  previousPhone: ''
+};
+
+function openErpFoundModal(cliente, endereco, inputEl = null, prefix = 'account', previousName = '', previousPhone = '') {
+  const modal = document.getElementById('modal-erp-customer-found');
+  if (!modal) return;
+
+  currentErpFoundContext = {
+    cliente,
+    endereco,
+    inputEl,
+    prefix,
+    previousName,
+    previousPhone
+  };
+
+  const nameEl = document.getElementById('erp-found-client-name');
+  const phoneEl = document.getElementById('erp-found-client-phone');
+  const streetEl = document.getElementById('erp-found-addr-street');
+  const bairroEl = document.getElementById('erp-found-addr-bairro');
+  const cityUfEl = document.getElementById('erp-found-addr-city-uf');
+  const cepEl = document.getElementById('erp-found-addr-cep');
+  const linesBox = document.getElementById('erp-found-client-address');
+  const noAddrMsg = document.getElementById('erp-found-no-address');
+  const editAddrBtn = document.getElementById('btn-erp-found-edit-address');
+
+  if (nameEl) nameEl.textContent = cliente.nome || 'Cliente';
+  if (phoneEl) phoneEl.textContent = formatPhone(cliente.telefone || '');
+
+  const hasAddress = endereco && (endereco.logradouro || endereco.bairro);
+  if (hasAddress) {
+    if (streetEl) streetEl.textContent = `${endereco.logradouro || 'Rua não informada'}, ${endereco.numero || 'S/N'}${endereco.referencia ? ' (' + endereco.referencia + ')' : ''}`;
+    if (bairroEl) bairroEl.textContent = endereco.bairro || '';
+    if (cityUfEl) cityUfEl.textContent = `${endereco.cidade || state.empresa?.cidade || 'Pouso Alegre'}${endereco.uf ? ' - ' + endereco.uf : ' - MG'}`;
+    if (cepEl) cepEl.textContent = endereco.cep ? `CEP ${endereco.cep}` : '';
+
+    if (linesBox) linesBox.style.display = 'flex';
+    if (noAddrMsg) noAddrMsg.style.display = 'none';
+    if (editAddrBtn) editAddrBtn.style.display = 'inline-block';
+  } else {
+    if (linesBox) linesBox.style.display = 'none';
+    if (noAddrMsg) noAddrMsg.style.display = 'block';
+    if (editAddrBtn) editAddrBtn.style.display = 'none';
+  }
+
+  modal.classList.add('open');
+}
+
+function closeErpFoundModal() {
+  document.getElementById('modal-erp-customer-found')?.classList.remove('open');
+}
+
+function handleConfirmFoundCustomer() {
+  const ctx = currentErpFoundContext;
+  const btn = document.getElementById('btn-erp-found-confirm');
+  const btnText = document.getElementById('btn-confirm-text');
+  
+  if (btn) btn.disabled = true;
+  if (btnText) btnText.textContent = 'Confirmando...';
+
+  setTimeout(() => {
+    closeErpFoundModal();
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = 'Usar este cadastro e continuar';
+
+    toast(`Olá, ${ctx.cliente?.nome || 'Cliente'}! Cadastro confirmado com sucesso.`, 'success', 3500);
+
+    // Se estiver no checkout, atualiza a exibição de endereço e contato
+    if (ctx.prefix === 'checkout' || document.getElementById('screen-checkout')?.classList.contains('active')) {
+      populateSavedAddressInCheckout();
+      updateCheckoutTotals();
+      validateCheckoutForm();
+    }
+  }, 350);
+}
+
+function handleRejectFoundCustomer() {
+  const ctx = currentErpFoundContext;
+  closeErpFoundModal();
+
+  // Limpa o input do WhatsApp e foca para que o usuário informe seu próprio número
+  if (ctx.inputEl) {
+    ctx.inputEl.value = '';
+    ctx.inputEl.focus();
+  }
+
+  // Restaura o nome anterior se havia sido alterado
+  const nameEl = document.getElementById(`${ctx.prefix === 'account' ? 'account' : 'reg'}-name`);
+  if (nameEl && ctx.previousName) {
+    nameEl.value = ctx.previousName;
+  }
+  const checkoutNameEl = document.getElementById('checkout-nome-cliente');
+  if (checkoutNameEl && ctx.previousName) {
+    checkoutNameEl.value = ctx.previousName;
+  }
+  const displayAccountName = document.getElementById('account-user-display-name');
+  if (displayAccountName && ctx.previousName) {
+    displayAccountName.textContent = ctx.previousName;
+  }
+
+  // Reverte no profile em memória (sem deletar nem criar outro cliente no banco)
+  if (state.profile) {
+    state.profile.cliente_local_id = null;
+    state.profile.nome = ctx.previousName || state.session?.user?.user_metadata?.full_name || 'Cliente';
+  }
+  updateHeaderUI();
+
+  toast('Sem problemas! Informe o seu WhatsApp correto abaixo.', 'info', 3500);
+}
+
+function handleEditAddressFromModal() {
+  const ctx = currentErpFoundContext;
+  closeErpFoundModal();
+
+  toast('Você pode alterar ou adicionar um novo endereço abaixo.', 'info', 3500);
+
+  if (ctx.prefix === 'checkout' || document.getElementById('screen-checkout')?.classList.contains('active')) {
+    // Aciona o fluxo existente de adicionar/editar endereço do checkout
+    const btnAddNovo = document.getElementById('btn-add-novo-endereco');
+    if (btnAddNovo) {
+      btnAddNovo.click();
+    } else {
+      document.getElementById('checkout-logradouro')?.focus();
+    }
+  } else if (ctx.prefix === 'account' || document.getElementById('screen-account')?.classList.contains('active')) {
+    document.getElementById('account-logradouro')?.focus();
+  } else {
+    document.getElementById('reg-logradouro')?.focus();
+  }
+}
+
+async function checkPhoneErpAutoLink(phoneInputEl, prefix = 'account') {
+  const raw = phoneInputEl?.value || '';
+  const val = validatePhone(raw);
+  if (!val.valid) return;
+
+  const previousName = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-name`)?.value || state.profile?.nome || '';
+  const previousPhone = raw;
+
+  const found = await findErpCustomerByPhone(val.clean);
+  if (found && found.cliente) {
+    const cli = found.cliente;
+    const end = found.endereco;
+
+    // 1. Atualizar o Nome do Cliente na tela com o nome oficial do sistema Windows
+    const nameEl = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-name`);
+    if (nameEl) {
+      nameEl.value = cli.nome;
+    }
+    const checkoutNameEl = document.getElementById('checkout-nome-cliente');
+    if (checkoutNameEl) {
+      checkoutNameEl.value = cli.nome;
+    }
+
+    // Atualiza nome na tela de Minha Conta (título do display)
+    const displayAccountName = document.getElementById('account-user-display-name');
+    if (displayAccountName) displayAccountName.textContent = cli.nome;
+
+    // 2. Preencher endereço do ERP se houver
+    if (end) {
+      const logrEl = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-logradouro`);
+      const numEl  = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-numero`);
+      const bairEl = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-bairro`);
+      const cidEl  = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-cidade`);
+      const cepEl  = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-cep`);
+      const compEl = document.getElementById(`${prefix === 'account' ? 'account' : 'reg'}-complemento`);
+
+      if (logrEl && end.logradouro) logrEl.value = end.logradouro;
+      if (numEl && end.numero) numEl.value = end.numero;
+      if (bairEl && end.bairro) bairEl.value = end.bairro;
+      if (cidEl && end.cidade) cidEl.value = end.cidade;
+      if (cepEl && end.cep) cepEl.value = end.cep;
+      if (compEl && end.referencia) compEl.value = end.referencia;
+    }
+
+    // 3. Atualiza estado em memória e banco de dados
+    if (state.profile) {
+      state.profile.nome = cli.nome;
+      state.profile.whatsapp = val.clean;
+      state.profile.cliente_local_id = cli.id;
+      if (end) {
+        state.profile.logradouro = end.logradouro || state.profile.logradouro;
+        state.profile.numero = end.numero || state.profile.numero;
+        state.profile.bairro = end.bairro || state.profile.bairro;
+        state.profile.cidade = end.cidade || state.profile.cidade;
+        state.profile.cep = end.cep || state.profile.cep;
+      }
+
+      // Sincronizar em cardapio_clientes
+      sb.from('cardapio_clientes').update({
+        nome: cli.nome,
+        whatsapp: val.clean,
+        cliente_local_id: cli.id,
+        logradouro: end?.logradouro || state.profile.logradouro || null,
+        numero: end?.numero || state.profile.numero || null,
+        bairro: end?.bairro || state.profile.bairro || null,
+        cidade: end?.cidade || state.profile.cidade || null,
+        cep: end?.cep || state.profile.cep || null,
+        updated_at: new Date().toISOString()
+      }).eq('id', state.profile.id).then(() => {}).catch(err => console.warn('Erro ao sincronizar perfil:', err));
+    }
+
+    // Atualiza cabeçalho e avatar
+    updateHeaderUI();
+
+    // 4. Dispara a nova experiência visual do modal "Encontramos você!"
+    openErpFoundModal(cli, end, phoneInputEl, prefix, previousName, previousPhone);
+  }
 }
 
 const fmt = (centavos) =>
@@ -765,18 +1352,45 @@ function validateMinimumCategoryQuantities() {
     }
   }
 
-  return { valid: errors.length === 0, errors };
+  const message = errors.map(err => `A categoria "${err.categoryName}" exige no mínimo ${err.minRequiredQty} un no pedido (atual: ${err.categoryQty} un. Faltam ${err.missingQty} un).`).join('\n');
+  return { valid: errors.length === 0, errors, message };
 }
 
-// ─── Toasts & Notificações ───────────────────────────────────────────
+// ─── Toasts & Notificações Amigáveis (Zero Erros Técnicos) ───────────
+function getFriendlyErrorMessage(rawMsg) {
+  if (!rawMsg) return 'Ocorreu um imprevisto. Por favor, tente novamente.';
+  const str = String(rawMsg);
+  if (str.includes('PGRST116') || str.includes('Results contain 0 rows') || str.includes('not found')) {
+    return 'Item ou registro não encontrado.';
+  }
+  if (str.includes('Failed to fetch') || str.includes('NetworkError') || str.includes('network')) {
+    return 'Sem conexão com a internet. Verifique sua rede e tente novamente.';
+  }
+  if (str.includes('JWT') || str.includes('token is expired') || str.includes('unauthorized')) {
+    return 'Sua sessão expirou. Faça login novamente para continuar.';
+  }
+  if (str.includes('violates foreign key constraint') || str.includes('foreign key')) {
+    return 'Não foi possível completar a operação com os dados informados.';
+  }
+  if (str.includes('violates check constraint') || str.includes('check constraint')) {
+    return 'Alguns dos dados informados não atendem aos critérios de validação da loja.';
+  }
+  if (str.includes('Unsupported provider') || str.includes('provider is not enabled')) {
+    return 'O login com Google ainda não está ativado no painel da loja. Utilize o login ou cadastro por e-mail e senha abaixo.';
+  }
+  return str;
+}
+
 function toast(msg, type = 'info', duration = 3500) {
   const icons = { success: '✅', error: '❌', info: 'ℹ️' };
   const container = document.getElementById('toast-container');
   if (!container) return;
 
+  const displayMsg = type === 'error' ? getFriendlyErrorMessage(msg) : msg;
+
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
-  el.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${msg}</span>`;
+  el.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${displayMsg}</span>`;
   container.appendChild(el);
 
   setTimeout(() => {
@@ -794,8 +1408,19 @@ function showLoading(show, message = 'Carregando cardápio...') {
 
 // ─── Gerenciamento de Navegação Unificada ─────────────────────────────
 function showScreen(screenId) {
-  // Proteger áreas de gestão de conta com autenticação obrigatória
-  if ((screenId === 'screen-account' || screenId === 'screen-orders') && !state.session && !state.profile) {
+  const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
+
+  // Proteger checkout e áreas de conta com autenticação obrigatória
+  if (screenId === 'screen-checkout') {
+    if (!state.cart || state.cart.length === 0) {
+      toast('Seu carrinho está vazio! Adicione itens do cardápio.', 'info');
+      screenId = 'screen-cardapio';
+    } else if (!isLogged) {
+      state.redirectAfterAuth = 'screen-checkout';
+      toast('🔐 Para sua segurança, faça login ou cadastre-se para finalizar seu pedido.', 'info', 4500);
+      screenId = 'screen-auth';
+    }
+  } else if ((screenId === 'screen-account' || screenId === 'screen-orders') && !isLogged) {
     state.redirectAfterAuth = screenId;
     screenId = 'screen-auth';
   }
@@ -836,9 +1461,38 @@ function showScreen(screenId) {
     loadCustomerOrders();
   } else if (screenId === 'screen-account') {
     populateAccountForm();
+  } else if (screenId === 'screen-auth') {
+    renderAuthScreen();
   }
 
   updateCartBar();
+}
+
+function renderAuthScreen() {
+  const notice = document.getElementById('checkout-auth-notice');
+  const noticeSub = document.getElementById('checkout-auth-notice-sub');
+  const mainTitle = document.getElementById('auth-main-title');
+  const subtitle = document.getElementById('auth-subtitle');
+  const backBtn = document.getElementById('auth-back-to-cart-btn');
+
+  if (state.redirectAfterAuth === 'screen-checkout' && state.cart && state.cart.length > 0) {
+    const count = cartCount();
+    const totalStr = fmt(cartTotal());
+    if (notice) {
+      notice.style.display = 'flex';
+      if (noticeSub) {
+        noticeSub.textContent = `Seu carrinho possui ${count} ${count === 1 ? 'item' : 'itens'} (${totalStr}). Faça login ou crie sua conta para informar o endereço e concluir o pedido!`;
+      }
+    }
+    if (mainTitle) mainTitle.textContent = 'Finalize seu Pedido';
+    if (subtitle) subtitle.textContent = 'Faça login ou crie sua conta para continuar para o checkout.';
+    if (backBtn) backBtn.style.display = 'inline-flex';
+  } else {
+    if (notice) notice.style.display = 'none';
+    if (mainTitle) mainTitle.textContent = 'Bem-vindo!';
+    if (subtitle) subtitle.textContent = 'Entre ou crie sua conta para acessar o cardápio e fazer seus pedidos.';
+    if (backBtn) backBtn.style.display = 'none';
+  }
 }
 
 // ─── Gerenciamento do Carrinho ───────────────────────────────────────
@@ -1007,13 +1661,34 @@ async function loadEmpresa() {
     state.tenantId = data.tenant_id;
     localStorage.setItem('fincore_cardapio_tenant', state.tenantId);
 
-    // Carregar configurações de Pix, banco e endereço estendido
+    // Carregar configurações de Pix, banco, endereço estendido e regras de taxa de entrega
     try {
-      const [{ data: empData }, { data: configData }, { data: fpData }] = await Promise.all([
+      const [{ data: empData }, { data: configData }, { data: fpList }, { data: taxasData }] = await Promise.all([
         sb.from('empresa').select('*').eq('id', state.tenantId).maybeSingle(),
         sb.from('empresa_configuracao').select('*').eq('tenantId', state.tenantId).maybeSingle(),
-        sb.from('forma_pagamento').select('*').eq('tenantId', state.tenantId).ilike('tipo', '%pix%').eq('ativo', true).maybeSingle()
+        sb.from('forma_pagamento').select('*').eq('tenantId', state.tenantId).eq('ativo', true).is('deletedAt', null).order('ordem', { ascending: true }),
+        sb.from('taxa_entrega').select('*').eq('tenantId', state.tenantId).eq('ativo', true).is('deletedAt', null)
       ]);
+
+      state.taxasEntrega = taxasData || [];
+      state.formasPagamento = (fpList || []).filter(fp => {
+        if (!fp || !fp.ativo) return false;
+        const t = String(fp.tipo || '').toLowerCase();
+        const n = String(fp.nome || '').toLowerCase();
+        // Não permitir consumo interno nem faturamento a prazo / nota a prazo no cardápio online
+        if (t === 'consumointerno' || t.includes('interno')) return false;
+        if (t === 'notaprazo' || t.includes('prazo') || n.includes('prazo') || n.includes('fiado')) return false;
+        return true;
+      });
+
+      if (state.formasPagamento.length === 0) {
+        state.formasPagamento = [
+          { id: 'default-pix', nome: 'Pix Instantâneo', tipo: 'pix', permiteTroco: false },
+          { id: 'default-dinheiro', nome: 'Dinheiro', tipo: 'DINHEIRO', permiteTroco: true },
+          { id: 'default-credito', nome: 'Cartão de Crédito', tipo: 'cartaoCredito', permiteTroco: false },
+          { id: 'default-debito', nome: 'Cartão de Débito', tipo: 'cartaoDebito', permiteTroco: false }
+        ];
+      }
 
       if (empData) state.empresa = { ...data, ...empData };
       if (configData) {
@@ -1047,10 +1722,13 @@ async function loadEmpresa() {
       }
 
       // Fallback em forma_pagamento se não veio de empresa_configuracao
-      if (!state.empresa.chave_pix && fpData) {
-        if (fpData.pixChave) state.empresa.chave_pix = fpData.pixChave;
-        if (fpData.pixTipoBanco) state.empresa.pix_banco = fpData.pixTipoBanco;
-        if (fpData.pixTipoChave) state.empresa.pix_tipo = fpData.pixTipoChave;
+      if (!state.empresa.chave_pix) {
+        const pixFp = state.formasPagamento.find(fp => String(fp.tipo || '').toLowerCase().includes('pix') || String(fp.nome || '').toLowerCase().includes('pix'));
+        if (pixFp) {
+          if (pixFp.pixChave) state.empresa.chave_pix = pixFp.pixChave;
+          if (pixFp.pixTipoBanco) state.empresa.pix_banco = pixFp.pixTipoBanco;
+          if (pixFp.pixTipoChave) state.empresa.pix_tipo = pixFp.pixTipoChave;
+        }
       }
 
       if (!state.empresa.pix_favorecido) {
@@ -1062,6 +1740,8 @@ async function loadEmpresa() {
       if (!state.empresa.pix_tipo) {
         state.empresa.pix_tipo = 'Chave Pix';
       }
+
+      renderPaymentMethods();
 
       // Parse horários de atendimento & regras de pedido
       state.horariosAtendimento = {
@@ -1134,9 +1814,6 @@ async function loadEmpresa() {
       const headerStoreName = document.getElementById('header-store-name');
       if (headerStoreName) headerStoreName.textContent = nome;
 
-      const homeGreetingName = document.getElementById('home-greeting-name');
-      if (homeGreetingName) homeGreetingName.textContent = nome;
-
       const homeInfoStoreName = document.getElementById('home-info-store-name');
       if (homeInfoStoreName) homeInfoStoreName.textContent = nome;
     }
@@ -1188,25 +1865,39 @@ async function loadEmpresa() {
   }
 }
 
-// ─── Carregamento de Produtos e Categorias ───────────────────────────
+// ─── Carregamento de Produtos, Categorias e Estoque Real ────────────
 async function loadCatalog() {
   try {
     let query = sb.from('vw_cardapio_produtos').select('*');
     let pQuery = sb.from('vw_cardapio_precificacao').select('*');
+    let eQuery = sb.from('estoque_produto').select('produtoId, quantidadeAtual, quantidadeReservada, quantidadeCritica').is('deletedAt', null);
 
     if (state.tenantId) {
       query = query.eq('tenant_id', state.tenantId);
       pQuery = pQuery.eq('tenant_id', state.tenantId);
+      eQuery = eQuery.eq('tenantId', state.tenantId);
     }
 
-    const [{ data: prods, error }, { data: precData }] = await Promise.all([
+    const [{ data: prods, error }, { data: precData }, { data: estoqueData }] = await Promise.all([
       query,
-      pQuery
+      pQuery,
+      eQuery
     ]);
 
     if (error) throw error;
     state.produtos     = prods || [];
     state.precificacao = precData || [];
+
+    // Mapeia estoque real para os produtos
+    const estoqueMap = new Map();
+    if (estoqueData && Array.isArray(estoqueData)) {
+      for (const est of estoqueData) {
+        estoqueMap.set(est.produtoId, est);
+      }
+    }
+    for (const p of state.produtos) {
+      p.estoqueInfo = estoqueMap.get(p.id) || null;
+    }
 
     // Montar categorias únicas
     const catMap = new Map();
@@ -1229,6 +1920,74 @@ async function loadCatalog() {
     toast('Erro ao carregar cardápio: ' + e.message, 'error');
     console.error(e);
   }
+}
+
+// ─── Disponibilidade Real do Produto no Estoque ──────────────────────
+function getProductAvailability(prod) {
+  if (!prod || prod.ativo === false || prod.status_comercial === 'indisponivel') {
+    return {
+      status: 'indisponivel',
+      label: 'Indisponível no momento',
+      badgeClass: 'avail-out',
+      dot: '🔴',
+      showBadge: true,
+      canAdd: false,
+      qty: 0
+    };
+  }
+
+  if (prod.estoqueInfo) {
+    const atual = Number(prod.estoqueInfo.quantidadeAtual || 0);
+    const reservado = Number(prod.estoqueInfo.quantidadeReservada || 0);
+    const disponivel = atual - reservado;
+    const critico = Number(prod.estoqueInfo.quantidadeCritica || 20);
+
+    if (disponivel <= 0) {
+      return {
+        status: 'indisponivel',
+        label: 'Indisponível no momento',
+        badgeClass: 'avail-out',
+        dot: '🔴',
+        showBadge: true,
+        canAdd: false,
+        qty: 0
+      };
+    }
+
+    if (disponivel <= critico) {
+      return {
+        status: 'poucas_unidades',
+        label: `Poucas unidades (${disponivel} un)`,
+        badgeClass: 'avail-low',
+        dot: '🟡',
+        showBadge: true,
+        canAdd: true,
+        qty: disponivel
+      };
+    }
+
+    return {
+      status: 'disponivel',
+      label: 'Disponível',
+      badgeClass: 'avail-ok',
+      dot: '🟢',
+      showBadge: true,
+      canAdd: true,
+      qty: disponivel
+    };
+  }
+
+  // Itens sem registro de estoque são feitos sob encomenda/demanda da cozinha.
+  // canAdd é permitido, mas não exibimos o selo '🟢 Disponível' para não sugerir falsa pronta entrega de balcão.
+  return {
+    status: 'sob_demanda',
+    label: '',
+    badgeClass: '',
+    dot: '',
+    showBadge: false,
+    canAdd: true,
+    qty: 999
+  };
 }
 
 // ─── Renderização da Barra de Categorias (Tela Cardápio) ──────────────
@@ -1291,39 +2050,54 @@ function selectCategory(catId) {
   renderProductsGrid();
 }
 
-// ─── TELA 1: HOME / DASHBOARD ─────────────────────────────────────────
+// ─── TELA 1: HOME / EXPERIÊNCIA DE PEDIDOS ONLINE ─────────────────────
 async function renderHome() {
-  // Saudação personalizada (somente cliente, nunca duplicar empresa)
-  const welcomeBadge = document.getElementById('home-welcome-badge');
-  const greetingSub = document.getElementById('home-greeting-sub');
-  if (welcomeBadge) {
-    if (state.profile?.nome) {
-      const firstName = state.profile.nome.trim().split(' ')[0];
-      welcomeBadge.textContent = `Olá, ${firstName}!`;
-    } else {
-      welcomeBadge.textContent = `Olá!`;
+  // 1. Saudação personalizada ao cliente identificado (sem duplicar nome/marca da loja)
+  const welcomeBadge  = document.getElementById('home-welcome-badge');
+  const greetingTitle = document.getElementById('home-greeting-name');
+  const storeAvatar   = document.getElementById('home-store-avatar');
+
+  if (state.profile?.nome) {
+    const firstName = state.profile.nome.trim().split(' ')[0];
+    if (welcomeBadge) welcomeBadge.textContent = 'Bem-vindo de volta';
+    if (greetingTitle) greetingTitle.textContent = `Olá, ${firstName}! O que vamos pedir hoje?`;
+    if (storeAvatar) {
+      storeAvatar.textContent = firstName[0].toUpperCase();
+      storeAvatar.style.background = 'linear-gradient(135deg, var(--brand-500), #ea580c)';
+    }
+  } else {
+    if (welcomeBadge) welcomeBadge.textContent = 'Bem-vindo';
+    if (greetingTitle) greetingTitle.textContent = 'Olá! O que vamos pedir hoje?';
+    if (storeAvatar) {
+      storeAvatar.textContent = '🍽️';
+      storeAvatar.style.background = '';
     }
   }
-  if (greetingSub) {
-    greetingSub.textContent = 'O que você deseja fazer hoje?';
-  }
 
-  // 1. Pedido Ativo em Andamento (se houver)
-  await renderActiveOrderWidget();
+  updateStoreStatusUI();
 
-  // 2. Próximas Encomendas Agendadas Futuras (se houver)
-  renderHomeScheduledOrders();
-
-  // 3. Compre Novamente (se houver histórico de pedidos concluídos)
-  renderHomeReorderSection();
-
-  // 4. Produtos Mais Pedidos do Cardápio
-  renderHomeFeaturedProducts();
-
-  // 5. Categorias Reais do Cadastro
+  // 2. Categorias Horizontais em Carrossel (Navegação visual imediata)
   renderHomeCategories();
 
-  // 6. Tabela de Preços por Quantidade (Lote)
+  // 3. Pedido em Andamento (Máxima prioridade visual — se existir)
+  await renderActiveOrderWidget();
+
+  // 4. Configuração dos Atalhos de Escolha Rápida e Super Busca
+  setupHomeIntentShortcuts();
+
+  // 5. Compre Novamente (se houver histórico de pedidos concluídos)
+  renderHomeReorderSection();
+
+  // 6. Próximas Encomendas Agendadas Futuras (se houver)
+  renderHomeScheduledOrders();
+
+  // 7. Produtos em Destaque do Cardápio
+  renderHomeFeaturedProducts();
+
+  // 7.1 Destaque Compacto de Festas & Eventos (com fotos reais do cardápio)
+  updatePartyBannerVisual();
+
+  // 8. Tabela de Preços por Quantidade (Lote)
   renderHomePricingTiersSection();
 }
 
@@ -1457,50 +2231,149 @@ function renderHomePricingTiersSection() {
   `;
 }
 
+// ─── Carrossel Horizontal de Categorias (Home) ───────────────────────
 function renderHomeCategories() {
-  const container = document.getElementById('home-categories-grid');
+  const container = document.getElementById('home-categories-carousel');
   if (!container) return;
 
   if (state.categorias.length === 0) {
-    container.innerHTML = `<div style="grid-column: 1/-1; color: var(--text-muted); font-size:13px;">Carregando categorias...</div>`;
+    container.innerHTML = `<span style="color: var(--text-muted); font-size:13px;">Carregando categorias...</span>`;
     return;
   }
 
-  container.innerHTML = state.categorias.map(cat => {
-    const count = state.produtos.filter(p => p.categoria_id === cat.id).length;
-    return `
-      <div class="home-cat-card" data-cat-id="${cat.id}">
-        <div class="home-cat-icon">${cat.icone}</div>
-        <div class="home-cat-name">${cat.nome}</div>
-        <div class="home-cat-count">${count} ${count === 1 ? 'opção' : 'opções'}</div>
-      </div>
-    `;
-  }).join('');
+  // Primeiro chip: 🍽️ Todos
+  let html = `
+    <button type="button" class="home-cat-chip ${state.currentCat === 'all' ? 'active' : ''}" data-cat-id="all">
+      <span class="home-cat-chip-icon">🍽️</span>
+      <span class="home-cat-chip-name">Todos</span>
+      <span class="home-cat-chip-count">${state.produtos.length}</span>
+    </button>
+  `;
 
-  container.querySelectorAll('.home-cat-card').forEach(card => {
-    card.addEventListener('click', () => {
-      selectCategory(card.dataset.catId);
-      showScreen('screen-cardapio');
+  for (const cat of state.categorias) {
+    const emoji = getCategoryIcon(cat.icone, cat.nome);
+    const count = state.produtos.filter(p => p.categoria_id === cat.id).length;
+    const isAct = state.currentCat === cat.id;
+
+    html += `
+      <button type="button" class="home-cat-chip ${isAct ? 'active' : ''}" data-cat-id="${cat.id}">
+        <span class="home-cat-chip-icon">${emoji}</span>
+        <span class="home-cat-chip-name">${cat.nome}</span>
+        <span class="home-cat-chip-count">${count}</span>
+      </button>
+    `;
+  }
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('.home-cat-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const catId = chip.dataset.catId;
+      selectCategory(catId);
+      if (catId === 'all') {
+        document.getElementById('home-featured-section')?.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        showScreen('screen-cardapio');
+      }
     });
   });
 }
 
-function renderHomeFeaturedProducts() {
-  const container = document.getElementById('home-featured-grid');
-  if (!container) return;
-
-  // Pegar os 6 primeiros produtos com prioridade
-  const featured = state.produtos.slice(0, 6);
-  if (featured.length === 0) {
-    container.innerHTML = `<div style="grid-column: 1/-1; color: var(--text-muted); font-size:13px;">Nenhum produto cadastrado no momento.</div>`;
-    return;
+// ─── Configuração de Atalhos de Escolha Rápida & Super Busca ───────────
+function setupHomeIntentShortcuts() {
+  // 1. Quero alguns salgados -> vai para o cardápio
+  const btnSalgados = document.getElementById('shortcut-salgados');
+  if (btnSalgados && !btnSalgados.dataset.bound) {
+    btnSalgados.dataset.bound = 'true';
+    btnSalgados.addEventListener('click', () => {
+      selectCategory('all');
+      showScreen('screen-cardapio');
+    });
   }
 
-  container.innerHTML = featured.map(prod => createProductCardHtml(prod, false)).join('');
-  attachProductCardEvents(container);
+  // 2. Tenho uma festa -> navega até o banner de encomendas
+  const btnFesta = document.getElementById('shortcut-festa');
+  if (btnFesta && !btnFesta.dataset.bound) {
+    btnFesta.dataset.bound = 'true';
+    btnFesta.addEventListener('click', () => {
+      const banner = document.getElementById('home-party-orders-banner');
+      if (banner) banner.scrollIntoView({ behavior: 'smooth' });
+      else showScreen('screen-cardapio');
+    });
+  }
+
+  // 3. Quero pedir igual -> repete o último pedido concluído com validação
+  const btnRepetir = document.getElementById('shortcut-repetir');
+  if (btnRepetir && !btnRepetir.dataset.bound) {
+    btnRepetir.dataset.bound = 'true';
+    btnRepetir.addEventListener('click', () => {
+      const completedOrders = state.customerOrders.filter(o => {
+        const st = String(o.status || '').toLowerCase().trim();
+        return st === 'concluido' || st === 'entregue' || st === 'finalizado';
+      });
+      if (completedOrders.length > 0) {
+        reorderOrder(completedOrders[0].id);
+      } else {
+        toast('Você ainda não possui pedidos anteriores registrados para repetir.', 'info');
+        showScreen('screen-cardapio');
+      }
+    });
+  }
+
+  // 4. Ver meus pedidos -> vai para a tela de pedidos
+  const btnPedidos = document.getElementById('shortcut-pedidos');
+  if (btnPedidos && !btnPedidos.dataset.bound) {
+    btnPedidos.dataset.bound = 'true';
+    btnPedidos.addEventListener('click', () => {
+      showScreen('screen-orders');
+      loadCustomerOrders();
+    });
+  }
+
+  // Super Barra de Busca da Home
+  const homeInput = document.getElementById('home-search-input');
+  const homeBtn   = document.getElementById('home-search-btn');
+  const homeClear = document.getElementById('home-search-clear-btn');
+
+  function executeHomeSearch() {
+    const term = (homeInput?.value || '').trim();
+    if (!term) return;
+
+    state.searchTerm = term;
+    const catSearchInput = document.getElementById('product-search-input');
+    if (catSearchInput) catSearchInput.value = term;
+
+    showScreen('screen-cardapio');
+    renderProductsGrid();
+  }
+
+  if (homeBtn && !homeBtn.dataset.bound) {
+    homeBtn.dataset.bound = 'true';
+    homeBtn.addEventListener('click', executeHomeSearch);
+  }
+  if (homeInput && !homeInput.dataset.bound) {
+    homeInput.dataset.bound = 'true';
+    homeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        executeHomeSearch();
+      }
+    });
+    homeInput.addEventListener('input', () => {
+      if (homeClear) homeClear.style.display = homeInput.value ? 'block' : 'none';
+    });
+  }
+  if (homeClear && !homeClear.dataset.bound) {
+    homeClear.dataset.bound = 'true';
+    homeClear.addEventListener('click', () => {
+      if (homeInput) homeInput.value = '';
+      if (homeClear) homeClear.style.display = 'none';
+      state.searchTerm = '';
+    });
+  }
 }
 
-// Mapeamento Canônico de Status do Kanban para Exibição
+// ─── Pedido em Andamento com Stepper Kanban Real de 5 Etapas ──────────
 const KANBAN_STATUS_MAP = {
   pendente:            { label: 'Recebido',             icon: '📋' },
   recebido:            { label: 'Recebido',             icon: '📋' },
@@ -1528,17 +2401,26 @@ async function renderActiveOrderWidget() {
 
   if (!container || !card) return;
 
-  if (!state.session && !state.profile) {
-    container.style.display = 'none';
-    if (dot) dot.style.display = 'none';
-    return;
-  }
-
-  // Permanece na tela da dashboard até REALMENTE SER ENTREGUE (ou cancelado)
-  const activeOrders = state.customerOrders.filter(o => {
+  let activeOrders = state.customerOrders.filter(o => {
     const st = String(o.status || '').toLowerCase().trim();
     return st !== 'entregue' && st !== 'concluido' && st !== 'finalizado' && st !== 'cancelado';
   });
+
+  // Recuperação do último pedido feito mesmo para clientes não autenticados via localStorage
+  if (activeOrders.length === 0) {
+    const lastOrderId = localStorage.getItem('fincore_last_order_id');
+    if (lastOrderId) {
+      try {
+        const { data: lastOrder } = await sb.from('pedido').select('*, item_pedido(*)').eq('id', lastOrderId).maybeSingle();
+        if (lastOrder) {
+          const st = String(lastOrder.status || '').toLowerCase().trim();
+          if (st !== 'entregue' && st !== 'concluido' && st !== 'finalizado' && st !== 'cancelado') {
+            activeOrders = [lastOrder];
+          }
+        }
+      } catch (_) {}
+    }
+  }
 
   if (activeOrders.length === 0) {
     container.style.display = 'none';
@@ -1557,22 +2439,79 @@ async function renderActiveOrderWidget() {
     ? fmtDateTime(o.dataHoraEntregaPrevista)
     : fmtDateTime(o.createdAt);
 
-  const statusInfo = KANBAN_STATUS_MAP[o.status] || { label: o.status, icon: '⚡' };
-  const statusLabel = statusInfo.label;
-  const statusIcon  = statusInfo.icon;
+  const rawStatus = String(o.status || 'pendente').toLowerCase().trim();
+
+  // Status mapping para Kanban de 5 passos reais:
+  let currentStep = 1;
+  let headline = '📋 Pedido recebido e confirmado pela cozinha!';
+  let icon = '📋';
+
+  if (rawStatus.includes('saiu') || rawStatus.includes('entrega') || rawStatus.includes('transito') || rawStatus.includes('caminho')) {
+    currentStep = 4;
+    headline = '🛵 Seu pedido está a caminho!';
+    icon = '🛵';
+  } else if (rawStatus.includes('pronto') || rawStatus.includes('aguardando')) {
+    currentStep = 3;
+    headline = '📦 Seu pedido está pronto para entrega/retirada!';
+    icon = '📦';
+  } else if (rawStatus.includes('prepar') || rawStatus.includes('cozinha')) {
+    currentStep = 2;
+    headline = '🍳 Seu pedido está sendo preparado com carinho!';
+    icon = '🍳';
+  }
+
+  const steps = [
+    { num: 1, label: 'Recebido' },
+    { num: 2, label: 'Em Preparação' },
+    { num: 3, label: 'Pronto' },
+    { num: 4, label: 'A Caminho' },
+    { num: 5, label: 'Entregue' }
+  ];
+
+  let stepperHtml = '<div class="active-order-stepper">';
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    let stepClass = 'step-pending';
+    let bulletContent = '○';
+
+    if (s.num < currentStep) {
+      stepClass = 'step-done';
+      bulletContent = '✓';
+    } else if (s.num === currentStep) {
+      stepClass = 'step-active';
+      bulletContent = '●';
+    }
+
+    stepperHtml += `
+      <div class="stepper-step ${stepClass}">
+        <div class="stepper-bullet">${bulletContent}</div>
+        <span class="stepper-label">${s.label}</span>
+      </div>
+    `;
+
+    if (i < steps.length - 1) {
+      let lineClass = '';
+      if (s.num < currentStep) lineClass = 'line-done';
+      else if (s.num === currentStep) lineClass = 'line-active';
+      stepperHtml += `<div class="stepper-line ${lineClass}"></div>`;
+    }
+  }
+  stepperHtml += '</div>';
 
   card.innerHTML = `
-    <div class="active-order-info">
-      <div class="active-order-icon">${statusIcon}</div>
-      <div>
-        <div class="active-order-num">Pedido #${num} • ${total}</div>
-        <div class="active-order-desc">Previsão: <strong>${dataHoraPrev}</strong> (${o.tipoLogistica || 'Entrega'})</div>
-        <span class="active-order-status-tag status-${o.status}">${statusLabel}</span>
+    <div class="active-order-top-row">
+      <div class="active-order-info">
+        <div class="active-order-icon">${icon}</div>
+        <div class="active-order-details">
+          <div class="active-order-headline">${headline}</div>
+          <div class="active-order-subline">Pedido <strong>#${num}</strong> • <strong>${total}</strong> • Previsão: ${dataHoraPrev}</div>
+        </div>
       </div>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-home-track-active-order">
+        🔍 Acompanhar ao Vivo →
+      </button>
     </div>
-    <button type="button" class="btn btn-primary btn-sm" id="btn-home-track-active-order">
-      🔍 Acompanhar Pedido
-    </button>
+    ${stepperHtml}
   `;
 
   document.getElementById('btn-home-track-active-order')?.addEventListener('click', () => {
@@ -1580,25 +2519,34 @@ async function renderActiveOrderWidget() {
   });
 }
 
+// ─── Compre Novamente (Recompra do Último Pedido) ─────────────────────
 function renderHomeReorderSection() {
   const container = document.getElementById('home-reorder-section');
   const card = document.getElementById('home-reorder-card');
   if (!container || !card) return;
 
-  // Pegar último pedido concluído
-  const completedOrders = state.customerOrders.filter(o =>
-    o.status === 'concluido' || o.status === 'entregue' || o.status === 'finalizado'
-  );
+  const completedOrders = state.customerOrders.filter(o => {
+    const st = String(o.status || '').toLowerCase().trim();
+    return st === 'concluido' || st === 'entregue' || st === 'finalizado';
+  });
 
   if (completedOrders.length > 0) {
     const lastOrder = completedOrders[0];
-    container.style.display = 'flex';
+    const items = lastOrder.item_pedido || [];
+    const num = lastOrder.numeroPedido || lastOrder.id.slice(0, 6);
+    const dateStr = fmtDate(lastOrder.createdAt);
+    const totalStr = fmt(lastOrder.valorTotalCentavos);
 
+    const itemsPills = items.slice(0, 4).map(i =>
+      `<span class="reorder-item-pill">${i.quantidade}x ${i.nomeProduto}</span>`
+    ).join('') + (items.length > 4 ? `<span class="reorder-item-pill">+${items.length - 4} itens</span>` : '');
+
+    container.style.display = 'flex';
     card.innerHTML = `
       <div class="reorder-items-preview">
-        <span class="reorder-order-header">ÚLTIMO PEDIDO #${lastOrder.numeroPedido || lastOrder.id.slice(0, 6)} • ${fmtDate(lastOrder.createdAt)}</span>
-        <span class="reorder-items-text">${lastOrder.tipoLogistica} • ${fmt(lastOrder.valorTotalCentavos)}</span>
-        <span class="reorder-total-text">Clique para adicionar todos os itens deste pedido ao seu carrinho agora mesmo.</span>
+        <span class="reorder-order-header">PEDIDO ANTERIOR #${num} • ${dateStr}</span>
+        <span class="reorder-items-text">${totalStr} (${lastOrder.tipoLogistica || 'Entrega'})</span>
+        <div class="reorder-pills-row">${itemsPills}</div>
       </div>
       <button type="button" class="btn btn-primary" id="btn-home-reorder-cta">
         🔁 Comprar Novamente em 1 Clique
@@ -1613,6 +2561,116 @@ function renderHomeReorderSection() {
   }
 }
 
+// ─── Adição Rápida e Microinteração de Compra no Card ────────────────
+function quickAddToCart(produtoId, delta = 1) {
+  const prod = state.produtos.find(p => p.id === produtoId);
+  if (!prod) return;
+
+  const avail = getProductAvailability(prod);
+  if (!avail.canAdd && delta > 0) {
+    toast(`O produto "${prod.nome}" está indisponível no momento.`, 'warning');
+    return;
+  }
+
+  const existingIdx = state.cart.findIndex(i => i.produto.id === produtoId);
+  let newQty = 0;
+
+  if (existingIdx >= 0) {
+    newQty = state.cart[existingIdx].qty + delta;
+    if (newQty <= 0) {
+      state.cart.splice(existingIdx, 1);
+      newQty = 0;
+    } else {
+      state.cart[existingIdx].qty = newQty;
+    }
+  } else if (delta > 0) {
+    state.cart.push({ produto: prod, qty: delta, obs: '' });
+    newQty = delta;
+  }
+
+  saveCart();
+  updateCartBar();
+
+  // Microinteração visual: animação pop nos contadores do carrinho
+  const bottomBadge = document.getElementById('bottom-cart-count');
+  const headerBadge = document.getElementById('header-cart-count');
+  if (bottomBadge) {
+    bottomBadge.classList.remove('cart-pop-anim');
+    void bottomBadge.offsetWidth;
+    bottomBadge.classList.add('cart-pop-anim');
+  }
+  if (headerBadge) {
+    headerBadge.classList.remove('cart-pop-anim');
+    void headerBadge.offsetWidth;
+    headerBadge.classList.add('cart-pop-anim');
+  }
+
+  // Atualiza controles do card no DOM instantaneamente
+  updateCardQtyControl(produtoId, newQty, avail);
+
+  if (delta > 0 && newQty === 1) {
+    toast(`🛒 ${prod.nome} adicionado ao pedido!`, 'success', 2000);
+  }
+}
+
+function updateCardQtyControl(produtoId, inCartQty, avail) {
+  document.querySelectorAll(`.product-card[data-prod-id="${produtoId}"]`).forEach(card => {
+    let cartBadge = card.querySelector('.product-card-cart-qty-badge');
+    if (inCartQty > 0) {
+      if (!cartBadge) {
+        cartBadge = document.createElement('span');
+        cartBadge.className = 'product-card-cart-qty-badge';
+        card.querySelector('.product-card-media')?.appendChild(cartBadge);
+      }
+      cartBadge.textContent = `${inCartQty} no pedido`;
+      cartBadge.style.display = 'inline-block';
+    } else if (cartBadge) {
+      cartBadge.style.display = 'none';
+    }
+
+    const footerAction = card.querySelector('.product-card-action-slot');
+    if (footerAction) {
+      if (!avail.canAdd) {
+        footerAction.innerHTML = `<button type="button" class="btn btn-secondary product-card-unavail-btn" disabled>Indisponível</button>`;
+      } else if (inCartQty > 0) {
+        footerAction.innerHTML = `
+          <div class="product-card-qty-ctrl" onclick="event.stopPropagation()">
+            <button type="button" class="btn-qty-mini btn-qty-minus" data-prod-id="${produtoId}" aria-label="Diminuir quantidade">−</button>
+            <span class="qty-mini-value">${inCartQty}</span>
+            <button type="button" class="btn-qty-mini btn-qty-plus" data-prod-id="${produtoId}" aria-label="Aumentar quantidade">+</button>
+          </div>
+        `;
+        attachCardQtyEvents(footerAction);
+      } else {
+        footerAction.innerHTML = `
+          <button type="button" class="btn btn-primary product-card-add-btn" data-prod-id="${produtoId}">
+            + Adicionar
+          </button>
+        `;
+        footerAction.querySelector('.product-card-add-btn')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          quickAddToCart(produtoId, 1);
+        });
+      }
+    }
+  });
+}
+
+function attachCardQtyEvents(container) {
+  container.querySelectorAll('.btn-qty-minus').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      quickAddToCart(btn.dataset.prodId, -1);
+    });
+  });
+  container.querySelectorAll('.btn-qty-plus').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      quickAddToCart(btn.dataset.prodId, 1);
+    });
+  });
+}
+
 // ─── Helper de Imagem do Produto ──────────────────────────────────────
 function getProductImageUrl(prod) {
   if (!prod) return '';
@@ -1624,23 +2682,16 @@ function getProductImageUrl(prod) {
   return '';
 }
 
-// Badge de categoria: somente na Home (seção "Produtos do Cardápio")
-// Não repetir no card se a seção já contextualiza a categoria.
-// Mantemos apenas no modo de busca/filtragem individual (screen-cardapio)
-// A função recebe showCatBadge=true para exibir, false para ocultar
+// ─── Card Comercial Gourmet do Produto ────────────────────────────────
 function createProductCardHtml(prod, showCatBadge = false) {
   const tiers = getTiersForProduct(prod);
-  // Preço base unitário de catálogo (independente do carrinho)
   const catalogBasePrice = getBaseUnitPrice(prod);
   const inCartQty = getCartQtyFor(prod.id);
+  const avail = getProductAvailability(prod);
 
-  // Garante que o ícone é sempre um emoji — nunca um slug Material Design
   const catIcon = getCategoryIcon(prod.categoria_icone, prod.categoria_nome);
   const catNameClean = sanitizeCategoryName(prod.categoria_nome);
 
-  // Área de Imagem/Ícone:
-  // - Se tiver imagem no banco de dados (URL válida) → exibe a imagem real do produto
-  // - Se não tiver imagem (ou for inválida) → fallback para o emoji da categoria
   let mediaHtml = '';
   const imgUrl = getProductImageUrl(prod);
   if (imgUrl) {
@@ -1650,14 +2701,12 @@ function createProductCardHtml(prod, showCatBadge = false) {
       <div class="product-card-fallback-icon" style="display:none">${catIcon}</div>
     `;
   } else {
-    // Slug de ícone (ex: "fastfood") ou vazio → exibe emoji da categoria
     mediaHtml = `<div class="product-card-fallback-icon">${catIcon}</div>`;
   }
 
-  // Pill de Lote: mostra a faixa de maior desconto da categoria de forma estável e consistente
+  // Pill de Lote
   let tierPillHtml = '';
   if (tiers && tiers.length > 1) {
-    // Pega o tier com maior quantidade (maior desconto)
     const bestTier = tiers[tiers.length - 1];
     const minQty = bestTier.qtd_minima;
     const discountPct = calculateDiscountPercent(catalogBasePrice, bestTier.valor_unitario_centavos);
@@ -1667,11 +2716,31 @@ function createProductCardHtml(prod, showCatBadge = false) {
 
   const descClean = (prod.descricao && String(prod.descricao).trim()) ? String(prod.descricao).trim() : '';
 
+  let actionSlotHtml = '';
+  if (!avail.canAdd) {
+    actionSlotHtml = `<button type="button" class="btn btn-secondary product-card-unavail-btn" disabled>Indisponível</button>`;
+  } else if (inCartQty > 0) {
+    actionSlotHtml = `
+      <div class="product-card-qty-ctrl" onclick="event.stopPropagation()">
+        <button type="button" class="btn-qty-mini btn-qty-minus" data-prod-id="${prod.id}" aria-label="Diminuir quantidade">−</button>
+        <span class="qty-mini-value">${inCartQty}</span>
+        <button type="button" class="btn-qty-mini btn-qty-plus" data-prod-id="${prod.id}" aria-label="Aumentar quantidade">+</button>
+      </div>
+    `;
+  } else {
+    actionSlotHtml = `
+      <button type="button" class="btn btn-primary product-card-add-btn" data-prod-id="${prod.id}">
+        + Adicionar
+      </button>
+    `;
+  }
+
   return `
-    <article class="product-card" data-prod-id="${prod.id}">
+    <article class="product-card ${!avail.canAdd ? 'is-unavailable' : ''}" data-prod-id="${prod.id}">
       <div class="product-card-media">
-        ${showCatBadge ? `<span class="product-card-badge-cat">${catIcon} ${catNameClean}</span>` : ''}
-        ${inCartQty > 0 ? `<span class="product-card-cart-qty-badge">${inCartQty} no pedido</span>` : ''}
+        <span class="product-card-badge-cat">${catIcon} ${catNameClean}</span>
+        ${avail.showBadge !== false ? `<span class="avail-badge ${avail.badgeClass}">${avail.dot} ${avail.label}</span>` : ''}
+        <span class="product-card-cart-qty-badge" style="${inCartQty > 0 ? '' : 'display:none'}">${inCartQty} no pedido</span>
         ${mediaHtml}
       </div>
       <div class="product-card-body">
@@ -1681,12 +2750,12 @@ function createProductCardHtml(prod, showCatBadge = false) {
       </div>
       <div class="product-card-footer">
         <div class="product-card-price-wrap">
-          <span class="product-card-price-label">A partir de</span>
-          <span class="product-card-price">${fmt(catalogBasePrice)}/un</span>
+          <span class="product-card-price-label">Unidade</span>
+          <span class="product-card-price">${fmt(catalogBasePrice)}</span>
         </div>
-        <button type="button" class="btn btn-primary product-card-add-btn" data-prod-id="${prod.id}">
-          + Adicionar
-        </button>
+        <div class="product-card-action-slot">
+          ${actionSlotHtml}
+        </div>
       </div>
     </article>
   `;
@@ -1694,12 +2763,69 @@ function createProductCardHtml(prod, showCatBadge = false) {
 
 function attachProductCardEvents(container) {
   container.querySelectorAll('.product-card').forEach(card => {
+    // Clique no card abre o modal detalhado (exceto se clicar no seletor de quantidade ou no botão adicionar)
     card.addEventListener('click', (e) => {
+      if (e.target.closest('.product-card-qty-ctrl') || e.target.closest('.product-card-add-btn') || e.target.closest('.product-card-unavail-btn')) {
+        return;
+      }
       const prodId = card.dataset.prodId;
       const prod = state.produtos.find(p => p.id === prodId);
       if (prod) openProductModal(prod);
     });
+
+    const addBtn = card.querySelector('.product-card-add-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        quickAddToCart(card.dataset.prodId, 1);
+      });
+    }
   });
+
+  attachCardQtyEvents(container);
+}
+
+function renderHomeFeaturedProducts() {
+  const container = document.getElementById('home-featured-grid');
+  if (!container) return;
+
+  const featured = state.produtos.slice(0, 6);
+  if (featured.length === 0) {
+    container.innerHTML = `<div style="grid-column: 1/-1; color: var(--text-muted); font-size:13px;">Nenhum produto cadastrado no momento.</div>`;
+    return;
+  }
+
+  container.innerHTML = featured.map(prod => createProductCardHtml(prod, true)).join('');
+  attachProductCardEvents(container);
+}
+
+// ─── Destaque Visual Compacto para Festas & Encomendas ──────────────
+function updatePartyBannerVisual() {
+  const visualContainer = document.getElementById('party-banner-visual');
+  const tierTag = document.getElementById('party-banner-tier-tag');
+
+  if (tierTag) {
+    const hasTiers = Array.isArray(state.precificacao) && state.precificacao.some(p => p.qtd_minima > 1);
+    tierTag.style.display = hasTiers ? 'inline-flex' : 'none';
+  }
+
+  if (!visualContainer) return;
+
+  const prodsComFoto = (state.produtos || []).filter(p => getProductImageUrl(p));
+  if (prodsComFoto.length >= 2) {
+    const fotos = prodsComFoto.slice(0, 3);
+    visualContainer.innerHTML = `
+      <div class="party-visual-mosaic">
+        ${fotos.map(p => `
+          <div class="party-mosaic-item" title="${p.nome}">
+            <img src="${getProductImageUrl(p)}" alt="${p.nome}" class="party-mosaic-img" loading="lazy" onerror="this.parentElement.style.display='none'" />
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } else {
+    visualContainer.innerHTML = `<span class="party-visual-emoji">🥟</span>`;
+  }
 }
 
 function renderProductsGrid() {
@@ -1746,7 +2872,7 @@ function renderProductsGrid() {
 // ─── Modal de Produto Gastronômico ────────────────────────────────────
 function openProductModal(prod) {
   state.modalProduct = prod;
-  state.modalQty = getMinQtyForCategory(prod.categoria_id) || 1;
+  state.modalQty = 0;
 
   const modal = document.getElementById('product-modal');
   const nameEl = document.getElementById('modal-prod-name');
@@ -1756,6 +2882,7 @@ function openProductModal(prod) {
   const imageArea = document.getElementById('modal-image-area');
   const qtyInput = document.getElementById('modal-qty-input');
   const tiersContainer = document.getElementById('modal-pricing-tiers');
+  const minHintEl = document.getElementById('modal-cat-min-hint');
 
   if (!modal) return;
 
@@ -1776,7 +2903,22 @@ function openProductModal(prod) {
   }
 
   if (catEl) catEl.textContent = `${catIcon} ${sanitizeCategoryName(prod.categoria_nome)}`;
-  if (qtyInput) qtyInput.value = state.modalQty;
+  if (qtyInput) {
+    qtyInput.value = 0;
+    qtyInput.min = '0';
+  }
+
+  // Aviso informativo de quantidade mínima da categoria no pedido
+  const minRequiredCat = getMinQtyForCategory(prod.categoria_id);
+  if (minHintEl) {
+    if (minRequiredCat > 1) {
+      minHintEl.innerHTML = `ℹ️ O pedido mínimo para a categoria <strong>${sanitizeCategoryName(prod.categoria_nome)}</strong> é de <strong>${minRequiredCat} unidades</strong> no total do pedido. Você pode selecionar a partir de 1 unidade e combinar produtos.`;
+      minHintEl.style.display = 'flex';
+    } else {
+      minHintEl.style.display = 'none';
+      minHintEl.innerHTML = '';
+    }
+  }
 
   // Imagem no Modal — busca imagem real no banco ou emoji de fallback
   if (imageArea) {
@@ -1825,6 +2967,50 @@ function openProductModal(prod) {
     tiersContainer.style.display = 'none';
   }
 
+  // Disponibilidade do Produto e Badge
+  const isInactive = prod.ativo === false || prod.status_comercial === 'indisponivel';
+  const isLimited = prod.status_comercial === 'limitado';
+  const availBadge = document.getElementById('modal-availability-badge');
+  const addBtn = document.getElementById('modal-add-btn');
+
+  if (availBadge) {
+    if (isInactive) {
+      availBadge.className = 'product-availability-badge unavailable';
+      availBadge.textContent = '❌ Indisponível';
+    } else if (isLimited) {
+      availBadge.className = 'product-availability-badge limited';
+      availBadge.textContent = '⚠️ Disponibilidade Limitada';
+    } else {
+      availBadge.className = 'product-availability-badge available';
+      availBadge.textContent = '✅ Disponível';
+    }
+  }
+
+  if (addBtn) {
+    addBtn.disabled = isInactive;
+    if (isInactive) {
+      addBtn.style.opacity = '0.5';
+      addBtn.style.cursor = 'not-allowed';
+    } else {
+      addBtn.style.opacity = '1';
+      addBtn.style.cursor = 'pointer';
+    }
+  }
+  if (qtyInput) qtyInput.disabled = isInactive;
+
+  // Botões rápidos de incremento de lote (+1, +5, +10, +25, +50, +100)
+  document.querySelectorAll('.quick-qty-chip').forEach(chip => {
+    chip.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isInactive) return;
+      const addQty = parseInt(chip.dataset.qty, 10) || 1;
+      state.modalQty = (parseInt(state.modalQty, 10) || 0) + addQty;
+      if (qtyInput) qtyInput.value = state.modalQty;
+      updateModalPrice();
+    };
+  });
+
   updateModalPrice();
   modal.classList.add('open');
 }
@@ -1838,12 +3024,36 @@ function closeProductModal() {
 function updateModalPrice() {
   if (!state.modalProduct) return;
   const prod = state.modalProduct;
-  const unitPrice = getPreco(prod, state.modalQty);
+  const unitPrice = getPreco(prod, Math.max(1, state.modalQty));
   const totalPrice = unitPrice * state.modalQty;
 
   const priceEl = document.getElementById('modal-prod-price');
   if (priceEl) {
-    priceEl.innerHTML = `${fmt(totalPrice)} <small style="font-size:12px;color:var(--text-muted);font-weight:600">(${fmt(unitPrice)} /un)</small>`;
+    if (state.modalQty > 0) {
+      priceEl.innerHTML = `${fmt(totalPrice)} <small style="font-size:12px;color:var(--text-muted);font-weight:600">(${fmt(unitPrice)} /un)</small>`;
+    } else {
+      priceEl.innerHTML = `${fmt(unitPrice)} <small style="font-size:12px;color:var(--text-muted);font-weight:600">/unidade</small>`;
+    }
+  }
+
+  const addBtn = document.getElementById('modal-add-btn');
+  const isInactive = prod.ativo === false || prod.status_comercial === 'indisponivel';
+  if (addBtn && !isInactive) {
+    if (state.modalQty > 0) {
+      addBtn.disabled = false;
+      addBtn.style.opacity = '1';
+      addBtn.style.cursor = 'pointer';
+      addBtn.innerHTML = `🛒 Adicionar ao Pedido • <span id="modal-btn-price">${fmt(totalPrice)}</span>`;
+    } else {
+      addBtn.disabled = true;
+      addBtn.style.opacity = '0.6';
+      addBtn.style.cursor = 'not-allowed';
+      addBtn.innerHTML = `🛒 Selecione a quantidade`;
+    }
+  } else if (addBtn && isInactive) {
+    addBtn.disabled = true;
+    addBtn.style.opacity = '0.5';
+    addBtn.style.cursor = 'not-allowed';
   }
 
   // Destacar faixa ativa na tabela de tiers
@@ -1859,8 +3069,587 @@ function updateModalPrice() {
   }
 }
 
+// ─── Motor de Geocodificação & Rotas Reais de Entrega ────────────────
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return parseFloat((R * c * 1.30).toFixed(1)); // 1.30 fator de malha viária urbana brasileira
+}
+
+async function geocodeAddress(addressStr) {
+  if (!addressStr || addressStr.trim().length < 4) return null;
+  const cleanAddr = addressStr.trim().toLowerCase();
+  const cacheKey = 'fincore_geo_' + btoa(unescape(encodeURIComponent(cleanAddr))).slice(0, 32);
+
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && parsed.lat && parsed.lon) return parsed;
+    }
+  } catch (_) {}
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressStr)}&countrycodes=br&limit=1`;
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'Accept-Language': 'pt-BR',
+        'User-Agent': 'FinCoreFoodCardapio/2.0'
+      }
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data && data.length > 0) {
+      const geo = {
+        lat: parseFloat(data[0].lat),
+        lon: parseFloat(data[0].lon),
+        displayName: data[0].display_name
+      };
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(geo));
+      } catch (_) {}
+      return geo;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function getStoreCoordinates() {
+  if (state.storeCoords && state.storeCoords.lat) return state.storeCoords;
+  const emp = state.empresa || {};
+  const rua = emp.logradouro || '';
+  const num = emp.numero || '';
+  const bair = emp.bairro || '';
+  const cid = emp.cidade || 'Pouso Alegre';
+  const uf = emp.estado || 'MG';
+
+  // Se for a matriz conhecida em Francisca Augusta Rios, Pouso Alegre
+  if (bair.toLowerCase().includes('francisca augusta') || rua.toLowerCase().includes('nadia prancic')) {
+    state.storeCoords = { lat: -22.2592283, lon: -45.9260035 };
+    return state.storeCoords;
+  }
+
+  // Tentar em cascata para máxima resiliência
+  const attempts = [
+    `${rua}, ${num} - ${bair}, ${cid} - ${uf}, Brasil`,
+    `${rua}, ${bair}, ${cid} - ${uf}, Brasil`,
+    `${bair}, ${cid} - ${uf}, Brasil`,
+    `${cid} - ${uf}, Brasil`
+  ];
+
+  for (const query of attempts) {
+    if (query.trim().length > 8) {
+      const coords = await geocodeAddress(query);
+      if (coords && coords.lat) {
+        state.storeCoords = coords;
+        return coords;
+      }
+    }
+  }
+
+  // Fallback padrão se nada responder
+  state.storeCoords = { lat: -22.2592283, lon: -45.9260035 };
+  return state.storeCoords;
+}
+
+async function calculateRouteDistance(originCoords, destCoords) {
+  if (!originCoords || !destCoords) return null;
+  const cacheKey = `fincore_route_${originCoords.lat.toFixed(4)}_${originCoords.lon.toFixed(4)}_${destCoords.lat.toFixed(4)}_${destCoords.lon.toFixed(4)}`;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch (_) {}
+
+  // 1. Tentar rota viária real OSRM
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const url = `https://router.project-osrm.org/route/v1/driving/${originCoords.lon},${originCoords.lat};${destCoords.lon},${destCoords.lat}?overview=false`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        const distKm = parseFloat((route.distance / 1000).toFixed(1));
+        const durMin = Math.round(route.duration / 60) || 5;
+        const result = {
+          distanceMeters: route.distance,
+          distanceKm: distKm,
+          durationMinutes: durMin,
+          provedor: 'osrm'
+        };
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(result));
+        } catch (_) {}
+        return result;
+      }
+    }
+  } catch (_) {}
+
+  // 2. Fallback imediato: Haversine viário (Garante que nunca trava ou fica sem cálculo)
+  const hKm = haversineKm(originCoords.lat, originCoords.lon, destCoords.lat, destCoords.lon);
+  const durEstimado = Math.max(5, Math.round(hKm * 2.5));
+  const fallbackResult = {
+    distanceMeters: hKm * 1000,
+    distanceKm: hKm,
+    durationMinutes: durEstimado,
+    provedor: 'haversine_viario'
+  };
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(fallbackResult));
+  } catch (_) {}
+  return fallbackResult;
+}
+
+let routeCalcDebounce = null;
+function triggerAsyncRouteCalculation() {
+  if (state.tipoLogistica !== 'Entrega') return;
+  const cep = (document.getElementById('checkout-cep')?.value || state.profile?.cep || '').replace(/\D/g, '');
+  const logr = (document.getElementById('checkout-logradouro')?.value || state.profile?.logradouro || '').trim();
+  const num = (document.getElementById('checkout-numero')?.value || state.profile?.numero || '').trim();
+  const bair = (document.getElementById('checkout-bairro')?.value || state.profile?.bairro || '').trim();
+  const cid = (document.getElementById('checkout-cidade')?.value || state.profile?.cidade || state.empresa?.cidade || 'Pouso Alegre').trim();
+  const uf = (document.getElementById('checkout-uf')?.value || state.profile?.uf || state.empresa?.estado || 'MG').trim();
+
+  // Precisa ter pelo menos (logradouro e bairro) OU (bairro e cidade) OU CEP completo
+  const hasMinLocation = (logr && (num || bair)) || (bair && cid) || (cep.length === 8);
+  if (!hasMinLocation) {
+    const routeBox = document.getElementById('checkout-route-summary');
+    if (routeBox) routeBox.style.display = 'none';
+    return;
+  }
+
+  const routeBox = document.getElementById('checkout-route-summary');
+  const distEl = document.getElementById('route-summary-distance');
+  const ruleEl = document.getElementById('route-summary-rule');
+  const badgeEl = document.getElementById('route-badge-fee');
+
+  if (routeBox && distEl && !state.routeInfo) {
+    routeBox.style.display = 'flex';
+    distEl.textContent = '📍 Calculando distância e rota de entrega...';
+    if (ruleEl) ruleEl.textContent = 'Consultando rota viária oficial';
+    if (badgeEl) badgeEl.textContent = '...';
+  }
+
+  clearTimeout(routeCalcDebounce);
+  routeCalcDebounce = setTimeout(async () => {
+    try {
+      const storeCoords = await getStoreCoordinates();
+      if (!storeCoords) return;
+
+      // Monta tentativas de geocodificação do destino
+      let destCoords = null;
+      const queries = [];
+      if (logr && num) queries.push(`${logr}, ${num} - ${bair}, ${cid} - ${uf}, Brasil`);
+      if (logr && bair) queries.push(`${logr}, ${bair}, ${cid} - ${uf}, Brasil`);
+      if (bair && cid) queries.push(`${bair}, ${cid} - ${uf}, Brasil`);
+      if (cep && cep.length === 8) queries.push(`${cep}, Brasil`);
+      if (cid && uf) queries.push(`${cid} - ${uf}, Brasil`);
+
+      for (const q of queries) {
+        destCoords = await geocodeAddress(q);
+        if (destCoords && destCoords.lat) break;
+      }
+
+      if (!destCoords) return;
+
+      const routeInfo = await calculateRouteDistance(storeCoords, destCoords);
+      if (routeInfo && routeInfo.distanceKm >= 0) {
+        state.routeInfo = routeInfo;
+        state.destCoords = destCoords;
+
+        if (routeBox && distEl) {
+          routeBox.style.display = 'flex';
+          distEl.textContent = `📍 ${routeInfo.distanceKm} km até você (~${routeInfo.durationMinutes} min de trajeto)`;
+        }
+
+        updateCheckoutTotals();
+        validateCheckoutForm();
+      }
+    } catch (e) {
+      console.warn('Erro ao calcular rota:', e);
+    }
+  }, 400);
+}
+
+function renderPickupStoreInfo() {
+  const storeNameEl = document.getElementById('retirada-store-name');
+  const storeAddrEl = document.getElementById('retirada-store-address');
+  const emp = state.empresa || {};
+  const nome = emp.nomeFantasia || emp.razaoSocial || 'FinCore Food';
+  const rua = emp.logradouro || '';
+  const num = emp.numero || '';
+  const bair = emp.bairro || '';
+  const cid = emp.cidade || '';
+  const uf = emp.estado || '';
+  const full = [rua ? `${rua}, ${num}` : '', bair, cid ? `${cid} - ${uf}` : ''].filter(Boolean).join(' - ');
+
+  if (storeNameEl) storeNameEl.textContent = nome;
+  if (storeAddrEl) storeAddrEl.textContent = full || 'Endereço disponível para retirada no balcão.';
+}
+
+// ─── Fallback Inteligente de Taxa de Entrega ────────────────────────
+function getTaxaEntregaFallback() {
+  const regras = state.taxasEntrega || [];
+  // 1. Regra explícita do tipo FIXO cadastrada pelo lojista
+  const fixa = regras.find(r => r.ativo && (r.tipoRegra === 'fixo' || r.tipo_regra === 'fixo'));
+  if (fixa) {
+    return {
+      valorCentavos: parseInt(fixa.valorCentavos || 0, 10),
+      nome: fixa.nome || 'Taxa Fixa Padrão',
+      isGratis: parseInt(fixa.valorCentavos || 0, 10) === 0
+    };
+  }
+
+  // 2. Se houver qualquer regra de KM ou Bairro cadastrada, usar a primeira regra ativa da loja
+  const ativas = regras.filter(r => r.ativo);
+  if (ativas.length > 0) {
+    const primeira = ativas[0];
+    return {
+      valorCentavos: parseInt(primeira.valorCentavos || 500, 10),
+      nome: primeira.nome || 'Taxa Padrão',
+      isGratis: parseInt(primeira.valorCentavos || 500, 10) === 0
+    };
+  }
+
+  // 3. Fallback comercial padrão (R$ 5,00)
+  return {
+    valorCentavos: 500,
+    nome: 'Taxa Padrão',
+    isGratis: false
+  };
+}
+
+// ─── Motor de Cálculo de Taxa de Entrega / Frete Comercial ───────────
+function calcularTaxaEntrega() {
+  if (state.tipoLogistica === 'Retirada') {
+    state.entregaMetadata = {
+      tipoLogistica: 'Retirada',
+      taxaCentavos: 0,
+      metodoCalculo: 'retirada_balcao'
+    };
+    return { valorCentavos: 0, label: 'Grátis (Retirada no Balcão)', isGratis: true };
+  }
+
+  const subtotal = cartTotal();
+  const regras = state.taxasEntrega || [];
+  const bairroInput = (document.getElementById('checkout-bairro')?.value || state.profile?.bairro || '').trim().toLowerCase();
+  const cepInput = (document.getElementById('checkout-cep')?.value || state.profile?.cep || '').replace(/\D/g, '');
+
+  let taxaEncontrada = null;
+
+  // 1. Busca prioritária por Bairro (exato ou similar na tabela de regras da loja)
+  if (bairroInput && regras.length > 0) {
+    taxaEncontrada = regras.find(r => {
+      if (r.ativo && (r.tipoRegra === 'bairro' || r.tipo_regra === 'bairro') && r.bairro) {
+        const b = r.bairro.trim().toLowerCase();
+        return b === bairroInput || bairroInput.includes(b) || b.includes(bairroInput);
+      }
+      return false;
+    });
+
+    if (taxaEncontrada) {
+      const valor = parseInt(taxaEncontrada.valorCentavos || 0, 10);
+      const minFreteGratis = parseInt(taxaEncontrada.pedidoMinimoCentavos || 0, 10);
+      const nomeRegra = `Bairro: ${taxaEncontrada.bairro || taxaEncontrada.nome}`;
+
+      state.entregaMetadata = {
+        tipoLogistica: 'Entrega',
+        latitude: state.destCoords?.lat || null,
+        longitude: state.destCoords?.lon || null,
+        distanciaKm: state.routeInfo?.distanceKm || null,
+        tempoMinutos: state.routeInfo?.durationMinutes || null,
+        metodoCalculo: 'regra_bairro',
+        regraAplicada: nomeRegra,
+        taxaCentavos: (minFreteGratis > 0 && subtotal >= minFreteGratis) ? 0 : valor
+      };
+
+      const routeRuleEl = document.getElementById('route-summary-rule');
+      const routeBadgeEl = document.getElementById('route-badge-fee');
+      if (routeRuleEl) routeRuleEl.textContent = `Regra: ${state.entregaMetadata.regraAplicada}`;
+      if (routeBadgeEl) routeBadgeEl.textContent = state.entregaMetadata.taxaCentavos === 0 ? 'Grátis' : fmt(state.entregaMetadata.taxaCentavos);
+
+      if (minFreteGratis > 0 && subtotal >= minFreteGratis) {
+        return { valorCentavos: 0, label: `Grátis (Pedido acima de ${fmt(minFreteGratis)})`, isGratis: true, nomeRegra };
+      }
+      return { valorCentavos: valor, label: fmt(valor), isGratis: valor === 0, nomeRegra };
+    }
+  }
+
+  // 2. Busca por Faixa de CEP (se não encontrou por bairro)
+  if (!taxaEncontrada && cepInput.length === 8 && regras.length > 0) {
+    const cepNum = parseInt(cepInput, 10);
+    taxaEncontrada = regras.find(r => {
+      if (r.ativo && (r.tipoRegra === 'cep' || r.tipo_regra === 'cep') && r.cepInicial && r.cepFinal) {
+        const ini = parseInt(r.cepInicial.replace(/\D/g, ''), 10);
+        const fim = parseInt(r.cepFinal.replace(/\D/g, ''), 10);
+        return !isNaN(ini) && !isNaN(fim) && cepNum >= ini && cepNum <= fim;
+      }
+      return false;
+    });
+
+    if (taxaEncontrada) {
+      const valor = parseInt(taxaEncontrada.valorCentavos || 0, 10);
+      const minFreteGratis = parseInt(taxaEncontrada.pedidoMinimoCentavos || 0, 10);
+      const nomeRegra = `Faixa CEP: ${taxaEncontrada.cepInicial} a ${taxaEncontrada.cepFinal}`;
+
+      state.entregaMetadata = {
+        tipoLogistica: 'Entrega',
+        latitude: state.destCoords?.lat || null,
+        longitude: state.destCoords?.lon || null,
+        distanciaKm: state.routeInfo?.distanceKm || null,
+        tempoMinutos: state.routeInfo?.durationMinutes || null,
+        metodoCalculo: 'regra_cep',
+        regraAplicada: nomeRegra,
+        taxaCentavos: (minFreteGratis > 0 && subtotal >= minFreteGratis) ? 0 : valor
+      };
+
+      const routeRuleEl = document.getElementById('route-summary-rule');
+      const routeBadgeEl = document.getElementById('route-badge-fee');
+      if (routeRuleEl) routeRuleEl.textContent = `Regra: ${state.entregaMetadata.regraAplicada}`;
+      if (routeBadgeEl) routeBadgeEl.textContent = state.entregaMetadata.taxaCentavos === 0 ? 'Grátis' : fmt(state.entregaMetadata.taxaCentavos);
+
+      if (minFreteGratis > 0 && subtotal >= minFreteGratis) {
+        return { valorCentavos: 0, label: `Grátis (Pedido acima de ${fmt(minFreteGratis)})`, isGratis: true, nomeRegra };
+      }
+      return { valorCentavos: valor, label: fmt(valor), isGratis: valor === 0, nomeRegra };
+    }
+  }
+
+  // 3. Busca por Faixa de KM / Distância Geolocalizada (quando não há taxa específica de Bairro ou CEP)
+  const kmRules = regras.filter(r => r.ativo && (r.tipoRegra === 'km' || r.tipo_regra === 'km'));
+  if (state.routeInfo && state.routeInfo.distanceKm >= 0 && kmRules.length > 0) {
+    const km = state.routeInfo.distanceKm;
+
+    // Ordenar faixas por distanciaMinKm crescente
+    const sortedKmRules = [...kmRules].sort((a, b) => {
+      const minA = parseFloat(a.distanciaMinKm || a.distancia_min_km || 0);
+      const minB = parseFloat(b.distanciaMinKm || b.distancia_min_km || 0);
+      return minA - minB;
+    });
+
+    // Encontrar faixa exata
+    taxaEncontrada = sortedKmRules.find(r => {
+      const minKm = parseFloat(r.distanciaMinKm || r.distancia_min_km || 0);
+      const maxKm = parseFloat(r.distanciaMaxKm || r.distancia_max_km || 99999);
+      return km >= minKm && km <= maxKm;
+    });
+
+    // Se o KM for menor que o início da primeira faixa cadastrada (ex: deu 0.8 km e a primeira faixa começa em 2.0 km):
+    // Como não há regra cobrando abaixo desse valor, é ENTREGA GRÁTIS (R$ 0,00)
+    if (!taxaEncontrada && sortedKmRules.length > 0) {
+      const firstMin = parseFloat(sortedKmRules[0].distanciaMinKm || sortedKmRules[0].distancia_min_km || 0);
+      if (km < firstMin) {
+        state.entregaMetadata = {
+          tipoLogistica: 'Entrega',
+          latitude: state.destCoords?.lat || null,
+          longitude: state.destCoords?.lon || null,
+          distanciaKm: km,
+          tempoMinutos: state.routeInfo?.durationMinutes || null,
+          metodoCalculo: 'faixa_km_gratis',
+          regraAplicada: `Entrega Grátis (Raio Próximo - ${km} km)`,
+          taxaCentavos: 0
+        };
+
+        const routeRuleEl = document.getElementById('route-summary-rule');
+        const routeBadgeEl = document.getElementById('route-badge-fee');
+        if (routeRuleEl) routeRuleEl.textContent = `Regra: Entrega Grátis (${km} km - Raio Próximo)`;
+        if (routeBadgeEl) routeBadgeEl.textContent = 'Grátis';
+
+        return {
+          valorCentavos: 0,
+          label: `Grátis (${km} km)`,
+          isGratis: true,
+          nomeRegra: `Entrega Grátis (Até ${firstMin} km)`
+        };
+      }
+    }
+
+    if (taxaEncontrada) {
+      const valor = parseInt(taxaEncontrada.valorCentavos || 0, 10);
+      const minFreteGratis = parseInt(taxaEncontrada.pedidoMinimoCentavos || 0, 10);
+      const nomeRegra = taxaEncontrada.nome || `Faixa ${taxaEncontrada.distanciaMinKm || 0} a ${taxaEncontrada.distanciaMaxKm || '∞'} km`;
+
+      state.entregaMetadata = {
+        tipoLogistica: 'Entrega',
+        latitude: state.destCoords?.lat || null,
+        longitude: state.destCoords?.lon || null,
+        distanciaKm: km,
+        tempoMinutos: state.routeInfo?.durationMinutes || null,
+        metodoCalculo: 'faixa_km_osrm',
+        regraAplicada: `${nomeRegra} (${km} km)`,
+        taxaCentavos: (minFreteGratis > 0 && subtotal >= minFreteGratis) ? 0 : valor
+      };
+
+      const routeRuleEl = document.getElementById('route-summary-rule');
+      const routeBadgeEl = document.getElementById('route-badge-fee');
+      if (routeRuleEl) routeRuleEl.textContent = `Regra: ${state.entregaMetadata.regraAplicada}`;
+      if (routeBadgeEl) routeBadgeEl.textContent = state.entregaMetadata.taxaCentavos === 0 ? 'Grátis' : fmt(state.entregaMetadata.taxaCentavos);
+
+      if (minFreteGratis > 0 && subtotal >= minFreteGratis) {
+        return { valorCentavos: 0, label: `Grátis (Pedido acima de ${fmt(minFreteGratis)})`, isGratis: true, nomeRegra };
+      }
+      return { valorCentavos: valor, label: fmt(valor), isGratis: valor === 0, nomeRegra };
+    } else if (sortedKmRules.length > 0) {
+      // Fora de todas as faixas (ex: cliente está a 18 km e o máx cadastrado é 8 km)
+      // Usa fallback da maior faixa ou taxa de fallback com aviso claro
+      const maiorFaixa = sortedKmRules[sortedKmRules.length - 1];
+      const maxKmTotal = parseFloat(maiorFaixa.distanciaMaxKm || maiorFaixa.distancia_max_km || 0);
+      const valorFallback = parseInt(maiorFaixa.valorCentavos || 800, 10);
+
+      state.entregaMetadata = {
+        tipoLogistica: 'Entrega',
+        distanciaKm: km,
+        taxaCentavos: valorFallback,
+        metodoCalculo: 'taxa_fallback_raio',
+        regraAplicada: `Taxa Excedente (${km} km - máx padrão ${maxKmTotal} km)`
+      };
+      const routeRuleEl = document.getElementById('route-summary-rule');
+      const routeBadgeEl = document.getElementById('route-badge-fee');
+      if (routeRuleEl) routeRuleEl.textContent = `Regra: ${state.entregaMetadata.regraAplicada}`;
+      if (routeBadgeEl) routeBadgeEl.textContent = fmt(valorFallback);
+
+      return {
+        valorCentavos: valorFallback,
+        label: `${fmt(valorFallback)} (Acima de ${maxKmTotal} km)`,
+        isGratis: false,
+        nomeRegra: `Acima de ${maxKmTotal} km`
+      };
+    }
+  }
+
+  // 4. Regra geral FIXA explícita (somente tipoRegra == 'fixo')
+  if (!taxaEncontrada && regras.length > 0) {
+    taxaEncontrada = regras.find(r => r.ativo && (r.tipoRegra === 'fixo' || r.tipo_regra === 'fixo'));
+  }
+
+  // 5. Aplicação da regra da tabela de taxas (Bairro / CEP / Fixa)
+  if (taxaEncontrada) {
+    const valor = parseInt(taxaEncontrada.valorCentavos || 0, 10);
+    const minFreteGratis = parseInt(taxaEncontrada.pedidoMinimoCentavos || 0, 10);
+
+    state.entregaMetadata = {
+      tipoLogistica: 'Entrega',
+      latitude: state.destCoords?.lat || null,
+      longitude: state.destCoords?.lon || null,
+      distanciaKm: state.routeInfo?.distanceKm || null,
+      tempoMinutos: state.routeInfo?.durationMinutes || null,
+      metodoCalculo: 'tabela_bairro',
+      regraAplicada: `Tabela: ${taxaEncontrada.nome}`,
+      taxaCentavos: (minFreteGratis > 0 && subtotal >= minFreteGratis) ? 0 : valor
+    };
+
+    const routeRuleEl = document.getElementById('route-summary-rule');
+    const routeBadgeEl = document.getElementById('route-badge-fee');
+    if (routeRuleEl) routeRuleEl.textContent = `Regra: ${taxaEncontrada.nome}`;
+    if (routeBadgeEl) routeBadgeEl.textContent = state.entregaMetadata.taxaCentavos === 0 ? 'Grátis' : fmt(valor);
+
+    if (minFreteGratis > 0 && subtotal >= minFreteGratis) {
+      return { 
+        valorCentavos: 0, 
+        label: `Grátis (Pedido acima de ${fmt(minFreteGratis)})`, 
+        isGratis: true,
+        nomeRegra: taxaEncontrada.nome 
+      };
+    }
+    return { 
+      valorCentavos: valor, 
+      label: fmt(valor), 
+      isGratis: valor === 0,
+      nomeRegra: taxaEncontrada.nome 
+    };
+  }
+
+  // 6. FALLBACK AUTOMÁTICO SE O CEP NÃO FOR ENCONTRADO OU SE O ENDEREÇO NÃO FOR MAPEADO
+  if (bairroInput || cepInput) {
+    const fallback = getTaxaEntregaFallback();
+    state.entregaMetadata = {
+      tipoLogistica: 'Entrega',
+      latitude: state.destCoords?.lat || null,
+      longitude: state.destCoords?.lon || null,
+      distanciaKm: state.routeInfo?.distanceKm || null,
+      tempoMinutos: state.routeInfo?.durationMinutes || null,
+      metodoCalculo: 'taxa_fallback',
+      regraAplicada: `${fallback.nome} (Endereço manual / CEP não mapeado)`,
+      taxaCentavos: fallback.valorCentavos
+    };
+
+    const routeRuleEl = document.getElementById('route-summary-rule');
+    const routeBadgeEl = document.getElementById('route-badge-fee');
+    if (routeRuleEl) routeRuleEl.textContent = `Regra: ${fallback.nome}`;
+    if (routeBadgeEl) routeBadgeEl.textContent = fallback.isGratis ? 'Grátis' : fmt(fallback.valorCentavos);
+
+    return {
+      valorCentavos: fallback.valorCentavos,
+      label: `${fmt(fallback.valorCentavos)} (${fallback.nome})`,
+      isGratis: fallback.isGratis,
+      nomeRegra: fallback.nome,
+      isFallback: true
+    };
+  }
+
+  state.entregaMetadata = {
+    tipoLogistica: 'Entrega',
+    latitude: state.destCoords?.lat || null,
+    longitude: state.destCoords?.lon || null,
+    distanciaKm: null,
+    tempoMinutos: null,
+    metodoCalculo: 'aguardando_endereco',
+    regraAplicada: 'Aguardando endereço',
+    taxaCentavos: 0
+  };
+
+  return { valorCentavos: 0, label: 'Informe o endereço para calcular', isGratis: true };
+}
+
+function updateCheckoutTotals() {
+  const subtotalEl = document.getElementById('checkout-subtotal');
+  const taxaEl = document.getElementById('checkout-taxa');
+  const totalEl = document.getElementById('checkout-total');
+
+  const subtotal = cartTotal();
+  const taxa = calcularTaxaEntrega();
+  state.taxaEntregaCentavos = taxa.valorCentavos;
+
+  if (subtotalEl) subtotalEl.textContent = fmt(subtotal);
+
+  if (taxaEl) {
+    taxaEl.textContent = taxa.label;
+    if (taxa.isGratis) {
+      taxaEl.className = 'text-success';
+    } else {
+      taxaEl.className = 'text-brand font-bold';
+    }
+  }
+
+  const grandTotal = subtotal + state.taxaEntregaCentavos;
+  if (totalEl) totalEl.textContent = fmt(grandTotal);
+
+  return { subtotal, taxaCentavos: state.taxaEntregaCentavos, grandTotal };
+}
+
 // ─── TELA 3: CHECKOUT & ENCOMENDAS ────────────────────────────────────
 function renderCheckoutPage() {
+  const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
+  if (!isLogged) {
+    state.redirectAfterAuth = 'screen-checkout';
+    toast('🔐 Faça login ou crie sua conta para finalizar o pedido.', 'info', 4000);
+    showScreen('screen-auth');
+    return;
+  }
+
   const itemsContainer = document.getElementById('checkout-items-list');
   const subtotalEl = document.getElementById('checkout-subtotal');
   const totalEl = document.getElementById('checkout-total');
@@ -2001,10 +3790,8 @@ function renderCheckoutPage() {
     });
   });
 
-  // Totais
-  const total = cartTotal();
-  if (subtotalEl) subtotalEl.textContent = fmt(total);
-  if (totalEl) totalEl.textContent = fmt(total);
+  // Totais & Taxa de Entrega Dinâmica
+  updateCheckoutTotals();
 
   // Validação de Quantidade Mínima
   const valResult = validateMinimumCategoryQuantities();
@@ -2017,14 +3804,101 @@ function renderCheckoutPage() {
     minQtyAlert.style.display = 'none';
   }
 
+  // Renderizar formas de pagamento dinâmicas da loja
+  renderPaymentMethods();
+
   // Preenchimento de identificação e endereço salvo se o usuário estiver logado
   populateSavedAddressInCheckout();
   validateCheckoutForm();
 }
 
-function populateSavedAddressInCheckout() {
-  // 1. Contato do Cliente: Se estiver logado, não precisa pedir dados de contato
-  const isLogged = !!(state.session || (state.profile && state.profile.nome));
+function renderPaymentMethods() {
+  const grid = document.getElementById('checkout-payment-grid');
+  if (!grid) return;
+
+  const fps = (state.formasPagamento && state.formasPagamento.length > 0)
+    ? state.formasPagamento
+    : [
+        { id: 'default-pix', nome: 'Pix Instantâneo', tipo: 'pix', permiteTroco: false },
+        { id: 'default-dinheiro', nome: 'Dinheiro', tipo: 'DINHEIRO', permiteTroco: true },
+        { id: 'default-credito', nome: 'Cartão de Crédito', tipo: 'cartaoCredito', permiteTroco: false },
+        { id: 'default-debito', nome: 'Cartão de Débito', tipo: 'cartaoDebito', permiteTroco: false }
+      ];
+
+  function getPaymentMeta(fp) {
+    const t = String(fp.tipo || '').toLowerCase();
+    const n = String(fp.nome || '').toLowerCase();
+    if (t.includes('pix') || n.includes('pix')) {
+      return { icon: '⚡', desc: 'Copia e Cola Automático com valor' };
+    }
+    if (t.includes('dinheiro') || n.includes('dinheiro')) {
+      return { icon: '💵', desc: 'Pagamento em espécie na entrega ou balcão' };
+    }
+    if (t.includes('credito') || n.includes('credito')) {
+      return { icon: '💳', desc: 'Cartão de crédito na maquininha' };
+    }
+    if (t.includes('debito') || n.includes('debito')) {
+      return { icon: '💳', desc: 'Cartão de débito na maquininha' };
+    }
+    return { icon: '💳', desc: 'Pagamento na entrega ou balcão' };
+  }
+
+  // Se nada foi selecionado ainda, define a primeira opção (preferindo Pix se houver)
+  if (!state.formaPagamentoId && fps.length > 0) {
+    const defaultFp = fps.find(f => String(f.tipo || '').toLowerCase().includes('pix') || String(f.nome || '').toLowerCase().includes('pix')) || fps[0];
+    state.formaPagamentoId = defaultFp.id;
+    state.formaPagamentoNome = defaultFp.nome;
+    state.formaPagamentoTipo = defaultFp.tipo;
+    state.formaPagamentoPermiteTroco = !!defaultFp.permiteTroco;
+  }
+
+  grid.innerHTML = fps.map(fp => {
+    const meta = getPaymentMeta(fp);
+    const isSelected = state.formaPagamentoId === fp.id || (!state.formaPagamentoId && state.formaPagamentoNome === fp.nome);
+    return `
+      <div
+        class="payment-card ${isSelected ? 'active' : ''}"
+        data-id="${fp.id}"
+        data-payment="${fp.nome}"
+        data-type="${fp.tipo || ''}"
+        data-troco="${fp.permiteTroco ? 'true' : 'false'}"
+        role="button"
+        tabindex="0"
+      >
+        <div class="payment-card-icon">${meta.icon}</div>
+        <div class="payment-card-title">${fp.nome}</div>
+        <div class="payment-card-desc">${meta.desc}</div>
+      </div>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.payment-card').forEach(card => {
+    card.addEventListener('click', () => {
+      grid.querySelectorAll('.payment-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+
+      state.formaPagamentoId = card.dataset.id;
+      state.formaPagamentoNome = card.dataset.payment;
+      state.formaPagamentoTipo = card.dataset.type;
+      state.formaPagamentoPermiteTroco = card.dataset.troco === 'true';
+
+      const trocoSec = document.getElementById('troco-section');
+      if (trocoSec) {
+        trocoSec.style.display = (state.formaPagamentoPermiteTroco || state.formaPagamentoNome === 'Dinheiro') ? 'block' : 'none';
+      }
+      validateCheckoutForm();
+    });
+  });
+
+  const trocoSec = document.getElementById('troco-section');
+  if (trocoSec) {
+    trocoSec.style.display = (state.formaPagamentoPermiteTroco || state.formaPagamentoNome === 'Dinheiro') ? 'block' : 'none';
+  }
+}
+
+async function populateSavedAddressInCheckout() {
+  // 1. Contato do Cliente: Obrigatório estar autenticado
+  const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
   const contactSection = document.getElementById('checkout-contact-section');
   const loggedUserBox = document.getElementById('checkout-logged-user-box');
   const loggedUserName = document.getElementById('checkout-logged-user-name');
@@ -2033,57 +3907,33 @@ function populateSavedAddressInCheckout() {
   const nomeInput = document.getElementById('checkout-nome-cliente');
   const phoneInput = document.getElementById('checkout-phone-cliente');
 
+  if (contactSection) contactSection.style.display = 'none';
+
   if (isLogged) {
-    if (contactSection) contactSection.style.display = 'none';
     if (loggedUserBox) loggedUserBox.style.display = 'block';
-    const nome = state.profile?.nome || 'Cliente Cadastrado';
+    const nome = state.profile?.nome || state.session?.user?.user_metadata?.full_name || 'Cliente Cadastrado';
     const phone = formatPhone(state.profile?.whatsapp || '');
     if (loggedUserName) loggedUserName.textContent = nome;
-    if (loggedUserPhone) loggedUserPhone.textContent = phone || 'Sem telefone';
+    if (loggedUserPhone) loggedUserPhone.textContent = phone || 'Sem WhatsApp informado';
     if (nomeInput) nomeInput.value = nome;
     if (phoneInput) phoneInput.value = phone;
   } else {
-    if (contactSection) contactSection.style.display = 'block';
     if (loggedUserBox) loggedUserBox.style.display = 'none';
-    let savedContact = null;
-    try {
-      savedContact = JSON.parse(localStorage.getItem('fincore_guest_contact') || 'null');
-    } catch (_) {}
-    if (nomeInput && !nomeInput.value) {
-      nomeInput.value = savedContact?.nome || '';
-    }
-    if (phoneInput && !phoneInput.value) {
-      phoneInput.value = formatPhone(savedContact?.phone || '');
-    }
+    state.redirectAfterAuth = 'screen-checkout';
+    showScreen('screen-auth');
+    return;
   }
 
-  // 2. Endereço Salvo / Cadastrado
-  let savedAddr = null;
-  try {
-    savedAddr = JSON.parse(localStorage.getItem('fincore_saved_address') || 'null');
-  } catch (_) {}
-
+  // 2. Endereços Salvos / Cadastrados do cliente
   const savedBox = document.getElementById('checkout-saved-address-box');
-  const savedText = document.getElementById('checkout-saved-address-text');
+  const addressesList = document.getElementById('checkout-saved-addresses-list');
   const formContainer = document.getElementById('checkout-address-form-container');
   const btnAddNovo = document.getElementById('btn-add-novo-endereco');
   const btnVoltarSalvo = document.getElementById('btn-voltar-endereco-salvo');
 
   if (!savedBox || !formContainer) return;
 
-  const hasProfileAddress = state.profile && (state.profile.logradouro || state.profile.endereco_padrao);
-  const hasLocalAddress = savedAddr && savedAddr.logradouro && savedAddr.numero;
-
-  const activeSaved = hasProfileAddress ? {
-    logradouro: state.profile.logradouro,
-    numero: state.profile.numero,
-    bairro: state.profile.bairro,
-    cidade: state.profile.cidade,
-    uf: state.profile.uf || 'SP',
-    complemento: state.profile.complemento || '',
-    referencia: state.profile.referencia || '',
-    cep: state.profile.cep || ''
-  } : (hasLocalAddress ? savedAddr : null);
+  await loadCustomerAddresses();
 
   const cepEl = document.getElementById('checkout-cep');
   const logrEl = document.getElementById('checkout-logradouro');
@@ -2094,21 +3944,73 @@ function populateSavedAddressInCheckout() {
   const compEl = document.getElementById('checkout-complemento');
   const refEl = document.getElementById('checkout-referencia');
 
-  if (activeSaved) {
-    const formatted = `${activeSaved.logradouro}, ${activeSaved.numero}${activeSaved.complemento ? ' (' + activeSaved.complemento + ')' : ''} - ${activeSaved.bairro}, ${activeSaved.cidade} - ${activeSaved.uf}`;
-    if (savedText) savedText.textContent = formatted;
+  function applySelectedAddress(addr) {
+    if (!addr) return;
+    state.selectedAddressId = addr.id;
+    if (cepEl) cepEl.value = addr.cep || '';
+    if (logrEl) logrEl.value = addr.logradouro || '';
+    if (numEl) numEl.value = addr.numero || '';
+    if (bairEl) bairEl.value = addr.bairro || '';
+    if (cidEl) cidEl.value = addr.cidade || state.empresa?.cidade || 'Pouso Alegre';
+    if (ufEl) ufEl.value = addr.uf || state.empresa?.estado || 'MG';
+    if (compEl) compEl.value = addr.complemento || '';
+    if (refEl) refEl.value = addr.referencia || '';
 
+    // Atualiza classes dos cards
+    document.querySelectorAll('#checkout-saved-addresses-list .address-card-item').forEach(card => {
+      card.classList.toggle('selected', card.dataset.id === String(addr.id));
+    });
+
+    triggerAsyncRouteCalculation();
+    validateCheckoutForm();
+    updateCheckoutTotals();
+  }
+
+  if (state.customerAddresses && state.customerAddresses.length > 0) {
     savedBox.style.display = 'block';
     formContainer.style.display = 'none';
 
-    if (cepEl) cepEl.value = activeSaved.cep || '';
-    if (logrEl) logrEl.value = activeSaved.logradouro || '';
-    if (numEl) numEl.value = activeSaved.numero || '';
-    if (bairEl) bairEl.value = activeSaved.bairro || '';
-    if (cidEl) cidEl.value = activeSaved.cidade || '';
-    if (ufEl) ufEl.value = activeSaved.uf || 'SP';
-    if (compEl) compEl.value = activeSaved.complemento || '';
-    if (refEl) refEl.value = activeSaved.referencia || '';
+    let defaultAddr = state.customerAddresses.find(a => a.id === state.selectedAddressId);
+    if (!defaultAddr) {
+      defaultAddr = state.customerAddresses.find(a => a.isPadrao || a.is_padrao) || state.customerAddresses[0];
+    }
+
+    if (addressesList) {
+      addressesList.innerHTML = state.customerAddresses.map(addr => {
+        const isSel = String(addr.id) === String(defaultAddr.id);
+        const icon = (addr.nomeIdentificador || '').toLowerCase().includes('trab') ? '💼' : ((addr.nomeIdentificador || '').toLowerCase().includes('casa') ? '🏠' : '📍');
+        const tag = addr.nomeIdentificador || 'Endereço';
+        const street = `${addr.logradouro || ''}, ${addr.numero || 'S/N'}${addr.complemento ? ' (' + addr.complemento + ')' : ''}`;
+        const sub = `${addr.bairro || ''} - ${addr.cidade || ''} / ${addr.uf || ''}${addr.cep ? ' • CEP: ' + addr.cep : ''}`;
+        const ref = addr.referencia ? `Ponto de ref: ${addr.referencia}` : '';
+
+        return `
+          <div class="address-card-item ${isSel ? 'selected' : ''}" data-id="${addr.id}">
+            <div class="address-card-radio"></div>
+            <div class="address-card-content">
+              <div class="address-card-top-row">
+                <div class="address-card-badge-row">
+                  <span class="address-card-tag">${icon} ${tag}</span>
+                  ${addr.isPadrao ? '<span class="address-badge-pill">Principal</span>' : ''}
+                </div>
+              </div>
+              <div class="address-card-street">${street}</div>
+              <div class="address-card-sub">${sub}</div>
+              ${ref ? `<div class="address-card-ref">${ref}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      addressesList.querySelectorAll('.address-card-item').forEach(card => {
+        card.addEventListener('click', () => {
+          const found = state.customerAddresses.find(a => String(a.id) === card.dataset.id);
+          if (found) applySelectedAddress(found);
+        });
+      });
+    }
+
+    applySelectedAddress(defaultAddr);
 
     if (btnAddNovo) {
       btnAddNovo.onclick = () => {
@@ -2118,6 +4020,8 @@ function populateSavedAddressInCheckout() {
         if (logrEl) {
           logrEl.value = '';
           if (numEl) numEl.value = '';
+          if (bairEl) bairEl.value = '';
+          if (cepEl) cepEl.value = '';
           if (compEl) compEl.value = '';
           if (refEl) refEl.value = '';
           logrEl.focus();
@@ -2131,19 +4035,87 @@ function populateSavedAddressInCheckout() {
         savedBox.style.display = 'block';
         formContainer.style.display = 'none';
         btnVoltarSalvo.style.display = 'none';
-        if (cepEl) cepEl.value = activeSaved.cep || '';
-        if (logrEl) logrEl.value = activeSaved.logradouro || '';
-        if (numEl) numEl.value = activeSaved.numero || '';
-        if (bairEl) bairEl.value = activeSaved.bairro || '';
-        if (cidEl) cidEl.value = activeSaved.cidade || '';
-        if (ufEl) ufEl.value = activeSaved.uf || 'SP';
-        validateCheckoutForm();
+        applySelectedAddress(defaultAddr);
       };
     }
   } else {
     savedBox.style.display = 'none';
     formContainer.style.display = 'block';
     if (btnVoltarSalvo) btnVoltarSalvo.style.display = 'none';
+  }
+
+  updateCheckoutTotals();
+  updateCheckoutStepper();
+}
+
+// ─── Controle Dinâmico do Stepper de Checkout ───────────────────────
+function updateCheckoutStepper(targetStep = null) {
+  const step1 = document.getElementById('step-ind-1');
+  const step2 = document.getElementById('step-ind-2');
+  const step3 = document.getElementById('step-ind-3');
+  const line1 = document.getElementById('step-line-1');
+  const line2 = document.getElementById('step-line-2');
+  if (!step1 || !step2 || !step3) return;
+
+  let currentStep = targetStep;
+  if (!currentStep) {
+    if (!state.cart || state.cart.length === 0) {
+      currentStep = 1;
+    } else {
+      const isLogged = !!(state.session || (state.profile && state.profile.nome));
+      const nome = isLogged ? (state.profile?.nome || 'Cliente') : (document.getElementById('checkout-nome-cliente')?.value.trim() || '');
+      const phone = isLogged ? (state.profile?.whatsapp || '') : (document.getElementById('checkout-phone-cliente')?.value || '');
+      const hasContact = nome.length >= 2 && phone.replace(/\D/g, '').length >= 8;
+
+      let hasDelivery = true;
+      if (state.tipoLogistica === 'Entrega') {
+        const logr = document.getElementById('checkout-logradouro')?.value.trim();
+        const num = document.getElementById('checkout-numero')?.value.trim();
+        hasDelivery = !!(logr && num);
+      }
+      const data = document.getElementById('checkout-data')?.value;
+      const hora = document.getElementById('checkout-hora')?.value;
+      const hasSchedule = !!(data && hora);
+
+      if (hasContact && hasDelivery && hasSchedule) {
+        currentStep = 3;
+      } else {
+        currentStep = 2;
+      }
+    }
+  }
+
+  const num1 = step1.querySelector('.step-num');
+  const num2 = step2.querySelector('.step-num');
+  const num3 = step3.querySelector('.step-num');
+
+  if (currentStep === 1) {
+    step1.className = 'step-item active';
+    if (num1) num1.textContent = '1';
+    step2.className = 'step-item';
+    if (num2) num2.textContent = '2';
+    step3.className = 'step-item';
+    if (num3) num3.textContent = '3';
+    if (line1) line1.className = 'step-line';
+    if (line2) line2.className = 'step-line';
+  } else if (currentStep === 2) {
+    step1.className = 'step-item completed';
+    if (num1) num1.textContent = '✓';
+    step2.className = 'step-item active';
+    if (num2) num2.textContent = '2';
+    step3.className = 'step-item';
+    if (num3) num3.textContent = '3';
+    if (line1) line1.className = 'step-line active';
+    if (line2) line2.className = 'step-line';
+  } else if (currentStep >= 3) {
+    step1.className = 'step-item completed';
+    if (num1) num1.textContent = '✓';
+    step2.className = 'step-item completed';
+    if (num2) num2.textContent = '✓';
+    step3.className = 'step-item active';
+    if (num3) num3.textContent = '3';
+    if (line1) line1.className = 'step-line active';
+    if (line2) line2.className = 'step-line active';
   }
 }
 
@@ -2161,18 +4133,20 @@ function validateCheckoutForm() {
     return;
   }
 
-  // Validação de Contato do Cliente (se logado, valida com os dados do perfil)
-  const isLogged = !!(state.session || (state.profile && state.profile.nome));
-  let nomeCliente = '';
-  let phoneCliente = '';
-
-  if (isLogged) {
-    nomeCliente = state.profile?.nome || document.getElementById('checkout-nome-cliente')?.value.trim() || 'Cliente';
-    phoneCliente = (state.profile?.whatsapp || document.getElementById('checkout-phone-cliente')?.value || '').replace(/\D/g, '');
-  } else {
-    nomeCliente = document.getElementById('checkout-nome-cliente')?.value.trim() || '';
-    phoneCliente = (document.getElementById('checkout-phone-cliente')?.value || '').replace(/\D/g, '');
+  // Validação de Autenticação Obrigatória
+  const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
+  if (!isLogged) {
+    warning.className = 'validation-warning-box invalid';
+    msgEl.textContent = 'Você precisa estar logado na sua conta para finalizar o pedido.';
+    submitBtn.disabled = true;
+    submitBtn.textContent = '🔐 Faça Login para Continuar';
+    return;
   }
+
+  // Validação de Contato do Cliente Autenticado
+  const nomeCliente = state.profile?.nome || document.getElementById('checkout-nome-cliente')?.value.trim() || 'Cliente';
+  const rawPhoneCliente = state.profile?.whatsapp || document.getElementById('checkout-phone-cliente')?.value || '';
+  const phoneVal = validatePhone(rawPhoneCliente);
 
   if (nomeCliente.length < 2) {
     warning.className = 'validation-warning-box invalid';
@@ -2181,9 +4155,9 @@ function validateCheckoutForm() {
     return;
   }
 
-  if (phoneCliente.length < 8) {
+  if (!phoneVal.valid) {
     warning.className = 'validation-warning-box invalid';
-    msgEl.textContent = 'Por favor, informe seu WhatsApp / Telefone com DDD.';
+    msgEl.textContent = phoneVal.error || 'Por favor, informe seu WhatsApp / Telefone com DDD no seu perfil.';
     submitBtn.disabled = true;
     return;
   }
@@ -2209,6 +4183,13 @@ function validateCheckoutForm() {
       submitBtn.disabled = true;
       return;
     }
+
+    if (state.entregaMetadata && state.entregaMetadata.foraDoRaio) {
+      warning.className = 'validation-warning-box invalid';
+      msgEl.textContent = 'O endereço informado está fora do raio de entrega configurado. Escolha a opção "Retirada no Balcão" ou consulte a loja.';
+      submitBtn.disabled = true;
+      return;
+    }
   }
 
   // Validação de Data e Hora com Regras de Atendimento e Antecedência
@@ -2225,33 +4206,35 @@ function validateCheckoutForm() {
   warning.className = 'validation-warning-box';
   submitBtn.disabled = false;
   submitBtn.textContent = '🚀 Revisar e Confirmar Pedido';
+  updateCheckoutStepper();
 }
 
 // ─── Criação e Confirmação de Pedidos (100% Real Supabase Schema) ──────
 async function abrirModalConfirmacaoCheckout() {
+  const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
+  if (!isLogged) {
+    toast('🔐 Faça login ou cadastre-se para confirmar seu pedido.', 'error', 4000);
+    state.redirectAfterAuth = 'screen-checkout';
+    showScreen('screen-auth');
+    return;
+  }
+
   const val = validateMinimumCategoryQuantities();
   if (!val.valid) {
     toast(val.message, 'error', 4000);
     return;
   }
 
-  const isLogged = !!(state.session || (state.profile && state.profile.nome));
-  const nome = isLogged
-    ? (state.profile?.nome || document.getElementById('checkout-nome-cliente')?.value.trim() || 'Cliente')
-    : (document.getElementById('checkout-nome-cliente')?.value.trim() || '');
-  const phone = isLogged
-    ? (state.profile?.whatsapp || document.getElementById('checkout-phone-cliente')?.value.trim() || '')
-    : (document.getElementById('checkout-phone-cliente')?.value.trim() || '');
+  const nome = state.profile?.nome || document.getElementById('checkout-nome-cliente')?.value.trim() || 'Cliente';
+  const phone = state.profile?.whatsapp || document.getElementById('checkout-phone-cliente')?.value.trim() || '';
 
   if (nome.length < 2) {
     toast('Por favor, preencha o seu nome completo.', 'error');
-    if (!isLogged) document.getElementById('checkout-nome-cliente')?.focus();
     return;
   }
 
   if (phone.replace(/\D/g, '').length < 8) {
-    toast('Por favor, informe seu telefone / WhatsApp.', 'error');
-    if (!isLogged) document.getElementById('checkout-phone-cliente')?.focus();
+    toast('Por favor, informe seu telefone / WhatsApp no seu cadastro.', 'error');
     return;
   }
 
@@ -2304,19 +4287,33 @@ async function abrirModalConfirmacaoCheckout() {
   }
 
   const subtotal = cartTotal();
+  const taxaEntrega = (state.tipoLogistica === 'Entrega') ? (state.taxaEntregaCentavos || 0) : 0;
+  const grandTotal = subtotal + taxaEntrega;
+
   document.getElementById('cm-subtotal-val').textContent = fmt(subtotal);
-  document.getElementById('cm-total-val').textContent = fmt(subtotal);
+  const cmTaxaEl = document.getElementById('cm-taxa-val');
+  if (cmTaxaEl) {
+    if (taxaEntrega === 0) {
+      cmTaxaEl.textContent = state.tipoLogistica === 'Retirada' ? 'Grátis (Retirada)' : 'Grátis';
+      cmTaxaEl.style.color = 'var(--success)';
+    } else {
+      cmTaxaEl.textContent = fmt(taxaEntrega);
+      cmTaxaEl.style.color = 'var(--brand-400)';
+    }
+  }
+  document.getElementById('cm-total-val').textContent = fmt(grandTotal);
 
   // Pix no Modal
   const pixBox = document.getElementById('cm-pix-box');
-  if (pixBox && state.formaPagamentoNome === 'Pix' && state.empresa?.chave_pix) {
+  const isPixSelected = String(state.formaPagamentoNome || '').toLowerCase().includes('pix') || String(state.formaPagamentoTipo || '').toLowerCase().includes('pix');
+  if (pixBox && isPixSelected && state.empresa?.chave_pix) {
     pixBox.style.display = 'block';
     document.getElementById('cm-pix-favorecido').textContent = state.empresa.pix_favorecido || state.empresa.nomeFantasia || 'FinCore Food';
     document.getElementById('cm-pix-banco').textContent = state.empresa.pix_banco || 'Instituição Bancária';
     document.getElementById('cm-pix-tipo').textContent = state.empresa.pix_tipo || 'Chave';
     document.getElementById('cm-pix-chave').textContent = state.empresa.chave_pix;
 
-    const payload = gerarPayloadPixEMV(state.empresa.chave_pix, state.empresa.pix_favorecido, state.empresa?.cidade || 'Pouso Alegre', subtotal);
+    const payload = gerarPayloadPixEMV(state.empresa.chave_pix, state.empresa.pix_favorecido, state.empresa?.cidade || 'Pouso Alegre', grandTotal);
     const cmBtnPayload = document.getElementById('cm-btn-copiar-pix-payload');
     if (cmBtnPayload) {
       cmBtnPayload.onclick = () => {
@@ -2347,7 +4344,9 @@ function gerarTextoResumoPedido() {
   const fullAddress = `${logr}, ${num} - ${bair}, ${cid}`;
 
   const obs = document.getElementById('checkout-obs')?.value.trim() || '';
-  const total = cartTotal();
+  const subtotal = cartTotal();
+  const taxaEntrega = (state.tipoLogistica === 'Entrega') ? (state.taxaEntregaCentavos || 0) : 0;
+  const grandTotal = subtotal + taxaEntrega;
 
   let txt = `*📋 RESUMO DO PEDIDO - ${empresaNome.toUpperCase()}*\n`;
   txt += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -2373,7 +4372,9 @@ function gerarTextoResumoPedido() {
   });
 
   txt += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  txt += `💰 *TOTAL GERAL: ${fmt(total)}*\n`;
+  txt += `💵 *Subtotal dos Itens:* ${fmt(subtotal)}\n`;
+  txt += `🛵 *Taxa de Entrega:* ${taxaEntrega > 0 ? fmt(taxaEntrega) : (state.tipoLogistica === 'Retirada' ? 'Grátis (Balcão)' : 'Grátis')}\n`;
+  txt += `💰 *TOTAL A PAGAR: ${fmt(grandTotal)}*\n`;
 
   if (state.formaPagamentoNome === 'Pix' && state.empresa?.chave_pix) {
     txt += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -2387,6 +4388,14 @@ function gerarTextoResumoPedido() {
 }
 
 async function submeterPedidoAoBanco() {
+  const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
+  if (!isLogged) {
+    toast('🔐 Sua sessão expirou. Faça login para enviar seu pedido.', 'error', 4000);
+    state.redirectAfterAuth = 'screen-checkout';
+    showScreen('screen-auth');
+    return;
+  }
+
   const btnFinal = document.getElementById('cm-btn-confirm-final');
   if (btnFinal) {
     btnFinal.disabled = true;
@@ -2397,6 +4406,7 @@ async function submeterPedidoAoBanco() {
     const data = document.getElementById('checkout-data').value;
     const hora = document.getElementById('checkout-hora').value;
     const obs = document.getElementById('checkout-obs').value.trim();
+    const subtotal = cartTotal();
 
     // Validação estrita de Horários e Prazo Mínimo
     const schedVal = validateOrderSchedule(data, hora);
@@ -2436,22 +4446,30 @@ async function submeterPedidoAoBanco() {
       console.warn('Aviso ao sincronizar cliente com ERP:', e.message);
     }
 
-    // Salvar no localStorage para agilizar próximas compras
-    try {
-      localStorage.setItem('fincore_guest_contact', JSON.stringify({ nome, phone }));
-      if (logr && num) {
-        localStorage.setItem('fincore_saved_address', JSON.stringify({
+    // Atualiza endereço padrão no cadastro do cliente se logado
+    if (state.profile?.id && logr && num) {
+      try {
+        const fullAddr = [
+          `${logr}, ${num}`,
+          comp ? `(${comp})` : '',
+          bair,
+          `${cid} - ${uf}`,
+          cep ? `CEP: ${cep}` : ''
+        ].filter(Boolean).join(' - ');
+        
+        sb.from('cardapio_clientes').update({
           logradouro: logr,
           numero: num,
           bairro: bair,
           cidade: cid,
           uf: uf,
-          complemento: comp,
-          referencia: ref,
-          cep: cep
-        }));
-      }
-    } catch (_) {}
+          cep: cep,
+          complemento: comp || null,
+          referencia: ref || null,
+          endereco_padrao: fullAddr
+        }).eq('id', state.profile.id).then();
+      } catch (_) {}
+    }
 
     const fullAddressStr = [
       `${logr}, ${num}`,
@@ -2460,6 +4478,9 @@ async function submeterPedidoAoBanco() {
       `${cid} - ${uf}`,
       cep ? `CEP: ${cep}` : ''
     ].filter(Boolean).join(' - ');
+
+    const taxaEntrega = (state.tipoLogistica === 'Entrega') ? (state.taxaEntregaCentavos || 0) : 0;
+    const totalFinal = subtotal + taxaEntrega;
 
     const enderecoObj = {
       cep: cep || '',
@@ -2471,7 +4492,13 @@ async function submeterPedidoAoBanco() {
       complemento: comp || '',
       referencia: ref || '',
       formatado: fullAddressStr,
-      taxaEntregaCentavos: 0
+      taxaEntregaCentavos: taxaEntrega,
+      latitude: state.entregaMetadata?.latitude || null,
+      longitude: state.entregaMetadata?.longitude || null,
+      distanciaKm: state.entregaMetadata?.distanciaKm || null,
+      tempoEstimadoMinutos: state.entregaMetadata?.tempoMinutos || null,
+      metodoCalculoEntrega: state.entregaMetadata?.metodoCalculo || null,
+      regraEntregaAplicada: state.entregaMetadata?.regraAplicada || null
     };
 
     let dataEntrega = null;
@@ -2480,15 +4507,25 @@ async function submeterPedidoAoBanco() {
     }
 
     let trocoCentavos = null;
-    if (state.formaPagamentoNome === 'Dinheiro') {
+    if (state.formaPagamentoPermiteTroco || state.formaPagamentoNome === 'Dinheiro') {
       const trocoVal = document.getElementById('checkout-troco')?.value.trim();
       if (trocoVal) {
         const n = parseFloat(trocoVal.replace(',', '.').replace(/[^\d.]/g, ''));
-        if (!isNaN(n) && n > 0) trocoCentavos = Math.round(n * 100);
+        if (!isNaN(n) && n > 0) {
+          trocoCentavos = Math.round(n * 100);
+          if (trocoCentavos < totalFinal) {
+            toast(`O valor informado para o troco (${fmt(trocoCentavos)}) não pode ser menor que o total do pedido (${fmt(totalFinal)}).`, 'error', 5000);
+            document.getElementById('checkout-troco')?.focus();
+            if (btnFinal) {
+              btnFinal.disabled = false;
+              btnFinal.textContent = '🚀 Confirmar e Enviar Pedido';
+            }
+            return;
+          }
+        }
       }
     }
 
-    const subtotal = cartTotal();
     const agora    = new Date().toISOString();
     const pedidoId = crypto.randomUUID();
 
@@ -2507,13 +4544,18 @@ async function submeterPedidoAoBanco() {
       }
     } catch (_) {}
 
-    const userIdValid = (state.profile?.id && state.profile.id.includes('-'))
-      ? state.profile.id
-      : (state.session?.user?.id || '00000000-0000-0000-0000-000000000000');
+    // Salvar ID do pedido no localStorage para acompanhamento mesmo de usuários avulsos/convidados
+    localStorage.setItem('fincore_last_order_id', pedidoId);
 
-    const targetClienteLocalId = erpCliente?.id || state.profile?.cliente_local_id || state.profile?.clienteLocalId || state.profile?.id || null;
-    const finalClienteNome = erpCliente?.nome || nome;
-    const finalClienteTelefone = erpCliente?.telefone ? formatPhone(erpCliente.telefone) : (formatPhone(phone) || null);
+    const userIdValid = state.session?.user?.id || state.profile?.user_id;
+    if (!userIdValid || !userIdValid.includes('-')) {
+      throw new Error('Sua conta precisa estar conectada para enviar o pedido. Faça login novamente.');
+    }
+
+    // Vincula diretamente ao ID do Cliente no ERP (tabela 'cliente')
+    const targetClienteLocalId = erpCliente?.id || state.profile?.cliente_local_id || null;
+    const finalClienteNome = erpCliente?.nome || state.profile?.nome || nome;
+    const finalClienteTelefone = state.profile?.whatsapp ? formatPhone(state.profile.whatsapp) : (erpCliente?.telefone ? formatPhone(erpCliente.telefone) : (formatPhone(phone) || null));
 
     // 1. Inserir na tabela 'pedido' com status 'pendente' (Aguardando aprovação do responsável)
     const pedidoPayload = {
@@ -2530,9 +4572,10 @@ async function submeterPedidoAoBanco() {
       clienteNomeAvulso:         finalClienteNome,
       clienteTelefoneAvulso:     finalClienteTelefone,
       valorSubtotalCentavos:     subtotal,
-      valorTaxaEntregaCentavos:  0,
-      valorTotalCentavos:        subtotal,
+      valorTaxaEntregaCentavos:  taxaEntrega,
+      valorTotalCentavos:        totalFinal,
       trocoParaCentavos:         trocoCentavos,
+      formaPagamentoId:          state.formaPagamentoId || null,
       formaPagamentoNome:        state.formaPagamentoNome,
       canalOrigem:                'cardapio_web',
       dataHoraCriacao:           agora,
@@ -2586,11 +4629,11 @@ async function submeterPedidoAoBanco() {
 
       const obsTags = [
         `[DADOS_PEDIDO]`,
-        `cliente: ${state.profile?.nome || 'Consumidor'}`,
+        `cliente: ${finalClienteNome || state.profile?.nome || 'Consumidor'}`,
         `telefone: ${state.profile?.whatsapp ? state.profile.whatsapp.replace(/\\D/g, '') : ''}`,
         `tipo: ${state.tipoLogistica}`,
         `pagamento: ${pagDesc}`,
-        `total: ${subtotal}`,
+        `total: ${totalFinal}`,
         `unidades: ${totalUnidades}`,
         state.tipoLogistica === 'Entrega' ? `endereco: ${logr ? `${logr}, ${num}` : ''}` : '',
         state.tipoLogistica === 'Entrega' && bair ? `bairro: ${bair}` : '',
@@ -2686,7 +4729,8 @@ function renderConfirmationPage(order) {
   if (totalEl) totalEl.textContent = fmt(order.valorTotalCentavos);
 
   // Renderizar Pix se selecionado
-  if (order.formaPagamentoNome === 'Pix' && pixContainer) {
+  const isPix = String(order.formaPagamentoNome || '').toLowerCase().includes('pix');
+  if (isPix && pixContainer) {
     const chave = state.empresa?.chave_pix || '';
     const favorecido = state.empresa?.pix_favorecido || state.empresa?.nomeFantasia || state.empresa?.razaoSocial || 'FinCore Food';
     const banco = state.empresa?.pix_banco || 'Instituição Bancária';
@@ -2719,6 +4763,24 @@ function renderConfirmationPage(order) {
     } else {
       pixContainer.style.display = 'none';
     }
+  }
+
+  // Ações de compartilhamento de link direto e WhatsApp da loja
+  const trackUrl = `${window.location.origin}${window.location.pathname}?p=${order.id}`;
+  const copyLinkBtn = document.getElementById('btn-confirm-copy-link');
+  if (copyLinkBtn) {
+    copyLinkBtn.onclick = () => {
+      copiarParaClipboard(trackUrl, 'Link de rastreio direto copiado!');
+    };
+  }
+
+  const waBtn = document.getElementById('btn-confirm-whatsapp-store');
+  if (waBtn && state.empresa?.telefone) {
+    const phoneClean = state.empresa.telefone.replace(/\D/g, '');
+    const num = order.numeroPedido || order.id.slice(0, 6);
+    const msg = `Olá! Acabei de enviar o pedido #${num} no valor de ${fmt(order.valorTotalCentavos)}. Segue meu link de acompanhamento: ${trackUrl}`;
+    waBtn.href = `https://wa.me/55${phoneClean}?text=${encodeURIComponent(msg)}`;
+    waBtn.style.display = 'inline-flex';
   } else if (pixContainer) {
     pixContainer.style.display = 'none';
   }
@@ -2769,7 +4831,27 @@ async function loadCustomerOrders(showSpinner = true) {
   const container = document.getElementById('orders-list');
   const emptyState = document.getElementById('orders-empty');
 
+  // Recupera lastOrderId caso exista para fallback imediato
+  const lastOrderId = localStorage.getItem('fincore_last_order_id');
+
   if (!state.session && !state.profile) {
+    if (lastOrderId) {
+      try {
+        const { data: lastOrder } = await sb
+          .from('pedido')
+          .select('*, item_pedido(*)')
+          .eq('id', lastOrderId)
+          .maybeSingle();
+
+        if (lastOrder) {
+          state.customerOrders = [lastOrder];
+          renderOrdersList();
+          renderActiveOrderWidget();
+          return;
+        }
+      } catch (_) {}
+    }
+
     if (container) container.innerHTML = '';
     if (emptyState) emptyState.style.display = 'flex';
     return;
@@ -2778,8 +4860,31 @@ async function loadCustomerOrders(showSpinner = true) {
   if (showSpinner) showLoading(true, 'Carregando seus pedidos...');
 
   try {
-    const phone = state.profile?.whatsapp ? formatPhone(state.profile.whatsapp) : null;
-    const clientLocalId = state.profile?.cliente_local_id || state.profile?.id;
+    const rawPhone = state.profile?.whatsapp ? state.profile.whatsapp.replace(/\D/g, '') : null;
+    const formattedPhone = rawPhone ? formatPhone(rawPhone) : null;
+    const clientLocalId = state.profile?.cliente_local_id;
+    const profileId = state.profile?.id;
+    const userId = state.session?.user?.id;
+
+    const orClauses = [];
+    if (userId) {
+      orClauses.push(`createdBy.eq.${userId}`);
+    }
+    if (clientLocalId) {
+      orClauses.push(`clienteId.eq.${clientLocalId}`);
+    }
+    if (profileId && profileId !== clientLocalId) {
+      orClauses.push(`clienteId.eq.${profileId}`);
+    }
+    if (rawPhone) {
+      orClauses.push(`clienteTelefoneAvulso.eq.${rawPhone}`);
+      if (formattedPhone && formattedPhone !== rawPhone) {
+        orClauses.push(`clienteTelefoneAvulso.eq."${formattedPhone}"`);
+      }
+    }
+    if (lastOrderId) {
+      orClauses.push(`id.eq.${lastOrderId}`);
+    }
 
     let query = sb
       .from('pedido')
@@ -2787,17 +4892,30 @@ async function loadCustomerOrders(showSpinner = true) {
       .eq('tenantId', state.tenantId || DEFAULT_TENANT_ID)
       .order('createdAt', { ascending: false });
 
-    // Filtrar pelo cliente logado
-    if (clientLocalId) {
-      query = query.or(`clienteId.eq.${clientLocalId},clienteTelefoneAvulso.eq.${phone},clienteTelefoneAvulso.eq.${state.profile?.whatsapp}`);
-    } else if (phone) {
-      query = query.or(`clienteTelefoneAvulso.eq.${phone},clienteTelefoneAvulso.eq.${state.profile?.whatsapp}`);
+    if (orClauses.length > 0) {
+      query = query.or(orClauses.join(','));
     }
 
-    const { data, error } = await query.limit(20);
+    const { data, error } = await query.limit(30);
     if (error) throw error;
 
-    state.customerOrders = data || [];
+    let orders = data || [];
+
+    // Se o pedido recente do localStorage não veio no filtro or, busca diretamente e anexa
+    if (lastOrderId && !orders.some(o => o.id === lastOrderId)) {
+      try {
+        const { data: directOrder } = await sb
+          .from('pedido')
+          .select('*, item_pedido(*)')
+          .eq('id', lastOrderId)
+          .maybeSingle();
+        if (directOrder) {
+          orders.unshift(directOrder);
+        }
+      } catch (_) {}
+    }
+
+    state.customerOrders = orders;
     renderOrdersList();
     renderActiveOrderWidget();
 
@@ -2915,49 +5033,59 @@ function renderOrdersList() {
   }
 }
 
-// ─── Funcionalidade "Comprar Novamente" (1-Clique) ────────────────────
+// ─── Funcionalidade "Comprar Novamente" Inteligente (Revalidação de Catálogo) ──
 async function reorderOrder(orderId) {
-  const order = state.customerOrders.find(o => o.id === orderId);
-  if (!order) return;
-
-  showLoading(true, 'Carregando itens para o carrinho...');
+  showLoading(true, 'Verificando disponibilidade e preços dos itens...');
 
   try {
-    let items = order.item_pedido;
+    let order = state.customerOrders.find(o => o.id === orderId);
+    let items = order?.item_pedido;
+
     if (!items || items.length === 0) {
-      const { data } = await sb.from('item_pedido').select('*').eq('pedidoId', orderId);
-      items = data || [];
+      const { data: dbItems } = await sb.from('item_pedido').select('*').eq('pedidoId', orderId);
+      items = dbItems || [];
     }
 
     if (items.length === 0) {
-      toast('Não foi possível recuperar os itens deste pedido.', 'error');
+      toast('Não foi possível recuperar os itens deste pedido anterior.', 'error');
       return;
     }
 
-    // Limpa o carrinho e adiciona os itens do pedido anterior
-    state.cart = [];
-    for (const item of items) {
-      let prod = state.produtos.find(p => p.id === item.produtoId);
-      if (!prod) {
-        prod = {
-          id: item.produtoId,
-          nome: item.nomeProduto,
-          categoria_id: 'default',
-          categoria_nome: 'Geral',
-          categoria_icone: '🍽️',
-          metadata: { preco_base: (item.valorUnitarioCentavos / 100).toFixed(2) }
-        };
-      }
-      state.cart.push({
-        produto: prod,
-        qty: item.quantidade
-      });
+    // Garante que o catálogo mais recente esteja em memória
+    if (!state.produtos || state.produtos.length === 0) {
+      await loadCatalog();
     }
 
+    const validItems = [];
+    const discontinued = [];
+
+    for (const item of items) {
+      const currentProd = state.produtos.find(p => p.id === item.produtoId);
+      if (!currentProd || currentProd.ativo === false || currentProd.status_comercial === 'indisponivel') {
+        discontinued.push(item.nomeProduto || 'Item');
+      } else {
+        validItems.push({
+          produto: currentProd,
+          qty: Number(item.quantidade) || 1
+        });
+      }
+    }
+
+    if (validItems.length === 0) {
+      toast('Infelizmente todos os itens deste pedido foram descontinuados.', 'error', 5000);
+      return;
+    }
+
+    state.cart = validItems;
     saveCart();
     updateCartBar();
     showScreen('screen-checkout');
-    toast('🎉 Itens carregados no carrinho! Revise e finalize seu pedido.', 'success', 4000);
+
+    if (discontinued.length > 0) {
+      toast(`Itens indisponíveis foram removidos: ${discontinued.join(', ')}. Os itens disponíveis foram adicionados com os preços vigentes!`, 'info', 6000);
+    } else {
+      toast('🎉 Itens carregados no pedido com os preços e condições vigentes!', 'success', 4000);
+    }
   } catch (err) {
     toast('Erro ao repetir pedido: ' + err.message, 'error');
   } finally {
@@ -2967,7 +5095,17 @@ async function reorderOrder(orderId) {
 
 function openOrderDetailModal(order) {
   const modal = document.getElementById('modal-order-detail');
-  if (!modal) return;
+  if (!modal || !order) return;
+
+  state.activeOrder = order;
+  if (order.id) {
+    localStorage.setItem('fincore_last_order_id', order.id);
+    if (!state.customerOrders.some(o => o.id === order.id)) {
+      state.customerOrders.unshift(order);
+      renderOrdersList();
+      renderActiveOrderWidget();
+    }
+  }
 
   const st = String(order.status || 'pendente').toLowerCase().trim();
   const STATUS_MODAL_LABELS = {
@@ -3100,16 +5238,54 @@ function openOrderDetailModal(order) {
     reorderOrder(order.id);
   };
 
+  // Botões de link de rastreio e WhatsApp no Detalhe do Pedido
+  const trackUrl = `${window.location.origin}${window.location.pathname}?p=${order.id}`;
+  const copyDetailLinkBtn = document.getElementById('btn-detail-copy-link');
+  if (copyDetailLinkBtn) {
+    copyDetailLinkBtn.onclick = () => {
+      copiarParaClipboard(trackUrl, 'Link de rastreio copiado!');
+    };
+  }
+
+  const waDetailBtn = document.getElementById('btn-detail-whatsapp-store');
+  if (waDetailBtn && state.empresa?.telefone) {
+    const phoneClean = state.empresa.telefone.replace(/\D/g, '');
+    const num = order.numeroPedido || order.id.slice(0, 6);
+    const msg = `Olá! Gostaria de informações sobre o meu pedido #${num}. Segue o link de acompanhamento: ${trackUrl}`;
+    waDetailBtn.href = `https://wa.me/55${phoneClean}?text=${encodeURIComponent(msg)}`;
+    waDetailBtn.style.display = 'inline-flex';
+  }
+
   modal.classList.add('open');
 }
 
 // ─── TELA 5: MINHA CONTA / PERFIL ────────────────────────────────────
 function populateAccountForm() {
-  if (!state.profile) return;
-  const p = state.profile;
+  const user = state.session?.user;
+  const p = state.profile || {};
+  const meta = user?.user_metadata || {};
 
-  document.getElementById('account-user-display-name').textContent = p.nome || 'Seu Nome';
-  document.getElementById('account-user-display-email').textContent = p.email || p.whatsapp || '';
+  const nome = p.nome || meta.full_name || meta.name || meta.display_name || (user?.email ? user.email.split('@')[0] : '');
+  const email = p.email || user?.email || '';
+  const phone = p.whatsapp || user?.phone || meta.phone || '';
+  const avatarUrl = meta.avatar_url || meta.picture || '';
+
+  const nameDisplay = document.getElementById('account-user-display-name');
+  const emailDisplay = document.getElementById('account-user-display-email');
+  const avatarLarge = document.getElementById('account-avatar-large');
+
+  if (nameDisplay) nameDisplay.textContent = nome || 'Minha Conta';
+  if (emailDisplay) emailDisplay.textContent = email || phone || '';
+
+  if (avatarLarge) {
+    if (avatarUrl) {
+      avatarLarge.innerHTML = `<img src="${avatarUrl}" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
+    } else if (nome) {
+      avatarLarge.textContent = nome.split(' ').filter(Boolean).map(n => n[0]).join('').slice(0, 2).toUpperCase();
+    } else {
+      avatarLarge.textContent = '👤';
+    }
+  }
 
   const nameEl = document.getElementById('account-name');
   const phoneEl = document.getElementById('account-phone');
@@ -3123,22 +5299,22 @@ function populateAccountForm() {
   const compEl = document.getElementById('account-complemento');
   const refEl = document.getElementById('account-referencia');
 
-  if (nameEl) nameEl.value = p.nome || '';
-  if (phoneEl) phoneEl.value = p.whatsapp || '';
-  if (emailEl) emailEl.value = p.email || '';
+  if (nameEl) nameEl.value = nome;
+  if (phoneEl) phoneEl.value = phone;
+  if (emailEl) emailEl.value = email;
   if (cepEl) cepEl.value = p.cep || '';
-  if (ufEl) ufEl.value = p.uf || 'SP';
+  if (ufEl) ufEl.value = p.uf || state.empresa?.estado || 'SP';
   if (logrEl) logrEl.value = p.logradouro || '';
   if (numEl) numEl.value = p.numero || '';
   if (bairEl) bairEl.value = p.bairro || '';
-  if (cidEl) cidEl.value = p.cidade || '';
+  if (cidEl) cidEl.value = p.cidade || state.empresa?.cidade || '';
   if (compEl) compEl.value = p.complemento || '';
   if (refEl) refEl.value = p.referencia || '';
 }
 
 async function saveAccountChanges(e) {
   e.preventDefault();
-  if (!state.session || !state.profile) {
+  if (!state.session?.user) {
     toast('Você precisa estar logado para salvar.', 'error');
     return;
   }
@@ -3155,64 +5331,268 @@ async function saveAccountChanges(e) {
   const comp = document.getElementById('account-complemento')?.value.trim();
   const ref = document.getElementById('account-referencia')?.value.trim();
 
-  const fullAddress = [
-    `${logr}, ${num}`,
-    comp ? `(${comp})` : '',
-    bair,
-    `${cid} - ${uf}`,
-    cep ? `CEP: ${cep}` : ''
-  ].filter(Boolean).join(' - ');
+  // 1. Validação de Nome
+  if (!nome || nome.length < 2) {
+    toast('Por favor, informe seu Nome Completo.', 'error');
+    document.getElementById('account-name')?.focus();
+    return;
+  }
 
-  showLoading(true, 'Salvando alterações...');
+  // 2. Validação Rigorosa de Telefone (conforme regra do negócio / ERP Windows)
+  const phoneVal = validatePhone(phone);
+  if (!phoneVal.valid) {
+    toast(phoneVal.error, 'error', 5000);
+    document.getElementById('account-phone')?.focus();
+    return;
+  }
+
+  // 3. Validação Rigorosa de Email
+  if (!isValidEmail(email)) {
+    toast('Por favor, informe um e-mail válido (ex: seu@email.com).', 'error');
+    document.getElementById('account-email')?.focus();
+    return;
+  }
+
+  showLoading(true, 'Salvando e vinculando seu cadastro...');
 
   try {
-    const { error } = await sb
-      .from('cardapio_clientes')
-      .update({
+    // 4. Amarração com o cadastro do sistema Windows (ERP)
+    let resolvedClienteLocalId = state.profile?.cliente_local_id || null;
+    let erpRes = null;
+    try {
+      erpRes = await syncCustomerToErp({
         nome,
-        whatsapp: phone,
+        telefone: phoneVal.clean,
         email,
-        cep,
-        uf,
         logradouro: logr,
         numero: num,
         bairro: bair,
         cidade: cid,
-        complemento: comp || null,
-        referencia: ref || null,
-        endereco_padrao: fullAddress
-      })
-      .eq('id', state.profile.id);
+        cep,
+        complemento: comp,
+        referencia: ref,
+        tenantId: state.tenantId || DEFAULT_TENANT_ID
+      });
+      if (erpRes && erpRes.id) {
+        resolvedClienteLocalId = erpRes.id;
+      }
+    } catch (e) {
+      console.warn('Aviso ao sincronizar com ERP Windows:', e);
+    }
 
-    if (error) throw error;
+    const fullAddress = [
+      `${logr}, ${num}`,
+      comp ? `(${comp})` : '',
+      bair,
+      `${cid} - ${uf}`,
+      cep ? `CEP: ${cep}` : ''
+    ].filter(Boolean).join(' - ');
 
-    state.profile = {
-      ...state.profile,
-      nome, whatsapp: phone, email, cep, uf,
-      logradouro: logr, numero: num, bairro: bair,
-      cidade: cid, complemento: comp, referencia: ref,
-      endereco_padrao: fullAddress
-    };
-
-    // Sincronizar alterações com cadastro de cliente no ERP
-    await syncCustomerToErp({
+    const payload = {
+      user_id: state.session.user.id,
+      tenant_id: state.tenantId || DEFAULT_TENANT_ID,
       nome,
-      telefone: phone,
+      whatsapp: phoneVal.clean,
       email,
+      cep,
+      uf: uf || state.empresa?.estado || 'SP',
       logradouro: logr,
       numero: num,
       bairro: bair,
-      cidade: cid,
-      cep,
-      complemento: comp,
-      referencia: ref,
-      tenantId: state.tenantId || DEFAULT_TENANT_ID
-    });
+      cidade: cid || state.empresa?.cidade || '',
+      complemento: comp || null,
+      referencia: ref || null,
+      endereco_padrao: fullAddress,
+      cliente_local_id: resolvedClienteLocalId,
+      updated_at: new Date().toISOString()
+    };
+
+    // 5. Gravação segura em cardapio_clientes sem erro de onConflict (respeitando tenant_id)
+    const targetTenant = state.tenantId || DEFAULT_TENANT_ID;
+    const { data: existingProf } = await sb
+      .from('cardapio_clientes')
+      .select('id')
+      .eq('user_id', state.session.user.id)
+      .eq('tenant_id', targetTenant)
+      .maybeSingle();
+
+    let savedProfile = null;
+    if (existingProf && existingProf.id) {
+      const { data: updData, error: updErr } = await sb
+        .from('cardapio_clientes')
+        .update(payload)
+        .eq('id', existingProf.id)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+      savedProfile = updData;
+    } else {
+      const { data: insData, error: insErr } = await sb
+        .from('cardapio_clientes')
+        .insert(payload)
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      savedProfile = insData;
+    }
+
+    state.profile = savedProfile || {
+      ...state.profile,
+      ...payload
+    };
 
     updateHeaderUI();
-    toast('✅ Dados atualizados com sucesso!', 'success');
+    populateAccountForm();
+
+    if (erpRes && erpRes.id) {
+      toast('✅ Dados salvos e vinculados ao cadastro do restaurante!', 'success', 4500);
+    } else {
+      toast('✅ Dados atualizados com sucesso!', 'success');
+    }
   } catch (err) {
-    toast('Erro ao atualizar dados: ' + err.message, 'error');
+    console.error('Erro ao atualizar dados:', err);
+    toast('Erro ao atualizar dados: ' + (err.message || 'Falha ao salvar'), 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// ─── Utilitários de Validação e Consulta de CEP ──────────────────────
+function isValidEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const regex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return regex.test(email.trim());
+}
+
+async function fetchViaCep(rawCep, prefix = 'reg') {
+  const clean = (rawCep || '').replace(/\D/g, '');
+  if (clean.length !== 8) {
+    if (clean.length > 0) toast('Informe um CEP com 8 dígitos.', 'error');
+    return;
+  }
+
+  const logrEl = document.getElementById(`${prefix}-logradouro`);
+  const bairEl = document.getElementById(`${prefix}-bairro`);
+  const cidEl = document.getElementById(`${prefix}-cidade`);
+  const ufEl = document.getElementById(`${prefix}-uf`);
+  const compEl = document.getElementById(`${prefix}-complemento`);
+  const numEl = document.getElementById(`${prefix}-numero`);
+
+  const cepBtn = document.getElementById(`${prefix}-cep-btn`);
+  const originalBtnText = cepBtn ? cepBtn.innerHTML : '';
+  if (cepBtn) cepBtn.innerHTML = '⏳ Buscando...';
+
+  try {
+    let addressFound = null;
+
+    // 1. Tenta ViaCEP
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && !data.erro) {
+          addressFound = {
+            logradouro: data.logradouro || '',
+            bairro: data.bairro || '',
+            cidade: data.localidade || '',
+            uf: (data.uf || 'MG').toUpperCase(),
+            complemento: data.complemento || ''
+          };
+        }
+      }
+    } catch (_) {}
+
+    // 2. Se ViaCEP falhou, tenta BrasilAPI
+    if (!addressFound) {
+      try {
+        const resB = await fetch(`https://brasilapi.com.br/api/cep/v1/${clean}`);
+        if (resB.ok) {
+          const dataB = await resB.json();
+          if (dataB && dataB.city) {
+            addressFound = {
+              logradouro: dataB.street || '',
+              bairro: dataB.neighborhood || '',
+              cidade: dataB.city || '',
+              uf: (dataB.state || 'MG').toUpperCase(),
+              complemento: ''
+            };
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (addressFound) {
+      if (logrEl) logrEl.value = addressFound.logradouro;
+      if (bairEl) bairEl.value = addressFound.bairro;
+      if (cidEl) cidEl.value = addressFound.cidade;
+      if (ufEl) ufEl.value = addressFound.uf;
+      if (compEl && addressFound.complemento && !compEl.value) {
+        compEl.value = addressFound.complemento;
+      }
+
+      toast('📍 Endereço preenchido automaticamente!', 'success');
+      if (prefix === 'checkout') {
+        state.routeInfo = null;
+        state.destCoords = null;
+        updateCheckoutTotals();
+        validateCheckoutForm();
+        triggerAsyncRouteCalculation();
+      }
+      if (numEl) numEl.focus();
+    } else {
+      // 3. FALLBACK: CEP não localizado nas bases postais
+      if (cidEl && !cidEl.value) cidEl.value = state.empresa?.cidade || 'Pouso Alegre';
+      if (ufEl && !ufEl.value) ufEl.value = state.empresa?.estado || 'MG';
+
+      toast('ℹ️ CEP não encontrado nos Correios. Preencha seu bairro e rua abaixo.', 'info', 4500);
+
+      if (prefix === 'checkout') {
+        state.routeInfo = null;
+        state.destCoords = null;
+        // Aplica a taxa de fallback imediatamente para não deixar o cliente sem cálculo
+        updateCheckoutTotals();
+        validateCheckoutForm();
+      }
+
+      if (bairEl && !bairEl.value) bairEl.focus();
+      else if (logrEl && !logrEl.value) logrEl.focus();
+      else if (numEl) numEl.focus();
+    }
+  } catch (err) {
+    console.warn('Erro ao consultar CEP:', err);
+    if (cidEl && !cidEl.value) cidEl.value = state.empresa?.cidade || 'Pouso Alegre';
+    if (ufEl && !ufEl.value) ufEl.value = state.empresa?.estado || 'MG';
+    toast('Preencha seu endereço manualmente abaixo.', 'info');
+    if (prefix === 'checkout') {
+      updateCheckoutTotals();
+      validateCheckoutForm();
+    }
+  } finally {
+    if (cepBtn) cepBtn.innerHTML = originalBtnText;
+  }
+}
+
+// ─── Autenticação com Google (Gmail OAuth) ───────────────────────────
+async function loginWithGoogle() {
+  showLoading(true, 'Conectando com o Google...');
+  try {
+    const redirectUrl = window.location.origin + window.location.pathname;
+    const { data, error } = await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl
+      }
+    });
+    if (error) throw error;
+  } catch (err) {
+    console.error('Erro no login com Google:', err);
+    const msg = String(err.message || '');
+    if (msg.includes('provider is not enabled') || msg.includes('Unsupported provider') || msg.includes('validation_failed')) {
+      toast('ℹ️ O login com Google ainda não está habilitado no Supabase. Por favor, entre ou crie sua conta com e-mail e senha abaixo.', 'warning', 6000);
+      document.getElementById('login-email')?.focus();
+    } else {
+      toast('Erro ao autenticar com Google: ' + err.message, 'error');
+    }
   } finally {
     showLoading(false);
   }
@@ -3225,20 +5605,23 @@ async function handleLogin(e) {
   const password = document.getElementById('login-password')?.value;
 
   if (!emailOrPhone || !password) {
-    toast('Preencha e-mail/telefone e senha.', 'error');
+    toast('Preencha seu e-mail e senha para entrar.', 'error');
+    return;
+  }
+
+  let emailToUse = emailOrPhone;
+  if (!emailOrPhone.includes('@')) {
+    const cleanPhone = emailOrPhone.replace(/\D/g, '');
+    emailToUse = `user_${cleanPhone}@fincore.com`;
+  } else if (!isValidEmail(emailOrPhone)) {
+    toast('Por favor, informe um endereço de e-mail válido (ex: seu@gmail.com).', 'error');
     return;
   }
 
   showLoading(true, 'Entrando na sua conta...');
   try {
-    let emailToUse = emailOrPhone;
-    if (!emailOrPhone.includes('@')) {
-      const cleanPhone = emailOrPhone.replace(/\D/g, '');
-      emailToUse = `user_${cleanPhone}@fincore.com`;
-    }
-
     const { data, error } = await sb.auth.signInWithPassword({
-      email: emailToUse,
+      email: emailToUse.toLowerCase(),
       password: password
     });
 
@@ -3261,11 +5644,11 @@ async function handleRegister(e) {
   e.preventDefault();
   const nome = document.getElementById('reg-name')?.value.trim();
   const phone = document.getElementById('reg-whatsapp')?.value.trim();
-  const email = document.getElementById('reg-email')?.value.trim();
+  const email = document.getElementById('reg-email')?.value.trim().toLowerCase();
   const password = document.getElementById('reg-password')?.value;
 
   const cep = document.getElementById('reg-cep')?.value.trim();
-  const uf = document.getElementById('reg-uf')?.value.trim();
+  const uf = (document.getElementById('reg-uf')?.value.trim() || 'SP').toUpperCase();
   const logr = document.getElementById('reg-logradouro')?.value.trim();
   const num = document.getElementById('reg-numero')?.value.trim();
   const bair = document.getElementById('reg-bairro')?.value.trim();
@@ -3273,21 +5656,50 @@ async function handleRegister(e) {
   const comp = document.getElementById('reg-complemento')?.value.trim();
   const ref = document.getElementById('reg-referencia')?.value.trim();
 
-  if (!nome || !phone || !email || !password || !logr || !num) {
+  // Verifica se o usuário já está autenticado via Google OAuth
+  const isGoogleAuthUser = Boolean(state.session?.user && state.session.user.email);
+
+  if (!nome || !phone || !email || !logr || !num) {
     toast('Preencha todos os campos obrigatórios (*)', 'error');
     return;
   }
 
-  showLoading(true, 'Criando sua conta...');
+  // Validação Rigorosa de Telefone (conforme regra do negócio / ERP Windows)
+  const phoneVal = validatePhone(phone);
+  if (!phoneVal.valid) {
+    toast(phoneVal.error, 'error', 5000);
+    document.getElementById('reg-whatsapp')?.focus();
+    return;
+  }
+
+  if (!isValidEmail(email)) {
+    toast('Por favor, informe um endereço de e-mail válido (ex: seu@gmail.com).', 'error');
+    document.getElementById('reg-email')?.focus();
+    return;
+  }
+
+  if (!isGoogleAuthUser && (!password || password.length < 6)) {
+    toast('A senha deve conter no mínimo 6 caracteres.', 'error');
+    document.getElementById('reg-password')?.focus();
+    return;
+  }
+
+  showLoading(true, isGoogleAuthUser ? 'Salvando seus dados de entrega...' : 'Criando sua conta...');
   try {
-    const { data: authData, error: authError } = await sb.auth.signUp({
-      email: email,
-      password: password
-    });
+    let userId = state.session?.user?.id;
 
-    if (authError) throw authError;
+    if (!isGoogleAuthUser) {
+      // Cria usuário no Supabase Auth
+      const { data: authData, error: authError } = await sb.auth.signUp({
+        email: email,
+        password: password
+      });
 
-    const userId = authData.user?.id || crypto.randomUUID();
+      if (authError) throw authError;
+      userId = authData.user?.id || crypto.randomUUID();
+      state.session = authData.session;
+    }
+
     const fullAddress = [
       `${logr}, ${num}`,
       comp ? `(${comp})` : '',
@@ -3296,38 +5708,60 @@ async function handleRegister(e) {
       cep ? `CEP: ${cep}` : ''
     ].filter(Boolean).join(' - ');
 
-    // Inserir em cardapio_clientes
-    const { data: profileData, error: profErr } = await sb
+    const payload = {
+      user_id: userId,
+      tenant_id: state.tenantId || DEFAULT_TENANT_ID,
+      nome,
+      whatsapp: phoneVal.clean,
+      email,
+      cep,
+      uf,
+      logradouro: logr,
+      numero: num,
+      bairro: bair,
+      cidade: cid,
+      complemento: comp || null,
+      referencia: ref || null,
+      endereco_padrao: fullAddress,
+      updated_at: new Date().toISOString()
+    };
+
+    // Gravação segura em cardapio_clientes sem erro de onConflict (respeitando tenant_id)
+    const targetTenant = state.tenantId || DEFAULT_TENANT_ID;
+    const { data: existingProf } = await sb
       .from('cardapio_clientes')
-      .insert({
-        user_id: userId,
-        tenant_id: state.tenantId || DEFAULT_TENANT_ID,
-        nome,
-        whatsapp: phone,
-        email,
-        cep,
-        uf,
-        logradouro: logr,
-        numero: num,
-        bairro: bair,
-        cidade: cid,
-        complemento: comp || null,
-        referencia: ref || null,
-        endereco_padrao: fullAddress
-      })
-      .select()
-      .single();
+      .select('id')
+      .eq('user_id', userId)
+      .eq('tenant_id', targetTenant)
+      .maybeSingle();
 
-    if (profErr) throw profErr;
+    let profileData = null;
+    if (existingProf && existingProf.id) {
+      const { data: updData, error: updErr } = await sb
+        .from('cardapio_clientes')
+        .update(payload)
+        .eq('id', existingProf.id)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+      profileData = updData;
+    } else {
+      const { data: insData, error: insErr } = await sb
+        .from('cardapio_clientes')
+        .insert(payload)
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      profileData = insData;
+    }
 
-    state.session = authData.session;
-    state.profile = profileData;
+    state.profile = profileData || { ...payload, id: userId };
 
     // Sincronizar imediatamente com a tabela 'cliente' e 'local_entrega' do ERP
     try {
       const erpClient = await syncCustomerToErp({
         nome,
-        telefone: phone,
+        telefone: phoneVal.clean,
         email,
         logradouro: logr,
         numero: num,
@@ -3345,41 +5779,239 @@ async function handleRegister(e) {
       console.warn('Aviso ao sincronizar novo usuário no ERP:', e.message);
     }
 
+    // Restaura layout da tela de auth
+    resetAuthLayout();
     updateHeaderUI();
+
     const nextScreen = state.redirectAfterAuth || (state.cart.length > 0 ? 'screen-checkout' : 'screen-home');
     state.redirectAfterAuth = null;
     showScreen(nextScreen);
-    toast('🎉 Conta criada com sucesso!', 'success');
+    toast('🎉 Cadastro concluído com sucesso! Pode fazer seu pedido.', 'success');
   } catch (err) {
-    toast('Erro ao criar conta: ' + err.message, 'error');
+    toast('Erro ao salvar cadastro: ' + err.message, 'error');
   } finally {
     showLoading(false);
   }
 }
 
+function resetAuthLayout() {
+  const gContainer = document.getElementById('google-auth-container');
+  const tabs = document.getElementById('auth-tabs');
+  const banner = document.getElementById('google-onboarding-banner');
+  const pwdGroup = document.getElementById('reg-password-group');
+  const emailInput = document.getElementById('reg-email');
+  const regBtn = document.getElementById('register-btn');
+
+  if (gContainer) gContainer.style.display = 'block';
+  if (tabs) tabs.style.display = 'flex';
+  if (banner) banner.style.display = 'none';
+  if (pwdGroup) pwdGroup.style.display = 'block';
+  if (emailInput) emailInput.readOnly = false;
+  if (regBtn) regBtn.textContent = 'Criar minha conta';
+}
+
+function prepareGoogleOnboardingUI(user) {
+  const gContainer = document.getElementById('google-auth-container');
+  const tabs = document.getElementById('auth-tabs');
+  const banner = document.getElementById('google-onboarding-banner');
+  const pwdGroup = document.getElementById('reg-password-group');
+  const emailInput = document.getElementById('reg-email');
+  const nameInput = document.getElementById('reg-name');
+  const regBtn = document.getElementById('register-btn');
+  const userNameEl = document.getElementById('gob-user-name');
+
+  const fullName = user.user_metadata?.full_name || user.user_metadata?.name || '';
+  const email = user.email || '';
+
+  if (gContainer) gContainer.style.display = 'none';
+  if (tabs) tabs.style.display = 'none';
+  if (banner) banner.style.display = 'flex';
+  if (pwdGroup) pwdGroup.style.display = 'none';
+  
+  if (userNameEl && fullName) {
+    userNameEl.textContent = `Olá, ${fullName.split(' ')[0]}!`;
+  }
+
+  if (nameInput && !nameInput.value) {
+    nameInput.value = fullName;
+  }
+  if (emailInput) {
+    emailInput.value = email;
+    emailInput.readOnly = true;
+  }
+
+  if (regBtn) {
+    regBtn.textContent = 'Salvar Endereço e Continuar Pedido';
+  }
+
+  // Ativa o formulário de cadastro
+  const formLogin = document.getElementById('form-login');
+  const formReg = document.getElementById('form-register');
+  if (formLogin) formLogin.style.display = 'none';
+  if (formReg) formReg.style.display = 'block';
+}
+
 async function loadUserProfile() {
   if (!state.session?.user) return;
+  const user = state.session.user;
+  const meta = user.user_metadata || {};
+  const googleName = meta.full_name || meta.name || meta.display_name || (user.email ? user.email.split('@')[0] : 'Cliente');
+  const googleEmail = user.email || '';
+  const googlePhone = user.phone || meta.phone || '';
+
   try {
-    const { data } = await sb
+    const targetTenant = state.tenantId || DEFAULT_TENANT_ID;
+    const { data, error } = await sb
       .from('cardapio_clientes')
       .select('*')
-      .eq('user_id', state.session.user.id)
+      .eq('user_id', user.id)
+      .eq('tenant_id', targetTenant)
       .maybeSingle();
 
     if (data) {
+      // Se já existe registro, atualiza se nome ou email estiverem vazios
+      let updated = false;
+      const updates = {};
+      if (!data.nome && googleName) {
+        updates.nome = googleName;
+        data.nome = googleName;
+        updated = true;
+      }
+      if (!data.email && googleEmail) {
+        updates.email = googleEmail;
+        data.email = googleEmail;
+        updated = true;
+      }
+      if (updated) {
+        await sb.from('cardapio_clientes').update(updates).eq('id', data.id);
+      }
       state.profile = data;
-      updateHeaderUI();
+    } else {
+      // Primeiro login (ex: Google OAuth): auto-provisionar em cardapio_clientes para a loja atual
+      const initialProfile = {
+        user_id: user.id,
+        tenant_id: targetTenant,
+        nome: googleName,
+        email: googleEmail,
+        whatsapp: googlePhone,
+        uf: state.empresa?.estado || 'SP',
+        cidade: state.empresa?.cidade || ''
+      };
+
+      // Inserção resiliente para usuário novo sem erro de onConflict
+      const { data: newProfile, error: insertErr } = await sb
+        .from('cardapio_clientes')
+        .insert(initialProfile)
+        .select()
+        .maybeSingle();
+
+      if (newProfile) {
+        state.profile = newProfile;
+      } else {
+        // Se porventura já existia registro concorrente, busca novamente
+        const { data: retryData } = await sb
+          .from('cardapio_clientes')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('tenant_id', targetTenant)
+          .maybeSingle();
+
+        state.profile = retryData || {
+          ...initialProfile,
+          id: user.id
+        };
+      }
     }
-  } catch (_) {}
+  } catch (e) {
+    console.warn('Erro ao carregar ou auto-provisionar perfil do usuário:', e);
+    if (!state.profile) {
+      state.profile = {
+        user_id: user.id,
+        nome: googleName,
+        email: googleEmail,
+        whatsapp: googlePhone
+      };
+    }
+  }
+
+  // Atualiza imediatamente a UI global
+  updateHeaderUI();
+  populateAccountForm();
+
+  if (state.profile?.logradouro && state.profile?.whatsapp) {
+    resetAuthLayout();
+  } else {
+    prepareGoogleOnboardingUI(user);
+  }
 }
 
-async function handleLogout() {
-  await sb.auth.signOut();
+async function handleLogout(redirectToHome = true) {
+  showLoading(true, 'Saindo da sua conta...');
+  try {
+    await sb.auth.signOut();
+  } catch (e) {
+    console.warn('Aviso ao sair da conta:', e);
+  }
+
+  // 1. Limpa sessão e perfil em memória
   state.session = null;
   state.profile = null;
+  state.redirectAfterAuth = null;
+  state.customerOrders = [];
+  state.activeOrder = null;
+  state.routeInfo = null;
+  state.destCoords = null;
+  state.taxaEntregaCentavos = 0;
+  state.entregaMetadata = null;
+
+  // 2. Limpa completamente o carrinho e itens da tela
+  clearCart();
+
+  // 3. Remove do localStorage storages de contato e endereço para nunca vazar dados de usuário anterior
+  try {
+    localStorage.removeItem('fincore_cart');
+    localStorage.removeItem('fincore_saved_address');
+    localStorage.removeItem('fincore_guest_contact');
+    localStorage.removeItem('fincore_last_order_id');
+  } catch (_) {}
+
+  // 4. Limpa todos os inputs do formulário de checkout e de conta no DOM
+  const inputsToClear = [
+    'checkout-nome-cliente', 'checkout-phone-cliente', 'checkout-cep',
+    'checkout-logradouro', 'checkout-numero', 'checkout-bairro',
+    'checkout-cidade', 'checkout-complemento', 'checkout-referencia',
+    'checkout-obs', 'checkout-troco', 'account-name', 'account-phone',
+    'account-email', 'account-cep', 'account-logradouro', 'account-numero',
+    'account-bairro', 'account-cidade', 'account-complemento', 'account-referencia'
+  ];
+  inputsToClear.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+
+  // 5. Reseta caixas de endereço do checkout
+  const savedBox = document.getElementById('checkout-saved-address-box');
+  const savedText = document.getElementById('checkout-saved-address-text');
+  const formContainer = document.getElementById('checkout-address-form-container');
+  const loggedUserBox = document.getElementById('checkout-logged-user-box');
+  const contactSection = document.getElementById('checkout-contact-section');
+
+  if (savedBox) savedBox.style.display = 'none';
+  if (savedText) savedText.textContent = '';
+  if (formContainer) formContainer.style.display = 'block';
+  if (loggedUserBox) loggedUserBox.style.display = 'none';
+  if (contactSection) contactSection.style.display = 'none';
+
+  // 6. Reseta layout de autenticação e cabeçalhos
+  resetAuthLayout();
   updateHeaderUI();
-  showScreen('screen-home');
-  toast('Você saiu da sua conta.', 'info');
+  updateCartBar();
+
+  showLoading(false);
+  if (redirectToHome) {
+    showScreen('screen-home');
+    toast('Você saiu da sua conta e os dados foram limpos com segurança.', 'info');
+  }
 }
 
 function updateHeaderUI() {
@@ -3387,53 +6019,33 @@ function updateHeaderUI() {
   const drawerName = document.getElementById('drawer-user-name');
   const drawerPhone = document.getElementById('drawer-user-phone');
 
-  if (state.profile?.nome) {
-    const initials = state.profile.nome.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-    if (avatarEl) avatarEl.textContent = initials;
-    if (drawerName) drawerName.textContent = state.profile.nome;
-    if (drawerPhone) drawerPhone.textContent = formatPhone(state.profile.whatsapp || '');
+  const user = state.session?.user;
+  const meta = user?.user_metadata || {};
+  const nome = state.profile?.nome || meta.full_name || meta.name || meta.display_name || '';
+  const email = state.profile?.email || user?.email || '';
+  const phone = state.profile?.whatsapp || user?.phone || meta.phone || '';
+  const avatarUrl = meta.avatar_url || meta.picture || '';
+
+  if (nome || email || user) {
+    if (avatarEl) {
+      if (avatarUrl) {
+        avatarEl.innerHTML = `<img src="${avatarUrl}" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
+      } else if (nome) {
+        const initials = nome.split(' ').filter(Boolean).map(n => n[0]).join('').slice(0, 2).toUpperCase();
+        avatarEl.textContent = initials || '👤';
+      } else {
+        avatarEl.textContent = '👤';
+      }
+    }
+    if (drawerName) drawerName.textContent = nome || (email ? email.split('@')[0] : 'Cliente');
+    if (drawerPhone) drawerPhone.textContent = formatPhone(phone) || email || 'Conectado';
   } else {
-    if (avatarEl) avatarEl.textContent = '👤';
+    if (avatarEl) {
+      avatarEl.innerHTML = '';
+      avatarEl.textContent = '👤';
+    }
     if (drawerName) drawerName.textContent = 'Visitante';
     if (drawerPhone) drawerPhone.textContent = 'Toque para entrar';
-  }
-}
-
-// ─── Busca de CEP (ViaCEP) ───────────────────────────────────────────
-async function fetchViaCep(cep, prefix) {
-  const clean = cep.replace(/\D/g, '');
-  if (clean.length !== 8) {
-    toast('CEP inválido (deve conter 8 dígitos)', 'error');
-    return;
-  }
-
-  showLoading(true, 'Buscando endereço pelo CEP...');
-  try {
-    const res = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
-    const data = await res.json();
-
-    if (data.erro) {
-      toast('CEP não encontrado.', 'error');
-      return;
-    }
-
-    const logr = document.getElementById(`${prefix}-logradouro`);
-    const bair = document.getElementById(`${prefix}-bairro`);
-    const cid  = document.getElementById(`${prefix}-cidade`);
-    const uf   = document.getElementById(`${prefix}-uf`);
-    const num  = document.getElementById(`${prefix}-numero`);
-
-    if (logr) logr.value = data.logradouro || '';
-    if (bair) bair.value = data.bairro || '';
-    if (cid)  cid.value  = data.localidade || '';
-    if (uf)   uf.value   = data.uf || 'SP';
-
-    if (num) num.focus();
-    toast('📍 Endereço preenchido automaticamente!', 'success');
-  } catch (err) {
-    toast('Erro ao buscar CEP: ' + err.message, 'error');
-  } finally {
-    showLoading(false);
   }
 }
 
@@ -3461,9 +6073,26 @@ function initEventListeners() {
   // Logo Header -> Home
   document.getElementById('header-logo-container')?.addEventListener('click', () => showScreen('screen-home'));
 
-  // Carrinho Topbar & Floating Bar -> Checkout
-  document.getElementById('header-cart-btn')?.addEventListener('click', () => showScreen('screen-checkout'));
-  document.getElementById('bottom-cart-action')?.addEventListener('click', () => showScreen('screen-checkout'));
+  // Carrinho Topbar & Floating Bar -> Checkout com validação obrigatória de login
+  const handleGoToCheckout = () => {
+    if (!state.cart || state.cart.length === 0) {
+      toast('Seu carrinho está vazio! Adicione produtos deliciosos do cardápio.', 'info');
+      showScreen('screen-cardapio');
+      return;
+    }
+    const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
+    if (!isLogged) {
+      state.redirectAfterAuth = 'screen-checkout';
+      toast('🔐 Para sua segurança, faça login ou cadastre-se para finalizar seu pedido.', 'info', 4500);
+      showScreen('screen-auth');
+    } else {
+      showScreen('screen-checkout');
+    }
+  };
+
+  document.getElementById('header-cart-btn')?.addEventListener('click', handleGoToCheckout);
+  document.getElementById('bottom-cart-action')?.addEventListener('click', handleGoToCheckout);
+  document.getElementById('auth-back-to-cart-btn')?.addEventListener('click', () => showScreen('screen-cardapio'));
 
   // Avatar Header -> Drawer ou Perfil
   document.getElementById('header-avatar')?.addEventListener('click', () => {
@@ -3471,41 +6100,13 @@ function initEventListeners() {
     else showScreen('screen-auth');
   });
 
-  // Botões e Atalhos da Central de Ações na Home
-  const triggerHomeSearch = () => {
-    const val = document.getElementById('home-search-input')?.value.trim();
-    if (val) {
-      state.searchTerm = val;
-      const searchInput = document.getElementById('product-search-input');
-      const searchClear = document.getElementById('product-search-clear');
-      if (searchInput) searchInput.value = val;
-      if (searchClear) searchClear.style.display = 'block';
-      renderProductsGrid();
-      showScreen('screen-cardapio');
-    }
-  };
+  // Atalhos de Escolha Rápida e Super Busca da Home
+  setupHomeIntentShortcuts();
 
-  document.getElementById('home-search-btn')?.addEventListener('click', triggerHomeSearch);
-  document.getElementById('home-search-input')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      triggerHomeSearch();
-    }
+  document.getElementById('btn-party-order-cta')?.addEventListener('click', () => {
+    selectCategory('all');
+    showScreen('screen-cardapio');
   });
-
-  document.getElementById('shortcut-cardapio')?.addEventListener('click', () => showScreen('screen-cardapio'));
-  document.getElementById('shortcut-encomenda')?.addEventListener('click', () => showScreen('screen-cardapio'));
-  document.getElementById('shortcut-pedidos')?.addEventListener('click', () => showScreen('screen-orders'));
-  document.getElementById('shortcut-tabela')?.addEventListener('click', () => {
-    const tiersSec = document.getElementById('home-pricing-tiers-section');
-    if (tiersSec && tiersSec.style.display !== 'none') {
-      tiersSec.scrollIntoView({ behavior: 'smooth' });
-    } else {
-      showScreen('screen-cardapio');
-    }
-  });
-
-  document.getElementById('btn-party-order-cta')?.addEventListener('click', () => showScreen('screen-cardapio'));
   document.getElementById('home-view-all-cats-btn')?.addEventListener('click', () => showScreen('screen-cardapio'));
   document.getElementById('home-view-all-prods-btn')?.addEventListener('click', () => showScreen('screen-cardapio'));
   document.getElementById('home-view-all-scheduled-btn')?.addEventListener('click', () => {
@@ -3559,8 +6160,7 @@ function initEventListeners() {
   });
 
   document.getElementById('modal-qty-minus')?.addEventListener('click', () => {
-    const min = getMinQtyForCategory(state.modalProduct?.categoria_id) || 1;
-    if (state.modalQty > min) {
+    if (state.modalQty > 0) {
       state.modalQty--;
       const input = document.getElementById('modal-qty-input');
       if (input) input.value = state.modalQty;
@@ -3577,21 +6177,43 @@ function initEventListeners() {
 
   document.getElementById('modal-qty-input')?.addEventListener('input', (e) => {
     const val = parseInt(e.target.value, 10);
-    if (!isNaN(val) && val >= 1) {
+    if (!isNaN(val) && val >= 0) {
       state.modalQty = val;
       updateModalPrice();
     }
   });
 
+  document.getElementById('modal-qty-input')?.addEventListener('blur', (e) => {
+    const val = parseInt(e.target.value, 10);
+    if (isNaN(val) || val < 0) {
+      state.modalQty = 0;
+      e.target.value = 0;
+      updateModalPrice();
+    }
+  });
+
   document.getElementById('modal-add-btn')?.addEventListener('click', () => {
-    if (state.modalProduct) {
+    if (state.modalProduct && state.modalQty > 0) {
       addToCart(state.modalProduct, state.modalQty);
       closeProductModal();
+    } else if (state.modalQty <= 0) {
+      toast('Selecione pelo menos 1 unidade para adicionar ao pedido.', 'info', 2500);
     }
   });
 
   // Checkout Controles
   document.getElementById('checkout-back-btn')?.addEventListener('click', () => showScreen('screen-cardapio'));
+
+  // Stepper Interativo de Navegação do Checkout
+  [1, 2, 3].forEach(stepNum => {
+    document.getElementById(`step-ind-${stepNum}`)?.addEventListener('click', () => {
+      const targetSec = document.getElementById(`checkout-sec-${stepNum}`);
+      if (targetSec) {
+        targetSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        updateCheckoutStepper(stepNum);
+      }
+    });
+  });
 
   // Limpar Carrinho com confirmação de segurança
   document.getElementById('btn-limpar-carrinho')?.addEventListener('click', () => {
@@ -3653,7 +6275,17 @@ function initEventListeners() {
       state.tipoLogistica = card.dataset.logistica;
 
       const endSec = document.getElementById('endereco-section');
-      if (endSec) endSec.style.display = state.tipoLogistica === 'Entrega' ? 'block' : 'none';
+      const retSec = document.getElementById('retirada-section');
+      if (state.tipoLogistica === 'Entrega') {
+        if (endSec) endSec.style.display = 'block';
+        if (retSec) retSec.style.display = 'none';
+        triggerAsyncRouteCalculation();
+      } else {
+        if (endSec) endSec.style.display = 'none';
+        if (retSec) retSec.style.display = 'block';
+        renderPickupStoreInfo();
+      }
+      updateCheckoutTotals();
       validateCheckoutForm();
     });
   });
@@ -3662,26 +6294,43 @@ function initEventListeners() {
   const dataInput = document.getElementById('checkout-data');
   const horaInput = document.getElementById('checkout-hora');
 
-  // Inicializa data de hoje e hora + 45min
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  if (dataInput) {
-    dataInput.value = `${yyyy}-${mm}-${dd}`;
-    dataInput.min = `${yyyy}-${mm}-${dd}`;
+  const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const now = new Date();
+  const primEntrega = calcularPrimeiraEntregaPossivel(now, state.horariosAtendimento);
+
+  if (dataInput && primEntrega.dataStr) {
+    dataInput.value = primEntrega.dataStr;
+    dataInput.min = toYmd(now);
   }
 
-  today.setMinutes(today.getMinutes() + 45);
-  const hh = String(today.getHours()).padStart(2, '0');
-  const min = String(today.getMinutes()).padStart(2, '0');
-  if (horaInput) horaInput.value = `${hh}:${min}`;
+  if (horaInput && primEntrega.horaStr) {
+    horaInput.value = primEntrega.horaStr;
+  }
+
+  document.querySelectorAll('.date-chip').forEach(c => c.classList.remove('active'));
+  if (primEntrega.isHoje) {
+    document.getElementById('btn-date-hoje')?.classList.add('active');
+  } else if (primEntrega.isAmanha) {
+    document.getElementById('btn-date-amanha')?.classList.add('active');
+  } else {
+    document.getElementById('btn-date-custom')?.classList.add('active');
+  }
 
   document.getElementById('btn-date-hoje')?.addEventListener('click', () => {
+    const pe = calcularPrimeiraEntregaPossivel(new Date(), state.horariosAtendimento);
+    if (!pe.canOrder || !pe.isHoje) {
+      const proximo = pe.isAmanha 
+        ? `amanhã a partir das ${pe.horaStr}` 
+        : `${pe.diaNome || 'próximo dia útil'} a partir das ${pe.horaStr}`;
+      toast(`Não há mais janelas de entrega disponíveis para hoje. Próximo horário: ${proximo}.`, 'warning', 4500);
+      return;
+    }
     document.querySelectorAll('.date-chip').forEach(c => c.classList.remove('active'));
     document.getElementById('btn-date-hoje')?.classList.add('active');
-    const d = new Date();
-    dataInput.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    dataInput.value = toYmd(new Date());
+    if (!horaInput.value || horaInput.value < pe.horaStr) {
+      horaInput.value = pe.horaStr;
+    }
     validateCheckoutForm();
   });
 
@@ -3690,7 +6339,11 @@ function initEventListeners() {
     document.getElementById('btn-date-amanha')?.classList.add('active');
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    dataInput.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    dataInput.value = toYmd(d);
+    const pe = calcularPrimeiraEntregaPossivel(new Date(), state.horariosAtendimento);
+    if (pe.isAmanha && (!horaInput.value || horaInput.value < pe.horaStr)) {
+      horaInput.value = pe.horaStr;
+    }
     validateCheckoutForm();
   });
 
@@ -3700,39 +6353,78 @@ function initEventListeners() {
     dataInput.focus();
   });
 
-  // Formas de Pagamento
-  document.querySelectorAll('.payment-card').forEach(card => {
-    card.addEventListener('click', () => {
-      document.querySelectorAll('.payment-card').forEach(c => c.classList.remove('active'));
-      card.classList.add('active');
-      state.formaPagamentoNome = card.dataset.payment;
+  // Listener de troco no checkout
+  document.getElementById('checkout-troco')?.addEventListener('input', validateCheckoutForm);
 
-      const trocoSec = document.getElementById('troco-section');
-      if (trocoSec) trocoSec.style.display = state.formaPagamentoNome === 'Dinheiro' ? 'block' : 'none';
+  // Validação em tempo real dos campos de contato e endereço com recálculo de taxa e rota
+  ['checkout-nome-cliente', 'checkout-phone-cliente', 'checkout-cep', 'checkout-logradouro', 'checkout-numero', 'checkout-bairro', 'checkout-cidade', 'checkout-data', 'checkout-hora'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', () => {
+      if (id === 'checkout-bairro' || id === 'checkout-cep' || id === 'checkout-logradouro' || id === 'checkout-numero') {
+        updateCheckoutTotals();
+        triggerAsyncRouteCalculation();
+      }
       validateCheckoutForm();
     });
   });
 
-  // Validação em tempo real dos campos de contato e endereço
-  ['checkout-nome-cliente', 'checkout-phone-cliente', 'checkout-cep', 'checkout-logradouro', 'checkout-numero', 'checkout-bairro', 'checkout-cidade', 'checkout-data', 'checkout-hora'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', validateCheckoutForm);
-  });
+  // Formatação de CEP com busca automática ao atingir 8 dígitos
+  const formatCep = (raw) => {
+    const clean = String(raw || '').replace(/\D/g, '').slice(0, 8);
+    if (clean.length > 5) return `${clean.slice(0, 5)}-${clean.slice(5)}`;
+    return clean;
+  };
 
-  // Máscaras automáticas para todos os campos de telefone / WhatsApp
+  const setupCepAutoFetch = (id, prefix) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.addEventListener('input', (e) => {
+      const clean = e.target.value.replace(/\D/g, '');
+      e.target.value = formatCep(clean);
+      if (clean.length === 8) {
+        fetchViaCep(clean, prefix);
+      }
+    });
+  };
+
+  setupCepAutoFetch('checkout-cep', 'checkout');
+  setupCepAutoFetch('reg-cep', 'reg');
+  setupCepAutoFetch('account-cep', 'account');
+
+  // Máscaras automáticas para todos os campos de telefone / WhatsApp com Amarração ao ERP Windows
   const applyMask = (e) => {
     e.target.value = formatPhone(e.target.value);
   };
+
   document.getElementById('checkout-phone-cliente')?.addEventListener('input', (e) => {
     applyMask(e);
     validateCheckoutForm();
   });
-  document.getElementById('reg-whatsapp')?.addEventListener('input', applyMask);
-  document.getElementById('account-phone')?.addEventListener('input', applyMask);
+
+  const setupPhoneAutoLink = (id, prefix) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', (e) => {
+      applyMask(e);
+      const clean = e.target.value.replace(/\D/g, '');
+      if (clean.length === 10 || clean.length === 11) {
+        checkPhoneErpAutoLink(el, prefix);
+      }
+    });
+    el.addEventListener('blur', () => {
+      checkPhoneErpAutoLink(el, prefix);
+    });
+  };
+
+  setupPhoneAutoLink('account-phone', 'account');
+  setupPhoneAutoLink('reg-whatsapp', 'reg');
+  setupPhoneAutoLink('checkout-phone-cliente', 'account');
 
   // Botão de trocar de conta no checkout
-  document.getElementById('btn-checkout-trocar-conta')?.addEventListener('click', () => {
+  document.getElementById('btn-checkout-trocar-conta')?.addEventListener('click', async () => {
     state.redirectAfterAuth = 'screen-checkout';
+    await handleLogout(false);
     showScreen('screen-auth');
+    toast('Faça login com a sua outra conta para continuar.', 'info', 3500);
   });
 
   // CEP Lookup
@@ -3749,6 +6441,15 @@ function initEventListeners() {
   document.getElementById('account-cep-btn')?.addEventListener('click', () => {
     const val = document.getElementById('account-cep')?.value || '';
     fetchViaCep(val, 'account');
+  });
+
+  // Modal de Identificação do Cliente ("Encontramos você!")
+  document.getElementById('modal-erp-found-close-btn')?.addEventListener('click', closeErpFoundModal);
+  document.getElementById('btn-erp-found-confirm')?.addEventListener('click', handleConfirmFoundCustomer);
+  document.getElementById('btn-erp-found-reject')?.addEventListener('click', handleRejectFoundCustomer);
+  document.getElementById('btn-erp-found-edit-address')?.addEventListener('click', handleEditAddressFromModal);
+  document.getElementById('modal-erp-customer-found')?.addEventListener('click', (e) => {
+    if (e.target.id === 'modal-erp-customer-found') closeErpFoundModal();
   });
 
   // Submissão do Checkout
@@ -3801,6 +6502,30 @@ function initEventListeners() {
     if (e.target.id === 'user-drawer') closeDrawer();
   });
 
+  // Google Auth Button
+  document.getElementById('btn-google-login')?.addEventListener('click', loginWithGoogle);
+
+  // Máscaras automáticas para todos os campos de CEP
+  const formatCepInput = (e) => {
+    let v = e.target.value.replace(/\D/g, '').slice(0, 8);
+    if (v.length > 5) v = `${v.slice(0, 5)}-${v.slice(5)}`;
+    e.target.value = v;
+  };
+
+  ['reg-cep', 'checkout-cep', 'account-cep'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', (e) => {
+        formatCepInput(e);
+        const clean = e.target.value.replace(/\D/g, '');
+        if (clean.length === 8) {
+          const prefix = id.split('-')[0];
+          fetchViaCep(clean, prefix);
+        }
+      });
+    }
+  });
+
   // Auth Tabs & Forms
   document.getElementById('tab-login')?.addEventListener('click', () => {
     document.getElementById('tab-login')?.classList.add('active');
@@ -3818,6 +6543,7 @@ function initEventListeners() {
 
   // Modal de Horários de Atendimento & Status da Loja
   document.getElementById('header-status-pill')?.addEventListener('click', openHorariosModal);
+  document.getElementById('home-status-pill')?.addEventListener('click', openHorariosModal);
   document.getElementById('btn-ver-horarios-checkout')?.addEventListener('click', openHorariosModal);
   document.getElementById('modal-horarios-close-btn')?.addEventListener('click', closeHorariosModal);
   document.getElementById('modal-horarios-ok-btn')?.addEventListener('click', closeHorariosModal);
@@ -3841,31 +6567,105 @@ async function initApp() {
     const { data: { session } } = await sb.auth.getSession();
     state.session = session;
 
-    // 2. Carrega perfil do usuário
+    // 2. Escuta mudanças na autenticação (ex: login com Google OAuth)
+    sb.auth.onAuthStateChange(async (event, newSession) => {
+      state.session = newSession;
+      if (newSession) {
+        await loadUserProfile();
+        await loadCustomerOrders(false);
+
+        // Se o cliente estava em fluxo de redirecionamento pós-login:
+        if (state.redirectAfterAuth === 'screen-checkout') {
+          state.redirectAfterAuth = null;
+          showScreen('screen-checkout');
+          toast(`Bem-vindo(a), ${state.profile?.nome || 'Cliente'}! Continue para finalizar seu pedido.`, 'success', 3500);
+        } else if (state.redirectAfterAuth === 'screen-account') {
+          state.redirectAfterAuth = null;
+          showScreen('screen-account');
+        } else if (state.redirectAfterAuth === 'screen-orders') {
+          state.redirectAfterAuth = null;
+          showScreen('screen-orders');
+        } else {
+          // Se estava na tela de login/cadastro, redireciona para a Home com os dados logados
+          const activeScreen = document.querySelector('.screen.active')?.id;
+          if (activeScreen === 'screen-auth') {
+            showScreen('screen-home');
+          }
+        }
+      } else {
+        state.profile = null;
+        resetAuthLayout();
+        updateHeaderUI();
+      }
+    });
+
+    // 3. Carrega perfil do usuário se já estiver logado
     if (session) {
       await loadUserProfile();
     }
 
-    // 3. Carrega dados do tenant e da empresa
+    // 4. Carrega dados do tenant e da empresa
     await loadEmpresa();
 
-    // 4. Carrega catálogo de produtos e precificação em lote
+    // 5. Carrega catálogo de produtos e precificação em lote
     await loadCatalog();
 
-    // 5. Carrega pedidos existentes do cliente
+    // 6. Carrega pedidos existentes do cliente
     if (state.session || state.profile) {
       await loadCustomerOrders();
     }
 
-    // 6. Exibe a tela inicial (Home Dashboard)
+    // 7. Exibe a tela inicial (Home Dashboard)
     showScreen('screen-home');
 
-    // 7. Sincronização em tempo real dos pedidos (Polling a cada 3s + Realtime)
+    // 7.1 Rastreamento Público por Link / Token (?p=UUID ou ?pedido=UUID ou ?rastreio=UUID)
+    const urlParams = new URLSearchParams(window.location.search);
+    const trackId = urlParams.get('p') || urlParams.get('pedido') || urlParams.get('rastreio');
+    if (trackId) {
+      try {
+        const { data: orderData } = await sb
+          .from('pedido')
+          .select('*, item_pedido(*)')
+          .eq('id', trackId)
+          .maybeSingle();
+
+        if (orderData) {
+          state.activeOrder = orderData;
+          localStorage.setItem('fincore_last_order_id', orderData.id);
+
+          if (!state.customerOrders.some(o => o.id === orderData.id)) {
+            state.customerOrders.unshift(orderData);
+          }
+
+          if (orderData.tenantId && orderData.tenantId !== state.tenantId) {
+            state.tenantId = orderData.tenantId;
+            localStorage.setItem('fincore_cardapio_tenant', state.tenantId);
+          }
+
+          renderOrdersList();
+          renderActiveOrderWidget();
+          openOrderDetailModal(orderData);
+        } else {
+          toast('Pedido não encontrado para o link de rastreio informado.', 'error', 4000);
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar pedido por rastreio:', e);
+      }
+    }
+
+    // 8. Sincronização em tempo real dos pedidos (Polling a cada 15s + Realtime)
     setInterval(() => {
       if (state.session || state.profile) {
         loadCustomerOrders(false);
       }
-    }, 3000);
+    }, 15000);
+
+    // 9. Reavaliação periódica em tempo real do status de abertura/fechamento (a cada 10 segundos)
+    setInterval(updateStoreStatusUI, 10000);
+    window.addEventListener('focus', updateStoreStatusUI);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) updateStoreStatusUI();
+    });
 
     try {
       sb.channel('realtime_pedido_sync')
@@ -3886,3 +6686,4 @@ async function initApp() {
 
 // Executa assim que o DOM estiver pronto
 document.addEventListener('DOMContentLoaded', initApp);
+
