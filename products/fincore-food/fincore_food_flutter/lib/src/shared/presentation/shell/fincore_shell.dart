@@ -7,12 +7,14 @@ import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
+import 'package:fincore_core/common/app_constants.dart';
 import 'package:fincore_core/sync/sync_engine.dart';
 import 'package:fincore_core/sync/outbox_service.dart';
 import 'package:fincore_food_flutter/src/shared/data/sync/supabase_sync_service.dart';
 import 'package:fincore_food_flutter/src/configuracoes/views/configuracoes_page.dart';
 import 'package:fincore_food_flutter/src/produtos/views/produtos_page.dart';
 import 'package:fincore_food_flutter/src/clientes/views/clientes_page.dart';
+import 'package:fincore_food_flutter/src/taxas_entrega/views/taxas_entrega_page.dart';
 import 'package:fincore_food_flutter/src/categorias/views/categorias_page.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/pedidos_page.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/pdv_page.dart';
@@ -27,10 +29,10 @@ import 'package:fincore_food_flutter/src/estoque/views/producao_page.dart';
 import 'package:fincore_food_flutter/src/cozinha/views/kds_screen.dart';
 import 'package:fincore_food_flutter/src/shared/services/permissao_service.dart';
 
-import 'package:fincore_food_flutter/src/shared/presentation/tenant/empresa_switcher_widget.dart';
 
 import 'package:fincore_food_flutter/src/shared/services/global_pedidos_alert_service.dart';
 import 'package:fincore_food_flutter/src/shared/widgets/pedidos_atencao_overlay.dart';
+import 'package:fincore_food_flutter/src/shared/widgets/novo_pedido_alerta_overlay.dart';
 
 // ─── Modelo de item da sidebar ─────────────────────────────────────────────
 
@@ -137,6 +139,12 @@ class _FincoreShellState extends State<FincoreShell>
           label: 'Clientes',
           icon: Icons.people_outline,
           iconSelected: Icons.people_rounded,
+        ),
+        _NavItem(
+          id: 'locais_entrega',
+          label: 'Taxas de Entrega',
+          icon: Icons.local_shipping_outlined,
+          iconSelected: Icons.local_shipping_rounded,
         ),
       ],
     ),
@@ -874,7 +882,11 @@ class _FincoreShellState extends State<FincoreShell>
   }
 
   void _selectTab(String id) {
-    setState(() => _selectedTabId = id);
+    if (id == 'pdv') {
+      setState(() => _selectedTabId = _pdvPadrao);
+    } else {
+      setState(() => _selectedTabId = id);
+    }
   }
 
   Future<void> _logout() async {
@@ -928,7 +940,7 @@ class _FincoreShellState extends State<FincoreShell>
             ),
           ),
           Text(
-            'v1.2.2',
+            AppConstants.version,
             style: TextStyle(
               color: FincoreColors.textMuted,
               fontSize: 9,
@@ -965,7 +977,9 @@ class _FincoreShellState extends State<FincoreShell>
                     Expanded(
                       child: Container(
                         color: _shellBg,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                        padding: _selectedTabId == 'pdv_express'
+                            ? const EdgeInsets.fromLTRB(16, 8, 16, 8)
+                            : const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                         child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),
                           switchInCurve: Curves.easeOutCubic,
@@ -989,6 +1003,18 @@ class _FincoreShellState extends State<FincoreShell>
               ),
             ],
           ),
+          // Overlay de Novo Pedido Recebido (Cardápio Digital / Remoto)
+          ValueListenableBuilder<PedidoData?>(
+            valueListenable: GlobalPedidosAlertService().novoPedidoOverlayNotifier,
+            builder: (context, pedido, _) {
+              if (pedido == null) return const SizedBox.shrink();
+              return NovoPedidoAlertaOverlay(
+                pedido: pedido,
+                onDismiss: () => GlobalPedidosAlertService().dismissNovoPedidoOverlay(),
+              );
+            },
+          ),
+          // Overlay de Pedidos com Atenção Operacional / Atrasos
           ValueListenableBuilder<PedidosAlertaResumo?>(
             valueListenable: GlobalPedidosAlertService().alertaOverlayNotifier,
             builder: (context, resumo, _) {
@@ -1090,7 +1116,7 @@ class _FincoreShellState extends State<FincoreShell>
                           ),
                         ),
                         child: Text(
-                          'v1.2.2',
+                          AppConstants.version,
                           style: TextStyle(
                             color: FincoreColors.primary,
                             fontSize: 9,
@@ -1519,7 +1545,7 @@ class _FincoreShellState extends State<FincoreShell>
       case 'categorias':
         return const CategoriasPage();
       case 'locais_entrega':
-        return const ClientesPage(initialTab: 1);
+        return const TaxasEntregaPage();
       case 'produtos':
         return const ProdutosPage();
       case 'financeiro':
@@ -1601,7 +1627,7 @@ class _FincoreShellState extends State<FincoreShell>
       'kds' => ('KDS — Cozinha', 'Fila de preparo em tempo real'),
       'clientes' => ('Clientes', 'Cadastro e histórico de clientes'),
       'categorias' => ('Categorias', 'Gerenciamento de categorias do cardápio'),
-      'locais_entrega' => ('Locais de Entrega', 'Bairros e taxas de entrega de pedidos'),
+      'locais_entrega' => ('Taxas de Entrega', 'Configuração de taxas por Faixa de KM, Bairro ou CEP'),
       'produtos' => ('Produtos', 'Cardápio e política de preços'),
       'financeiro' => ('Controle de Caixa', 'Abertura, fechamento e fluxo de caixa diário'),
       'contas_receber' => ('Contas a Receber', 'Gestão de títulos, pendências e conciliação'),

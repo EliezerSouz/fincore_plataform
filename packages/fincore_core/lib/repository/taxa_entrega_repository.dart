@@ -31,8 +31,10 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
         'nome': entity.nome,
         'tipoRegra': entity.tipoRegra.name,
         'bairro': entity.bairro,
-        'cepInicial': entity.cepInicial,
-        'cepFinal': entity.cepFinal,
+        'cepInicial': entity.tipoRegra == TipoRegraTaxaEntrega.km ? null : entity.cepInicial,
+        'cepFinal': entity.tipoRegra == TipoRegraTaxaEntrega.km ? null : entity.cepFinal,
+        'distanciaMinKm': entity.distanciaMinKm,
+        'distanciaMaxKm': entity.distanciaMaxKm,
         'valorCentavos': entity.valorCentavos,
         'ativo': entity.ativo,
         'pedidoMinimoCentavos': entity.pedidoMinimoCentavos,
@@ -81,6 +83,9 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
     try { await db.customStatement('ALTER TABLE taxas_entrega_table ADD COLUMN prazo_estimado TEXT'); } catch (_) {}
     try { await db.customStatement('ALTER TABLE taxas_entrega_table ADD COLUMN observacoes TEXT'); } catch (_) {}
 
+    final cepIni = taxa.tipoRegra == TipoRegraTaxaEntrega.km ? taxa.distanciaMinKm?.toString() : taxa.cepInicial;
+    final cepFin = taxa.tipoRegra == TipoRegraTaxaEntrega.km ? taxa.distanciaMaxKm?.toString() : taxa.cepFinal;
+
     await db.into(db.taxasEntregaTable).insertOnConflictUpdate(
           TaxasEntregaTableCompanion.insert(
             id: taxa.id,
@@ -88,8 +93,8 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
             nome: taxa.nome,
             tipoRegra: taxa.tipoRegra.name,
             bairro: Value(taxa.bairro),
-            cepInicial: Value(taxa.cepInicial),
-            cepFinal: Value(taxa.cepFinal),
+            cepInicial: Value(cepIni),
+            cepFinal: Value(cepFin),
             valorCentavos: taxa.valorCentavos,
             ativo: taxa.ativo,
             pedidoMinimoCentavos: Value(taxa.pedidoMinimoCentavos),
@@ -141,16 +146,27 @@ class TaxaEntregaRepository extends SyncableRepository<TaxaEntrega> {
   }
 
   TaxaEntrega _mapToDomain(TaxaEntregaData data) {
+    final tipo = TipoRegraTaxaEntrega.values.firstWhere(
+        (e) => e.name == data.tipoRegra,
+        orElse: () => TipoRegraTaxaEntrega.fixo);
+
+    double? distMin;
+    double? distMax;
+    if (tipo == TipoRegraTaxaEntrega.km) {
+      distMin = double.tryParse(data.cepInicial ?? '');
+      distMax = double.tryParse(data.cepFinal ?? '');
+    }
+
     return TaxaEntrega(
       id: data.id,
       tenantId: data.tenantId,
       nome: data.nome,
-      tipoRegra: TipoRegraTaxaEntrega.values.firstWhere(
-          (e) => e.name == data.tipoRegra,
-          orElse: () => TipoRegraTaxaEntrega.fixo),
+      tipoRegra: tipo,
       bairro: data.bairro,
-      cepInicial: data.cepInicial,
-      cepFinal: data.cepFinal,
+      cepInicial: tipo == TipoRegraTaxaEntrega.km ? null : data.cepInicial,
+      cepFinal: tipo == TipoRegraTaxaEntrega.km ? null : data.cepFinal,
+      distanciaMinKm: distMin,
+      distanciaMaxKm: distMax,
       valorCentavos: data.valorCentavos,
       ativo: data.ativo,
       pedidoMinimoCentavos: data.pedidoMinimoCentavos ?? 0,

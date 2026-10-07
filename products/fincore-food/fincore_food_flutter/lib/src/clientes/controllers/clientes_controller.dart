@@ -77,17 +77,31 @@ class ClientesController extends ChangeNotifier {
   String get filtroOrdenacao => _filtroOrdenacao;
 
   // ─── Métodos Auxiliares de Métricas dos Clientes ───────────────────────────
+  bool _pedidoPertenceAoCliente(PedidoData p, String clienteId) {
+    if (p.clienteId == clienteId) return true;
+    final cliente = _clientes.where((c) => c.id == clienteId).firstOrNull;
+    if (cliente == null) return false;
+    final cTel = cliente.telefone.replaceAll(RegExp(r'\D'), '');
+    if (cTel.length >= 8) {
+      final pTel = p.clienteTelefoneAvulso?.replaceAll(RegExp(r'\D'), '');
+      if (pTel != null && pTel.length >= 8 && (pTel.endsWith(cTel) || cTel.endsWith(pTel))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   List<PedidoData> getPedidosDoCliente(String clienteId) {
-    return _todosPedidos.where((p) => p.clienteId == clienteId).toList();
+    return _todosPedidos.where((p) => _pedidoPertenceAoCliente(p, clienteId)).toList();
   }
 
   int getCountPedidos(String clienteId) {
-    return _todosPedidos.where((p) => p.clienteId == clienteId && p.status != 'cancelado').length;
+    return _todosPedidos.where((p) => _pedidoPertenceAoCliente(p, clienteId) && p.status != 'cancelado').length;
   }
 
   int getTotalGastoCentavos(String clienteId) {
     return _todosPedidos
-        .where((p) => p.clienteId == clienteId && p.status != 'cancelado')
+        .where((p) => _pedidoPertenceAoCliente(p, clienteId) && p.status != 'cancelado')
         .fold<int>(0, (sum, p) => sum + p.valorTotalCentavos);
   }
 
@@ -683,6 +697,8 @@ class ClientesController extends ChangeNotifier {
     String? bairro,
     String? cepInicial,
     String? cepFinal,
+    double? distanciaMinKm,
+    double? distanciaMaxKm,
     required int valorCentavos,
     required bool ativo,
     required int pedidoMinimoCentavos,
@@ -707,6 +723,8 @@ class ClientesController extends ChangeNotifier {
         bairro: bairro?.trim().isEmpty == true ? null : bairro?.trim(),
         cepInicial: cepInicial?.trim().isEmpty == true ? null : cepInicial?.trim(),
         cepFinal: cepFinal?.trim().isEmpty == true ? null : cepFinal?.trim(),
+        distanciaMinKm: distanciaMinKm,
+        distanciaMaxKm: distanciaMaxKm,
         valorCentavos: valorCentavos,
         ativo: ativo,
         pedidoMinimoCentavos: pedidoMinimoCentavos,

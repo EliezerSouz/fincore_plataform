@@ -421,16 +421,17 @@ class ContasReceberController extends ChangeNotifier {
         final lancamentos = lancamentosPorPedido[ped.id] ?? [];
 
         // Para PIX: Só é considerado recebido/validado se houver lançamento financeiro de receita
-        // (ou seja, quando o operador confere o extrato bancário/comprovante e valida no sistema).
-        // Para Cartão ou Nota a Prazo: quitado via baixa explícita ou lançamento de receita.
+        // gerado pela validação bancária ou liquidação do título.
+        // Para Cartão ou Nota a Prazo: quitado via baixa explícita ou liquidação.
         final temReceita = (isNotaPrazo || isCartao || isPix)
             ? lancamentos.any((l) =>
                 l.tipo == 'receita' &&
                 (l.descricao.toLowerCase().contains('baixa') ||
-                 l.descricao.toLowerCase().contains('pix') ||
+                 l.descricao.toLowerCase().contains('liquid') ||
                  l.descricao.toLowerCase().contains('validad') ||
                  l.descricao.toLowerCase().contains('recebimento') ||
-                 l.descricao.toLowerCase().contains('venda')))
+                 l.descricao.toLowerCase().contains('quitação') ||
+                 l.descricao.toLowerCase().contains('quitacao')))
             : lancamentos.any((l) => l.tipo == 'receita');
 
         // Data do Pedido e Data da Entrega

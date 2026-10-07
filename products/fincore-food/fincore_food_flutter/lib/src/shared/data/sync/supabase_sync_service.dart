@@ -479,25 +479,28 @@ class SupabaseSyncService {
       // O CHECK CONSTRAINT no PostgreSQL ('pedido_status_check') exige:
       // ('rascunho', 'confirmado', 'em_preparo', 'pronto', 'entregue', 'cancelado').
       if (tableName == 'pedido') {
-        // Sanitizar valorTaxaServicoCentavos para garantir consistência total com subtotal e entrega
-        final subtotal = (payload['valorSubtotalCentavos'] as num?)?.toInt() ?? 0;
-        final entrega = (payload['valorTaxaEntregaCentavos'] as num?)?.toInt() ?? 0;
-        final total = (payload['valorTotalCentavos'] as num?)?.toInt() ?? 0;
-        int servico = (payload['valorTaxaServicoCentavos'] as num?)?.toInt() ?? (total - subtotal - entrega);
-        if (servico < 0) servico = 0;
-        payload['valorTaxaServicoCentavos'] = servico;
+        // Sanitizar valorTaxaServicoCentavos apenas se for envio com valores financeiros
+        if (payload.containsKey('valorSubtotalCentavos')) {
+          final subtotal = (payload['valorSubtotalCentavos'] as num?)?.toInt() ?? 0;
+          final entrega = (payload['valorTaxaEntregaCentavos'] as num?)?.toInt() ?? 0;
+          final total = (payload['valorTotalCentavos'] as num?)?.toInt() ?? 0;
+          int servico = (payload['valorTaxaServicoCentavos'] as num?)?.toInt() ?? (total - subtotal - entrega);
+          if (servico < 0) servico = 0;
+          payload['valorTaxaServicoCentavos'] = servico;
+        }
 
         if (payload.containsKey('status')) {
           const statusMap = {
             'emPreparo': 'em_preparo',
-            'pendente': 'confirmado',
             'recebido': 'confirmado',
-            'saiu_para_entrega': 'pronto',
-            'saiuparaentrega': 'pronto',
-            'saiuParaEntrega': 'pronto',
-            'em_transito': 'pronto',
-            'emtransito': 'pronto',
-            'emTransito': 'pronto',
+            'saiuparaentrega': 'saiu_para_entrega',
+            'saiuParaEntrega': 'saiu_para_entrega',
+            'saiu_entrega': 'saiu_para_entrega',
+            'em_transito': 'saiu_para_entrega',
+            'emtransito': 'saiu_para_entrega',
+            'emTransito': 'saiu_para_entrega',
+            'a_caminho': 'saiu_para_entrega',
+            'em_entrega': 'saiu_para_entrega',
           };
           final rawStatus = payload['status'] as String? ?? '';
           if (statusMap.containsKey(rawStatus)) {
@@ -506,7 +509,23 @@ class SupabaseSyncService {
               LogModule.sync,
               'Status de Pedido sanitizado: "$rawStatus" → "${payload['status']}" ($tableName)',
             );
-          } else if (!const {'rascunho', 'confirmado', 'em_preparo', 'pronto', 'entregue', 'cancelado'}.contains(rawStatus)) {
+          } else if (!const {
+            'rascunho',
+            'pendente',
+            'confirmado',
+            'recebido',
+            'em_preparo',
+            'pronto',
+            'aguardando_retirada',
+            'saiu_para_entrega',
+            'saiu_entrega',
+            'em_entrega',
+            'a_caminho',
+            'entregue',
+            'concluido',
+            'finalizado',
+            'cancelado'
+          }.contains(rawStatus)) {
             // Fallback defensivo para qualquer outro status desconhecido
             payload['status'] = 'confirmado';
           }
@@ -518,10 +537,15 @@ class SupabaseSyncService {
               final payloadStatus = payload['status'] as String;
               final payloadVersion = (payload['syncVersion'] as num?)?.toInt() ?? entry.version;
 
-              if (payloadVersion < remoteVersion) {
-                payload['status'] = remoteStatus;
-              } else if (payloadVersion == remoteVersion) {
-                if (StatusPrecedence.isHigherOrEqual(remoteStatus, payloadStatus)) {
+              if (StatusPrecedence.isHigherOrEqual(payloadStatus, remoteStatus)) {
+                // Se o status local é mais avançado ou igual (ex: entregue vs pronto/saiu_para_entrega):
+                // garante que syncVersion supere a versão remota para gravar com sucesso na nuvem
+                if (payloadVersion <= remoteVersion) {
+                  payload['syncVersion'] = remoteVersion + 1;
+                }
+              } else {
+                // Status local é inferior ao remoto (ex: remoto já entregue e local tenta voltar a em_preparo)
+                if (payloadVersion < remoteVersion) {
                   payload['status'] = remoteStatus;
                 }
               }
@@ -532,6 +556,14 @@ class SupabaseSyncService {
         const statusCamelToSnake = {
           'emPreparo': 'em_preparo',
           'confirmado': 'pendente',
+          'saiuparaentrega': 'saiu_para_entrega',
+          'saiuParaEntrega': 'saiu_para_entrega',
+          'saiu_entrega': 'saiu_para_entrega',
+          'em_transito': 'saiu_para_entrega',
+          'emtransito': 'saiu_para_entrega',
+          'emTransito': 'saiu_para_entrega',
+          'a_caminho': 'saiu_para_entrega',
+          'em_entrega': 'saiu_para_entrega',
         };
         final rawStatus = payload['status'] as String? ?? '';
         if (statusCamelToSnake.containsKey(rawStatus)) {
@@ -549,10 +581,12 @@ class SupabaseSyncService {
             final payloadStatus = payload['status'] as String;
             final payloadVersion = (payload['syncVersion'] as num?)?.toInt() ?? entry.version;
 
-            if (payloadVersion < remoteVersion) {
-              payload['status'] = remoteStatus;
-            } else if (payloadVersion == remoteVersion) {
-              if (StatusPrecedence.isHigherOrEqual(remoteStatus, payloadStatus)) {
+            if (StatusPrecedence.isHigherOrEqual(payloadStatus, remoteStatus)) {
+              if (payloadVersion <= remoteVersion) {
+                payload['syncVersion'] = remoteVersion + 1;
+              }
+            } else {
+              if (payloadVersion < remoteVersion) {
                 payload['status'] = remoteStatus;
               }
             }
@@ -1159,6 +1193,7 @@ class SupabaseSyncService {
                 ..where((t) => t.id.equals(entityId)))
               .getSingleOrNull();
           return row?.syncVersion;
+        case 'taxa_entrega':
         case 'taxas_entrega':
           final row = await (db.select(db.taxasEntregaTable)
                 ..where((t) => t.id.equals(entityId)))
@@ -1562,26 +1597,38 @@ class SupabaseSyncService {
             );
         break;
 
+      case 'taxa_entrega':
       case 'taxas_entrega':
+        final isKm = (row['tipoRegra'] ?? row['tipo_regra']) == 'km';
+        final cepIni = isKm
+            ? (row['distanciaMinKm'] ?? row['distancia_min_km'] ?? row['cepInicial'])?.toString()
+            : row['cepInicial'] as String?;
+        final cepFin = isKm
+            ? (row['distanciaMaxKm'] ?? row['distancia_max_km'] ?? row['cepFinal'])?.toString()
+            : row['cepFinal'] as String?;
+
         await db.into(db.taxasEntregaTable).insertOnConflictUpdate(
               TaxasEntregaTableCompanion.insert(
                 id: row['id'] as String,
-                tenantId: row['tenantId'] as String,
+                tenantId: (row['tenantId'] ?? row['tenant_id']) as String,
                 nome: row['nome'] as String,
-                tipoRegra: row['tipoRegra'] as String? ?? 'fixo',
+                tipoRegra: (row['tipoRegra'] ?? row['tipo_regra'] ?? 'fixo') as String,
                 bairro: Value(row['bairro'] as String?),
-                cepInicial: Value(row['cepInicial'] as String?),
-                cepFinal: Value(row['cepFinal'] as String?),
-                valorCentavos: row['valorCentavos'] as int? ?? 0,
-                ativo: row['ativo'] as bool? ?? true,
-                syncVersion: Value(row['syncVersion'] as int? ?? 1),
+                cepInicial: Value(cepIni),
+                cepFinal: Value(cepFin),
+                valorCentavos: (row['valorCentavos'] ?? row['valor_centavos'] ?? 0) as int,
+                ativo: (row['ativo'] ?? true) as bool,
+                pedidoMinimoCentavos: Value((row['pedidoMinimoCentavos'] ?? row['pedido_minimo_centavos'] ?? 0) as int?),
+                prazoEstimado: Value(row['prazoEstimado'] as String?),
+                observacoes: Value(row['observacoes'] as String?),
+                syncVersion: Value((row['syncVersion'] ?? row['sync_version'] ?? 1) as int),
                 syncStatus: SyncStatus.synced,
                 lastSyncedAt: Value(DateTime.now().toUtc()),
-                createdAt: _parseDate(row['createdAt'] as String?) ?? DateTime.now(),
-                updatedAt: _parseDate(row['updatedAt'] as String?) ?? DateTime.now(),
-                createdBy: row['createdBy'] as String? ?? '',
-                updatedBy: row['updatedBy'] as String? ?? '',
-                deletedAt: Value(_parseDate(row['deletedAt'] as String?)),
+                createdAt: _parseDate(row['createdAt'] ?? row['created_at']) ?? DateTime.now(),
+                updatedAt: _parseDate(row['updatedAt'] ?? row['updated_at']) ?? DateTime.now(),
+                createdBy: (row['createdBy'] ?? row['created_by'] ?? '') as String,
+                updatedBy: (row['updatedBy'] ?? row['updated_by'] ?? '') as String,
+                deletedAt: Value(_parseDate(row['deletedAt'] ?? row['deleted_at'])),
                 deletedBy: const Value(null),
               ),
             );
@@ -1782,8 +1829,7 @@ class SupabaseSyncService {
             );
         if (pedidoIdOrdem.isNotEmpty) {
           try {
-            String pedidoStatusCandidate = finalStatusOrdem;
-            if (finalStatusOrdem == 'pendente') pedidoStatusCandidate = 'confirmado';
+            final pedidoStatusCandidate = finalStatusOrdem;
 
             final existingPedido = await (db.select(db.pedidosTable)..where((t) => t.id.equals(pedidoIdOrdem))).getSingleOrNull();
             if (existingPedido == null || !StatusPrecedence.isHigherOrEqual(existingPedido.status, pedidoStatusCandidate)) {
@@ -1997,12 +2043,12 @@ class SupabaseSyncService {
     String finalStatus = incomingStatus;
     if (existingPedido != null) {
       final existingVersion = existingPedido.syncVersion;
-      if (incomingVersion < existingVersion) {
+      // Se localmente o pedido já está em status igual ou de precedência superior (ex: entregue vs pronto/saiu_para_entrega),
+      // o pull da nuvem nunca deve rebaixar o pedido local para um status anterior.
+      if (StatusPrecedence.isHigherOrEqual(existingPedido.status, incomingStatus)) {
         finalStatus = existingPedido.status;
-      } else if (incomingVersion == existingVersion) {
-        if (StatusPrecedence.isHigherOrEqual(existingPedido.status, incomingStatus)) {
-          finalStatus = existingPedido.status;
-        }
+      } else if (incomingVersion < existingVersion) {
+        finalStatus = existingPedido.status;
       }
     }
 

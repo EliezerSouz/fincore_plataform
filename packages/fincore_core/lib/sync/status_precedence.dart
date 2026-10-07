@@ -5,10 +5,12 @@ library fincore_core;
 ///
 /// Hierarquia de Precedência de Estados:
 /// - 0: rascunho
-/// - 1: confirmado / pendente
-/// - 2: em_preparo / emPreparo
-/// - 3: pronto
-/// - 4: entregue / finalizado / concluido
+/// - 1: pendente / aguardando_aprovacao (Solicitação recebida, aguardando aprovação da loja)
+/// - 2: confirmado / recebido / aprovado (Confirmado pelo operador, liberado para produção)
+/// - 3: em_preparo / emPreparo
+/// - 4: pronto / aguardando_retirada
+/// - 5: saiu_para_entrega / em_transito / a_caminho
+/// - 6: entregue / finalizado / concluido
 /// - 99: cancelado (Estado Terminal de Cancelamento)
 class StatusPrecedence {
   static int getRank(String? status) {
@@ -18,17 +20,30 @@ class StatusPrecedence {
       case 'rascunho':
         return 0;
       case 'pendente':
-      case 'confirmado':
+      case 'aguardando_aprovacao':
         return 1;
+      case 'confirmado':
+      case 'recebido':
+      case 'aprovado':
+        return 2;
       case 'em_preparo':
       case 'empreparo':
-        return 2;
-      case 'pronto':
         return 3;
+      case 'pronto':
+      case 'aguardando_retirada':
+        return 4;
+      case 'saiu_para_entrega':
+      case 'saiuparaentrega':
+      case 'saiu_entrega':
+      case 'em_entrega':
+      case 'em_transito':
+      case 'emtransito':
+      case 'a_caminho':
+        return 5;
       case 'entregue':
       case 'finalizado':
       case 'concluido':
-        return 4;
+        return 6;
       case 'cancelado':
         return 99;
       default:
@@ -57,7 +72,7 @@ class StatusPrecedence {
     if (incomingRank == 99) return true;
 
     // Se o estado atual for terminal de sucesso (entregue/finalizado/concluido), não aceita regressão
-    if (existingRank == 4 && incomingRank < 4) return false;
+    if (existingRank == 5 && incomingRank < 5) return false;
 
     // Se o estado atual for cancelado, não aceita mudança
     if (existingRank == 99) return false;

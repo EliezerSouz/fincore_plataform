@@ -4,6 +4,7 @@ import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import '../controllers/financeiro_controller.dart';
 import '../widgets/dialogs_caixa.dart';
+import 'fechamento_turno_page.dart';
 
 class FinanceiroPage extends StatefulWidget {
   const FinanceiroPage({super.key});
@@ -545,6 +546,7 @@ class _FinanceiroPageState extends State<FinanceiroPage> with SingleTickerProvid
             dataRowMaxHeight: 52,
             columns: const [
               DataColumn(label: Text('STATUS', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold))),
+              DataColumn(label: Text('TURNO', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold))),
               DataColumn(label: Text('OPERADOR', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold))),
               DataColumn(label: Text('ABERTURA', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold))),
               DataColumn(label: Text('FECHAMENTO', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold))),
@@ -576,6 +578,23 @@ class _FinanceiroPageState extends State<FinanceiroPage> with SingleTickerProvid
                         style: TextStyle(
                           color: isAberta ? FincoreColors.success : FincoreColors.textMuted,
                           fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  DataCell(
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: FincoreColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        FinanceiroController.formatarNomeTurno(s.observacoes, s.dataAbertura),
+                        style: TextStyle(
+                          color: FincoreColors.primary,
+                          fontSize: 11,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -627,6 +646,7 @@ class _FinanceiroPageState extends State<FinanceiroPage> with SingleTickerProvid
   void _mostrarDialogAbrirCaixa(FinanceiroController ctrl) {
     DialogAbrirCaixa.show(
       context,
+      controller: ctrl,
       onConfirm: (valor, turno) async {
         await ctrl.abrirCaixa(valorAberturaCentavos: valor, nomeTurno: turno);
       },
@@ -634,18 +654,7 @@ class _FinanceiroPageState extends State<FinanceiroPage> with SingleTickerProvid
   }
 
   void _mostrarDialogFecharCaixa(FinanceiroController ctrl) {
-    DialogFecharCaixa.show(
-      context,
-      resumo: ctrl.resumo,
-      controller: ctrl,
-      formatarValor: _fmt,
-      onConfirm: (valorContado, obs) async {
-        await ctrl.fecharCaixa(
-          valorContadoCentavos: valorContado,
-          observacoes: obs,
-        );
-      },
-    );
+    FechamentoTurnoPage.show(context, controller: ctrl);
   }
 
   void _mostrarDialogMovimento(FinanceiroController ctrl, [String initialTipo = 'sangria']) {
@@ -796,12 +805,12 @@ class _ExtratoSessaoDrawerState extends State<_ExtratoSessaoDrawer> with SingleT
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Sessão #${s.id.substring(0, 8)} ${obsTurno != null ? "· $obsTurno" : ""}',
+                    FinanceiroController.formatarNomeTurno(obsTurno, s.dataAbertura),
                     style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Operador: ${s.operadorNome} · Aberto: ${_dtFmt.format(s.dataAbertura.toLocal())}${s.dataFechamento != null ? " · Fechado: ${_dtFmt.format(s.dataFechamento!.toLocal())}" : ""}',
+                    'Sessão #${s.id.substring(0, 8)} · Operador: ${s.operadorNome} · Aberto: ${_dtFmt.format(s.dataAbertura.toLocal())}${s.dataFechamento != null ? " · Fechado: ${_dtFmt.format(s.dataFechamento!.toLocal())}" : ""}',
                     style: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
                   ),
                 ],

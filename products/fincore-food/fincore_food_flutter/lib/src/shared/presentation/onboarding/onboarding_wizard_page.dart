@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/cep_service.dart';
 
 class OnboardingWizardPage extends StatefulWidget {
   final VoidCallback onCreated;
@@ -13,6 +14,7 @@ class OnboardingWizardPage extends StatefulWidget {
 class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
   int _currentStep = 0;
   bool _isLoading = false;
+  bool _buscandoCep = false;
 
   final _formKey1 = GlobalKey<FormState>();
   final _formKey2 = GlobalKey<FormState>();
@@ -25,7 +27,18 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
   final _telefoneController = TextEditingController();
   final _emailEmpresaController = TextEditingController();
 
+  // Endereço
+  final _cepController = TextEditingController();
+  final _logradouroController = TextEditingController();
+  final _numeroController = TextEditingController();
+  final _complementoController = TextEditingController();
+  final _bairroController = TextEditingController();
+  final _cidadeController = TextEditingController();
+  final _estadoController = TextEditingController();
 
+  static final RegExp _emailRegExp = RegExp(
+    r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+  );
 
   @override
   void initState() {
@@ -44,7 +57,33 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
     _documentoController.dispose();
     _telefoneController.dispose();
     _emailEmpresaController.dispose();
+    _cepController.dispose();
+    _logradouroController.dispose();
+    _numeroController.dispose();
+    _complementoController.dispose();
+    _bairroController.dispose();
+    _cidadeController.dispose();
+    _estadoController.dispose();
     super.dispose();
+  }
+
+  Future<void> _buscarCep(String cepDigitado) async {
+    final cepLimpo = cepDigitado.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cepLimpo.length != 8) return;
+
+    setState(() => _buscandoCep = true);
+    final endereco = await CepService.consultarCep(cepLimpo);
+    setState(() => _buscandoCep = false);
+
+    if (endereco != null && mounted) {
+      _logradouroController.text = endereco.logradouro;
+      _bairroController.text = endereco.bairro;
+      _cidadeController.text = endereco.cidade;
+      _estadoController.text = endereco.uf;
+      if (endereco.complemento.isNotEmpty && _complementoController.text.isEmpty) {
+        _complementoController.text = endereco.complemento;
+      }
+    }
   }
 
   Future<void> _submitOnboarding() async {
@@ -52,7 +91,9 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
     try {
       String usuarioNome = 'Administrador';
       try {
-        usuarioNome = Supabase.instance.client.auth.currentUser?.userMetadata?['name'] ?? 'Administrador';
+        usuarioNome = Supabase.instance.client.auth.currentUser?.userMetadata?['name'] ??
+            Supabase.instance.client.auth.currentUser?.userMetadata?['full_name'] ??
+            'Administrador';
       } catch (_) {}
 
       final supabase = Supabase.instance.client;
@@ -67,10 +108,10 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
       final documentoFiscal = _documentoController.text.trim().isEmpty
           ? '00.000.000/0001-00'
           : _documentoController.text.trim();
-      final emailEmpresa = _emailEmpresaController.text.trim();
+      final emailEmpresa = _emailEmpresaController.text.trim().toLowerCase();
       final telefoneEmpresa = _telefoneController.text.trim();
 
-      // 1. Criar empresa no Supabase
+      // 1. Criar empresa no Supabase com endereço
       final empresaResult = await supabase.from('empresa').insert({
         'razaoSocial': razaoSocial,
         'nomeFantasia': nomeFantasia,
@@ -78,6 +119,13 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
         'email': emailEmpresa,
         'telefone': telefoneEmpresa,
         'segmento': _segmento,
+        'cep': _cepController.text.trim(),
+        'logradouro': _logradouroController.text.trim(),
+        'numero': _numeroController.text.trim(),
+        'complemento': _complementoController.text.trim(),
+        'bairro': _bairroController.text.trim(),
+        'cidade': _cidadeController.text.trim(),
+        'estado': _estadoController.text.trim().toUpperCase(),
         'status': 'PENDENTE_ATIVACAO',
         'plano': 'bronze',
         'timezone': 'America/Sao_Paulo',
@@ -108,7 +156,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
         final username = (currentUser.email ?? 'usuario').split('@').first;
         final insertUser = await supabase.from('usuarios').insert({
           'authUserId': currentUser.id,
-          'email': currentUser.email,
+          'email': currentUser.email?.toLowerCase().trim(),
           'username': username,
           'nome': usuarioNome,
           'ativo': true,
@@ -167,7 +215,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Empresa criada com sucesso! Aguardando ativação.'),
+          content: Text('Empresa cadastrada com sucesso! Bem-vindo ao FINCORE FOOD.'),
           backgroundColor: FincoreColors.success,
         ),
       );
@@ -209,7 +257,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: const BoxConstraints(maxWidth: 540),
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
               color: FincoreColors.surface,
@@ -221,7 +269,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'CONFIGURAÇÃO DO ESPAÇO',
+                  'CONFIGURAÇÃO DA EMPRESA',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: FincoreColors.textPrimary,
@@ -232,7 +280,9 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Passo ${_currentStep + 1} de 2',
+                  _currentStep == 0
+                      ? 'Passo 1 de 2: Dados do Negócio'
+                      : 'Passo 2 de 2: Fiscal, Contato e Endereço',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: FincoreColors.primary,
@@ -247,11 +297,11 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                   minHeight: 6,
                   borderRadius: BorderRadius.circular(3),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
                 
                 _buildStepContent(),
 
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -286,12 +336,15 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                                 width: 18,
                                 child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                               )
-                            : Text(_currentStep == 1 ? 'FINALIZAR' : 'AVANÇAR', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            : Text(
+                                _currentStep == 1 ? 'CONCLUIR CADASTRO' : 'AVANÇAR',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 TextButton.icon(
                   onPressed: () async {
                     await Supabase.instance.client.auth.signOut();
@@ -315,13 +368,13 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Sobre a Empresa', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+              const Text('Identificação da Empresa', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _razaoSocialController,
                 style: const TextStyle(color: FincoreColors.textPrimary),
                 decoration: InputDecoration(
-                  labelText: 'Razão Social',
+                  labelText: 'Razão Social *',
                   labelStyle: const TextStyle(color: FincoreColors.textSecondary),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -332,7 +385,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                     borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
-                validator: (value) => value == null || value.isEmpty ? 'Informe a Razão Social' : null,
+                validator: (value) => value == null || value.trim().isEmpty ? 'Informe a Razão Social' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -368,7 +421,7 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                     borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
-                items: ['Food Service', 'Varejo Geral', 'Logística', 'Outro']
+                items: ['Food Service', 'Restaurante / Bar', 'Pizzaria / Hamburgueria', 'Confeitaria / Padaria', 'Varejo Geral', 'Outro']
                     .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                     .toList(),
                 onChanged: (val) {
@@ -384,53 +437,61 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Informações Fiscais e Contato', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _documentoController,
-                style: const TextStyle(color: FincoreColors.textPrimary),
-                inputFormatters: FincoreFormatters.cnpjCpf,
-                decoration: InputDecoration(
-                  labelText: 'CNPJ / CPF',
-                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.border),
+              const Text('Fiscal e Contato', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _documentoController,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      inputFormatters: FincoreFormatters.cnpjCpf,
+                      decoration: InputDecoration(
+                        labelText: 'CNPJ / CPF *',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (value) => value == null || value.trim().isEmpty ? 'Informe o CNPJ/CPF' : null,
+                    ),
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: FincoreColors.primary),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _telefoneController,
+                      keyboardType: TextInputType.phone,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      inputFormatters: FincoreFormatters.telefone,
+                      decoration: InputDecoration(
+                        labelText: 'WhatsApp / Telefone *',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (value) => value == null || value.trim().isEmpty ? 'Informe o telefone' : null,
+                    ),
                   ),
-                ),
-                validator: (value) => value == null || value.isEmpty ? 'Informe o CNPJ/CPF' : null,
+                ],
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _telefoneController,
-                keyboardType: TextInputType.phone,
-                style: const TextStyle(color: FincoreColors.textPrimary),
-                inputFormatters: FincoreFormatters.telefone,
-                decoration: InputDecoration(
-                  labelText: 'Telefone de Contato',
-                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: FincoreColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: FincoreColors.primary),
-                  ),
-                ),
-                validator: (value) => value == null || value.isEmpty ? 'Informe o telefone' : null,
-              ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               TextFormField(
                 controller: _emailEmpresaController,
                 keyboardType: TextInputType.emailAddress,
                 style: const TextStyle(color: FincoreColors.textPrimary),
                 decoration: InputDecoration(
-                  labelText: 'E-mail Comercial',
+                  labelText: 'E-mail Comercial *',
                   labelStyle: const TextStyle(color: FincoreColors.textSecondary),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -441,7 +502,194 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
                     borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
-                validator: (value) => value == null || value.isEmpty ? 'Informe o e-mail comercial' : null,
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) return 'Informe o e-mail comercial';
+                  if (!_emailRegExp.hasMatch(value.trim())) return 'Informe um e-mail válido (ex: contato@empresa.com)';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 20),
+              const Divider(color: FincoreColors.border),
+              const SizedBox(height: 12),
+              const Text('Endereço do Estabelecimento', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: _cepController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: FincoreFormatters.cep,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      onChanged: (val) {
+                        if (val.replaceAll(RegExp(r'[^0-9]'), '').length == 8) {
+                          _buscarCep(val);
+                        }
+                      },
+                      decoration: InputDecoration(
+                        labelText: 'CEP *',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        suffixIcon: _buscandoCep
+                            ? Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: FincoreColors.primary),
+                                ),
+                              )
+                            : IconButton(
+                                icon: Icon(Icons.search, size: 20, color: FincoreColors.primary),
+                                onPressed: () => _buscarCep(_cepController.text),
+                              ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Informe o CEP' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 3,
+                    child: TextFormField(
+                      controller: _cidadeController,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Cidade *',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Informe a Cidade' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 70,
+                    child: TextFormField(
+                      controller: _estadoController,
+                      textCapitalization: TextCapitalization.characters,
+                      maxLength: 2,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'UF *',
+                        counterText: '',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'UF' : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextFormField(
+                      controller: _logradouroController,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Logradouro / Rua *',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Informe a Rua/Avenida' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 1,
+                    child: TextFormField(
+                      controller: _numeroController,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Nº *',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Nº' : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _bairroController,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Bairro *',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Informe o Bairro' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _complementoController,
+                      style: const TextStyle(color: FincoreColors.textPrimary),
+                      decoration: InputDecoration(
+                        labelText: 'Complemento',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: FincoreColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: FincoreColors.primary),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -451,3 +699,4 @@ class _OnboardingWizardPageState extends State<OnboardingWizardPage> {
     }
   }
 }
+

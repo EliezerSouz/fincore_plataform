@@ -91,7 +91,7 @@ class KdsController extends ChangeNotifier {
         StatusOrdemPreparo.pendente        => 'confirmado',
         StatusOrdemPreparo.emPreparo       => 'em_preparo',
         StatusOrdemPreparo.pronto          => 'pronto',
-        StatusOrdemPreparo.saiuParaEntrega => 'pronto',
+        StatusOrdemPreparo.saiuParaEntrega => 'saiu_para_entrega',
         StatusOrdemPreparo.entregue        => 'entregue',
         StatusOrdemPreparo.cancelado       => 'cancelado',
       };

@@ -152,7 +152,7 @@ class DadosEntrega {
     DateTime? dataHora,
     this.distanciaMetros,
     this.tempoDeslocamentoSegundos,
-  }) : dataHora = dataHora ?? DateTime.now();
+  }) : dataHora = dataHora ?? DateTime.now().add(const Duration(hours: 2));
 
   DadosEntrega copyWith({
     String? tipo,
@@ -283,6 +283,10 @@ class PdvExpressController extends ChangeNotifier {
   // Estado da última venda finalizada (para Undo e para abrir comprovante)
   PedidoDraft? _lastVenda;
   PedidoDraft? get lastVenda => _lastVenda;
+  int? _lastNumeroPedido;
+  int? get lastNumeroPedido => _lastNumeroPedido;
+  String? _lastPedidoId;
+  String? get lastPedidoId => _lastPedidoId;
   Timer? _resetTimer;
   bool _isPersistingVenda = false;
 
@@ -1264,6 +1268,8 @@ class PdvExpressController extends ChangeNotifier {
       }
 
       _lastVenda = pedido;
+      _lastNumeroPedido = result.numeroPedido;
+      _lastPedidoId = result.pedidoId;
       _state = PdvState.completed;
       notifyListeners();
 

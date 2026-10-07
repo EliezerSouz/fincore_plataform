@@ -43,5 +43,6 @@ data/
 DATA/
 backups/
 fincore_food/
+releases/
 *.dpapi
 

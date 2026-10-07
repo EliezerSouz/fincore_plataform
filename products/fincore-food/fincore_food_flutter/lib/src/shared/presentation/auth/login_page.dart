@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -60,6 +61,34 @@ class _LoginPageState extends State<LoginPage>
     _entryController.dispose();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loginComGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      final redirectUrl = kIsWeb ? null : 'io.supabase.fincore://login-callback/';
+      await Supabase.instance.client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: redirectUrl,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white, size: 18),
+                const SizedBox(width: 10),
+                Expanded(child: Text('Erro ao autenticar com Google: $e')),
+              ],
+            ),
+            backgroundColor: FincoreColors.danger,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _login() async {
@@ -521,39 +550,26 @@ class _LoginPageState extends State<LoginPage>
                               ),
                               const SizedBox(height: 32),
 
-                              // Botão Entrar com gradiente
-                              Container(
-                                decoration: BoxDecoration(
-                                  gradient: _isLoading
-                                      ? null
-                                      : FincoreColors.primaryGradient,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: _isLoading
-                                      ? null
-                                      : FincoreShadows.glow(
-                                          FincoreColors.primary,
-                                          intensity: 0.25,
-                                        ),
-                                ),
+                              // Botão Entrar
+                              SizedBox(
+                                width: double.infinity,
+                                height: 48,
                                 child: ElevatedButton(
                                   onPressed: _isLoading ? null : _login,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.transparent,
-                                    shadowColor: Colors.transparent,
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 16),
+                                    backgroundColor: FincoreColors.primary,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
                                     ),
-                                    disabledBackgroundColor:
-                                        FincoreColors.surface,
+                                    elevation: 4,
+                                    shadowColor: FincoreColors.primary.withValues(alpha: 0.4),
                                   ),
                                   child: _isLoading
-                                      ? SizedBox(
+                                      ? const SizedBox(
                                           height: 20,
                                           width: 20,
                                           child: CircularProgressIndicator(
-                                            color: FincoreColors.primary,
+                                            color: Colors.white,
                                             strokeWidth: 2,
                                           ),
                                         )
@@ -568,7 +584,50 @@ class _LoginPageState extends State<LoginPage>
                                         ),
                                 ),
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 16),
+
+                              // Botão Continuar com Google (OAuth)
+                              SizedBox(
+                                width: double.infinity,
+                                height: 48,
+                                child: OutlinedButton(
+                                  onPressed: _isLoading ? null : _loginComGoogle,
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: FincoreColors.border, width: 1.2),
+                                    backgroundColor: FincoreColors.background.withValues(alpha: 0.5),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.white,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.g_mobiledata_rounded,
+                                          color: Color(0xFF4285F4),
+                                          size: 20,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      const Text(
+                                        'Continuar com o Google',
+                                        style: TextStyle(
+                                          color: FincoreColors.textPrimary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
 
                               // Divider
                               Row(
@@ -583,7 +642,7 @@ class _LoginPageState extends State<LoginPage>
                                     padding:
                                         EdgeInsets.symmetric(horizontal: 16),
                                     child: Text(
-                                      'ou',
+                                      'ou crie uma nova conta',
                                       style: TextStyle(
                                         color: FincoreColors.textMuted,
                                         fontSize: 12,
@@ -598,7 +657,7 @@ class _LoginPageState extends State<LoginPage>
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 20),
 
                               // Cadastrar
                               OutlinedButton(
@@ -624,11 +683,11 @@ class _LoginPageState extends State<LoginPage>
                                   ),
                                 ),
                                 child: const Text(
-                                  'CRIAR CONTA',
+                                  'CRIAR CONTA COM E-MAIL',
                                   style: TextStyle(
                                     color: FincoreColors.textPrimary,
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 14,
+                                    fontSize: 13,
                                     letterSpacing: 0.5,
                                   ),
                                 ),
@@ -637,7 +696,7 @@ class _LoginPageState extends State<LoginPage>
                               const SizedBox(height: 32),
                               Center(
                                 child: Text(
-                                  'v1.2.2',
+                                  AppConstants.version,
                                   style: TextStyle(
                                     color: FincoreColors.textMuted
                                         .withValues(alpha: 0.5),

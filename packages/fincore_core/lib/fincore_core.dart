@@ -1,5 +1,6 @@
 library fincore_core;
 
+export 'common/app_constants.dart';
 export 'common/core_models.dart';
 export 'common/domain_primitives.dart';
 export 'common/kds_models.dart';

@@ -719,6 +719,11 @@ class DashboardRepository {
           final prodId = entry.key;
           final qtdReservadaDia = entry.value;
 
+          final prodRow = await (db.select(db.produtosTable)
+                ..where((t) => t.id.equals(prodId) & t.deletedAt.isNull()))
+              .getSingleOrNull();
+          if (prodRow == null || !prodRow.ativo) continue;
+
           final estoqueRecord = await (db.select(db.estoqueProdutosTable)
                 ..where((t) => t.tenantId.equals(activeTenant) & t.produtoId.equals(prodId) & t.deletedAt.isNull()))
               .getSingleOrNull();
@@ -884,12 +889,14 @@ class DashboardRepository {
       }
 
       final prodRow = await (db.select(db.produtosTable)
-            ..where((t) => t.id.equals(est.produtoId)))
+            ..where((t) => t.id.equals(est.produtoId) & t.deletedAt.isNull()))
           .getSingleOrNull();
+
+      if (prodRow == null || !prodRow.ativo) continue;
 
       rupturaEstoque.add(RupturaEstoqueItem(
         produtoId: est.produtoId,
-        nomeProduto: prodRow?.nome ?? 'Produto',
+        nomeProduto: prodRow.nome,
         quantidadeDisponivel: disponivel,
         consumoMedioPorHora: consumoPorHora,
         horasAteZerar: horasAteZerar,

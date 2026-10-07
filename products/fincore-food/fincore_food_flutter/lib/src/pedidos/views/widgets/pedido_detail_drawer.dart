@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:fincore_design_system/fincore_design_system.dart';
@@ -38,9 +39,14 @@ class PedidoDetailDrawer extends StatefulWidget {
   /// Callback para ação de cancelar
   final VoidCallback? onCancelar;
 
-  /// Callback para solicitar motivo de reversão
+  /// Callback para solicitar motivo de reversão (legado)
   final Future<String?> Function(String deStatus, String paraStatus)?
       onSolicitarMotivoReversao;
+
+  /// Callback avançado para reversão com escolha de status destino e motivo
+  final Future<({StatusOrdemPreparo destino, String motivo})?> Function(
+      OrdemPreparo ordem, List<StatusOrdemPreparo> opcoesDestino)?
+      onSolicitarReversao;
 
   const PedidoDetailDrawer({
     super.key,
@@ -53,6 +59,7 @@ class PedidoDetailDrawer extends StatefulWidget {
     this.onEditar,
     this.onCancelar,
     this.onSolicitarMotivoReversao,
+    this.onSolicitarReversao,
   });
 
   @override
@@ -287,8 +294,8 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
       String? tel = pedido.clienteTelefoneAvulso;
       String? nome = pedido.clienteNomeAvulso ?? widget.parsed.cliente;
 
-      // Se tiver clienteId, busca o cliente cadastrado
-      if (pedido.clienteId != null && (tel == null || tel.isEmpty)) {
+      // Se tiver clienteId, busca o cliente cadastrado oficial
+      if (pedido.clienteId != null) {
         try {
           final clienteRow = await (db.select(db.clientesTable)
                 ..where((c) => c.id.equals(pedido.clienteId!) & c.deletedAt.isNull()))
@@ -300,6 +307,29 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
             }
           }
         } catch (_) {}
+      }
+
+      // Se ainda não encontrou ou nome genérico, tenta resolver por telefone
+      if (nome == null || nome.isEmpty || nome == 'Consumidor' || nome == 'Cliente') {
+        final searchTel = tel ?? pedido.clienteTelefoneAvulso;
+        if (searchTel != null && searchTel.isNotEmpty) {
+          final telDigits = searchTel.replaceAll(RegExp(r'\D'), '');
+          if (telDigits.length >= 8) {
+            try {
+              final clientes = await (db.select(db.clientesTable)
+                    ..where((c) => c.deletedAt.isNull()))
+                  .get();
+              final match = clientes.where((c) {
+                final cDigits = c.telefone.replaceAll(RegExp(r'\D'), '');
+                return cDigits.length >= 8 && (cDigits.endsWith(telDigits) || telDigits.endsWith(cDigits));
+              }).firstOrNull;
+              if (match != null) {
+                nome = match.nome;
+                tel = match.telefone;
+              }
+            } catch (_) {}
+          }
+        }
       }
 
       // Busca forma de pagamento para verificar se e PIX
@@ -334,72 +364,213 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
 
   /// Abre o WhatsAppDialog com dados do pedido, incluindo card PIX se aplicavel
   Future<void> _abrirWhatsApp() async {
-    final tel = _telefonePedido ?? widget.parsed.telefone;
-    if (tel.isEmpty) {
+    try {
+      final db = DependencyInjection().get<FincoreDatabase>();
+
+      PedidoData? pedidoRow;
+      try {
+        pedidoRow = await (db.select(db.pedidosTable)
+              ..where((t) => t.id.equals(widget.ordem.pedidoId)))
+            .getSingleOrNull();
+      } catch (_) {}
+
+      final pedidoMemoria = widget.controller.pedidosMap[widget.ordem.pedidoId];
+
+      String? tel = _telefonePedido ?? pedidoRow?.clienteTelefoneAvulso ?? pedidoMemoria?.clienteTelefoneAvulso ?? widget.parsed.telefone;
+      String nome = _nomeClientePedido ?? pedidoRow?.clienteNomeAvulso ?? pedidoMemoria?.clienteNomeAvulso ?? widget.parsed.cliente;
+      final clienteId = pedidoRow?.clienteId ?? pedidoMemoria?.clienteId;
+
+      if (clienteId != null && tel.isEmpty) {
+        try {
+          final clienteRow = await (db.select(db.clientesTable)
+                ..where((c) => c.id.equals(clienteId) & c.deletedAt.isNull()))
+              .getSingleOrNull();
+          if (clienteRow != null) {
+            tel = clienteRow.telefone;
+            if (clienteRow.nome.isNotEmpty) {
+              nome = clienteRow.nome;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (tel == null || tel.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: FincoreColors.danger,
+              content: Text('Nenhum telefone cadastrado para este cliente.'),
+            ),
+          );
+        }
+        return;
+      }
+
+      // ── Itens do pedido ──────────────────────────────────────────
+      List<ItemPedidoData> itemRows = [];
+      try {
+        itemRows = await (db.select(db.itensPedidoTable)
+              ..where((t) => t.pedidoId.equals(widget.ordem.pedidoId) & t.deletedAt.isNull()))
+            .get();
+      } catch (_) {}
+
+      List<Map<String, dynamic>> itensWhats = [];
+      if (itemRows.isNotEmpty) {
+        itensWhats = itemRows.map((it) => {
+          'nome': it.nomeProduto,
+          'qtd': it.quantidade,
+          'unit': it.valorUnitarioCentavos / 100.0,
+          'total': it.valorTotalCentavos / 100.0,
+          'obs': it.observacoes,
+        }).toList();
+      } else {
+        itensWhats = widget.ordem.itens.map((it) {
+          final pUnit = _itemPrecosEfetivos[it.produtoId] ??
+              widget.controller.precoUnitarioCentavos(it.produtoId);
+          final totalItemCentavos = (it.quantidade * pUnit).round();
+          return {
+            'nome': it.nomeProduto,
+            'qtd': it.quantidade,
+            'unit': pUnit / 100.0,
+            'total': totalItemCentavos / 100.0,
+            'obs': null,
+          };
+        }).toList();
+      }
+
+      // ── Endereço de entrega ───────────────────────────────────────
+      String? enderecoStr;
+      if (pedidoRow?.enderecoJson != null && pedidoRow!.enderecoJson!.isNotEmpty) {
+        try {
+          final map = jsonDecode(pedidoRow.enderecoJson!) as Map<String, dynamic>;
+          final logradouro = (map['logradouro'] as String?)?.trim() ?? '';
+          final numero = (map['numero'] as String?)?.trim() ?? '';
+          final bairro = (map['bairro'] as String?)?.trim() ?? '';
+          final cidade = (map['cidade'] as String?)?.trim() ?? '';
+          final complemento = (map['complemento'] as String?)?.trim() ?? '';
+          final ref = (map['pontoReferencia'] as String? ?? map['referencia'] as String?)?.trim() ?? '';
+
+          final parts = <String>[];
+          if (logradouro.isNotEmpty) {
+            parts.add(numero.isNotEmpty ? '$logradouro, $numero' : logradouro);
+          }
+          if (complemento.isNotEmpty) parts.add(complemento);
+          if (bairro.isNotEmpty) parts.add(bairro);
+          if (cidade.isNotEmpty) parts.add(cidade);
+          if (ref.isNotEmpty) parts.add('(Ref: $ref)');
+          if (parts.isNotEmpty) enderecoStr = parts.join(' - ');
+        } catch (_) {}
+      }
+      if (enderecoStr == null || enderecoStr.isEmpty) {
+        final endParsed = widget.parsed.endereco;
+        final bairroParsed = widget.parsed.bairro;
+        if (endParsed != null && endParsed.isNotEmpty) {
+          enderecoStr = endParsed + (bairroParsed != null && bairroParsed.isNotEmpty ? ' - $bairroParsed' : '');
+        }
+      }
+
+      // ── Data e Hora prevista ──────────────────────────────────────
+      final dt = pedidoRow?.dataHoraEntregaPrevista?.toLocal() ??
+                 pedidoRow?.dataHoraCriacao.toLocal() ??
+                 widget.ordem.criadaEm.toLocal();
+      final dataStr = '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} às ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+      // ── Logística e Pagamento ─────────────────────────────────────
+      final tipoAtendimento = pedidoRow?.tipoLogistica ?? widget.parsed.tipoLogistica;
+      final formaPagtoStr = pedidoRow?.formaPagamentoNome ?? widget.parsed.pagamento;
+
+      // ── Valores monetários ────────────────────────────────────────
+      final subtotal = (pedidoRow != null && pedidoRow.valorSubtotalCentavos > 0)
+          ? (pedidoRow.valorSubtotalCentavos / 100.0)
+          : itensWhats.fold<double>(0.0, (acc, item) => acc + ((item['total'] as num?)?.toDouble() ?? 0.0));
+      final taxaEntrega = (pedidoRow?.valorTaxaEntregaCentavos ?? 0) / 100.0;
+      final taxaServico = (pedidoRow?.valorTaxaServicoCentavos ?? 0) / 100.0;
+      final total = (pedidoRow != null && pedidoRow.valorTotalCentavos > 0)
+          ? (pedidoRow.valorTotalCentavos / 100.0)
+          : (widget.controller.totalOrdemCentavos(widget.ordem) / 100.0);
+
+      // ── Observações ───────────────────────────────────────────────
+      final obs = (pedidoRow?.observacoes != null && pedidoRow!.observacoes!.isNotEmpty)
+          ? pedidoRow.observacoes
+          : (widget.parsed.observacoesLimpa.isNotEmpty ? widget.parsed.observacoesLimpa : null);
+
+      // ── Gera card PIX se a forma de pagamento for PIX e tiver chave cadastrada ──
+      PixWhatsAppInfo? pixInfo;
+      if (_formaPagamentoIsPix && _pixChave != null && _pixChave!.isNotEmpty) {
+        try {
+          final config = await (db.select(db.empresaConfiguracaoTable)..limit(1)).getSingleOrNull();
+          final copiaECola = PixGenerator.gerarCopiaCola(
+            chave: _pixChave!,
+            favorecido: (config?.pixFavorecido != null && config!.pixFavorecido!.isNotEmpty)
+                ? config.pixFavorecido!
+                : nome,
+            cidade: 'Sorocaba',
+            valor: total,
+            tipoChave: _pixTipoChave,
+          );
+          pixInfo = PixWhatsAppInfo(
+            chaveDisplay: _pixChave!,
+            tipoChave: _pixTipoChave ?? 'PIX',
+            copiaECola: copiaECola,
+          );
+        } catch (pixErr) {
+          debugPrint('[PedidoDetailDrawer] Erro ao gerar PIX para WhatsApp: $pixErr');
+        }
+      }
+
+      final numPedido = (pedidoRow?.numeroPedido != null)
+          ? '#${pedidoRow!.numeroPedido.toString().padLeft(6, '0')}'
+          : (pedidoMemoria?.numeroPedido != null
+              ? '#${pedidoMemoria!.numeroPedido.toString().padLeft(6, '0')}'
+              : '#${widget.ordem.pedidoId.length > 6 ? widget.ordem.pedidoId.substring(0, 6).toUpperCase() : widget.ordem.pedidoId.toUpperCase()}');
+
+      String? empresaNome;
+      try {
+        if (TenantContext().hasContext) {
+          empresaNome = TenantContext().empresa.nomeFantasia.isNotEmpty
+              ? TenantContext().empresa.nomeFantasia
+              : TenantContext().empresa.razaoSocial;
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+
+      final resumoWhats = WhatsAppService.gerarTextoResumoPedido(
+        nomeCliente: nome,
+        numeroPedidoOuId: numPedido.replaceAll('#', ''),
+        tipoAtendimento: tipoAtendimento,
+        dataHoraPrevista: dataStr,
+        itens: itensWhats,
+        subtotal: subtotal,
+        taxaEntrega: taxaEntrega,
+        taxaServico: taxaServico,
+        total: total,
+        formaPagamento: formaPagtoStr,
+        enderecoEntrega: tipoAtendimento.toLowerCase().contains('entrega') ? enderecoStr : null,
+        observacoes: obs,
+        nomeEmpresa: empresaNome,
+      );
+
+      await WhatsAppDialog.show(
+        context,
+        rawPhone: tel,
+        clienteNome: nome,
+        initialMessage: resumoWhats,
+        enderecoCliente: enderecoStr,
+        pixInfo: pixInfo,
+        numeroPedido: numPedido,
+        nomeEmpresa: empresaNome,
+      );
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
+            content: Text('Erro ao abrir WhatsApp: $e'),
             backgroundColor: FincoreColors.danger,
-            content: Text('Nenhum telefone cadastrado para este cliente.'),
           ),
         );
       }
-      return;
     }
-
-    final nome = _nomeClientePedido ?? widget.parsed.cliente;
-    final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
-    final numPedido = pedido?.numeroPedido != null
-        ? '#${pedido!.numeroPedido.toString().padLeft(6, '0')}'
-        : widget.ordem.pedidoId.substring(0, 8).toUpperCase();
-
-    // Gera card PIX se a forma de pagamento for PIX e tiver chave cadastrada
-    PixWhatsAppInfo? pixInfo;
-    if (_formaPagamentoIsPix && _pixChave != null && _pixChave!.isNotEmpty) {
-      try {
-        final db = DependencyInjection().get<FincoreDatabase>();
-        final config = await (db.select(db.empresaConfiguracaoTable)).getSingleOrNull();
-        final totalCentavos = widget.controller.totalOrdemCentavos(widget.ordem);
-        final copiaECola = PixGenerator.gerarCopiaCola(
-          chave: _pixChave!,
-          favorecido: (config?.pixFavorecido != null && config!.pixFavorecido!.isNotEmpty)
-              ? config.pixFavorecido!
-              : nome,
-          cidade: 'Sorocaba',
-          valor: totalCentavos / 100,
-          tipoChave: _pixTipoChave,
-        );
-        pixInfo = PixWhatsAppInfo(
-          chaveDisplay: _pixChave!,
-          tipoChave: _pixTipoChave ?? 'PIX',
-          copiaECola: copiaECola,
-        );
-      } catch (_) {}
-    }
-
-    String? empresaNome;
-    try {
-      if (TenantContext().hasContext) {
-        empresaNome = TenantContext().empresa.nomeFantasia.isNotEmpty
-            ? TenantContext().empresa.nomeFantasia
-            : TenantContext().empresa.razaoSocial;
-      }
-    } catch (_) {}
-
-    if (!mounted) return;
-    await WhatsAppDialog.show(
-      context,
-      rawPhone: tel,
-      clienteNome: nome,
-      initialMessage: WhatsAppService.gerarTextoContatoKanban(
-        nomeCliente: nome,
-        numeroPedidoOuId: numPedido,
-        nomeEmpresa: empresaNome,
-      ),
-      pixInfo: pixInfo,
-      numeroPedido: numPedido,
-      nomeEmpresa: empresaNome,
-    );
   }
 
   Future<void> _carregarPrecosEfetivos() async {
@@ -438,6 +609,7 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     StatusOrdemPreparo.pendente: 'Pendente',
     StatusOrdemPreparo.emPreparo: 'Em Preparo',
     StatusOrdemPreparo.pronto: 'Pronto',
+    StatusOrdemPreparo.saiuParaEntrega: 'Saiu p/ Entrega',
     StatusOrdemPreparo.entregue: 'Entregue',
     StatusOrdemPreparo.cancelado: 'Cancelado',
   };
@@ -445,7 +617,8 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   static const _statusColors = {
     StatusOrdemPreparo.pendente: Color(0xFFF97316),
     StatusOrdemPreparo.emPreparo: Color(0xFFF59E0B),
-    StatusOrdemPreparo.pronto: Color(0xFF06B6D4),
+    StatusOrdemPreparo.pronto: Color(0xFF10B981),
+    StatusOrdemPreparo.saiuParaEntrega: Color(0xFF06B6D4),
     StatusOrdemPreparo.entregue: Color(0xFF10B981),
     StatusOrdemPreparo.cancelado: Color(0xFFEF4444),
   };
@@ -459,6 +632,11 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   // ── Próxima ação pelo role ────────────────────────────────────────────
 
   StatusOrdemPreparo? get _proximoStatus {
+    final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
+    final isDelivery = (pedido?.tipoLogistica.toLowerCase().contains('entrega') ?? false) ||
+        widget.parsed.tipoLogistica.toLowerCase().contains('entrega') ||
+        widget.parsed.tipoLogistica.toLowerCase().contains('delivery');
+
     switch (widget.ordem.status) {
       case StatusOrdemPreparo.pendente:
         return PermissaoService.podeIniciarPreparo(widget.userRole)
@@ -469,6 +647,15 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
             ? StatusOrdemPreparo.pronto
             : null;
       case StatusOrdemPreparo.pronto:
+        if (isDelivery) {
+          return PermissaoService.podeEntregar(widget.userRole)
+              ? StatusOrdemPreparo.saiuParaEntrega
+              : null;
+        }
+        return PermissaoService.podeEntregar(widget.userRole)
+            ? StatusOrdemPreparo.entregue
+            : null;
+      case StatusOrdemPreparo.saiuParaEntrega:
         return PermissaoService.podeEntregar(widget.userRole)
             ? StatusOrdemPreparo.entregue
             : null;
@@ -478,13 +665,20 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   }
 
   String get _proximoLabel {
+    final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
+    final isDelivery = (pedido?.tipoLogistica.toLowerCase().contains('entrega') ?? false) ||
+        widget.parsed.tipoLogistica.toLowerCase().contains('entrega') ||
+        widget.parsed.tipoLogistica.toLowerCase().contains('delivery');
+
     switch (widget.ordem.status) {
       case StatusOrdemPreparo.pendente:
         return 'Iniciar Preparo';
       case StatusOrdemPreparo.emPreparo:
         return 'Marcar como Pronto';
       case StatusOrdemPreparo.pronto:
-        return 'Confirmar Entrega';
+        return isDelivery ? 'Saiu para Entrega' : 'Finalizar Entrega';
+      case StatusOrdemPreparo.saiuParaEntrega:
+        return 'Confirmar Entrega (Finalizar)';
       default:
         return '';
     }
@@ -506,27 +700,65 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     }
   }
 
-  // ── Ação de reverter status ───────────────────────────────────────────
+  // ── Ação de reverter status com escolha de destino ─────────────────────
 
-  StatusOrdemPreparo? get _statusAnterior {
+  List<StatusOrdemPreparo> get _opcoesReversao {
     switch (widget.ordem.status) {
       case StatusOrdemPreparo.emPreparo:
-        return StatusOrdemPreparo.pendente;
+        return [StatusOrdemPreparo.pendente];
       case StatusOrdemPreparo.pronto:
-        return StatusOrdemPreparo.emPreparo;
+        return [StatusOrdemPreparo.emPreparo, StatusOrdemPreparo.pendente];
+      case StatusOrdemPreparo.saiuParaEntrega:
+        return [
+          StatusOrdemPreparo.pronto,
+          StatusOrdemPreparo.emPreparo,
+          StatusOrdemPreparo.pendente,
+        ];
       case StatusOrdemPreparo.entregue:
-        return StatusOrdemPreparo.pronto;
+        final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
+        final isDelivery = (pedido?.tipoLogistica.toLowerCase().contains('entrega') ?? false) ||
+            widget.parsed.tipoLogistica.toLowerCase().contains('entrega');
+        return [
+          if (isDelivery) StatusOrdemPreparo.saiuParaEntrega,
+          StatusOrdemPreparo.pronto,
+          StatusOrdemPreparo.emPreparo,
+          StatusOrdemPreparo.pendente,
+        ];
       case StatusOrdemPreparo.cancelado:
-        return StatusOrdemPreparo.pendente;
+        return [
+          StatusOrdemPreparo.pendente,
+          StatusOrdemPreparo.emPreparo,
+          StatusOrdemPreparo.pronto,
+        ];
       default:
-        return null;
+        return [];
     }
   }
 
   Future<void> _reverterStatus() async {
-    final anterior = _statusAnterior;
-    if (anterior == null) return;
+    final opcoes = _opcoesReversao;
+    if (opcoes.isEmpty) return;
 
+    if (widget.onSolicitarReversao != null) {
+      final res = await widget.onSolicitarReversao!(widget.ordem, opcoes);
+      if (res == null) return;
+
+      setState(() => _loadingAction = true);
+      try {
+        await widget.controller.moverStatus(
+          widget.ordem,
+          res.destino,
+          motivo: res.motivo,
+        );
+        widget.onStatusChanged?.call();
+        if (mounted) Navigator.of(context).pop();
+      } finally {
+        if (mounted) setState(() => _loadingAction = false);
+      }
+      return;
+    }
+
+    final anterior = opcoes.first;
     final deLabel = _statusLabel;
     final paraLabel = _statusLabels[anterior] ?? anterior.name;
     final motivo = await widget.onSolicitarMotivoReversao?.call(deLabel, paraLabel);
@@ -596,6 +828,11 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   // ── Lifecycle horizontal ───────────────────────────────────────────────
 
   Widget _buildLifecycle() {
+    final pedido = widget.controller.pedidosMap[widget.ordem.pedidoId];
+    final isDelivery = (pedido?.tipoLogistica.toLowerCase().contains('entrega') ?? false) ||
+        widget.parsed.tipoLogistica.toLowerCase().contains('entrega') ||
+        widget.parsed.tipoLogistica.toLowerCase().contains('delivery');
+
     final steps = [
       _LifecycleStep(
         label: 'Criado',
@@ -611,9 +848,17 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
       _LifecycleStep(
         label: 'Pronto',
         completed: widget.ordem.status == StatusOrdemPreparo.pronto ||
+            widget.ordem.status == StatusOrdemPreparo.saiuParaEntrega ||
             widget.ordem.status == StatusOrdemPreparo.entregue,
         isCurrent: widget.ordem.status == StatusOrdemPreparo.pronto,
       ),
+      if (isDelivery)
+        _LifecycleStep(
+          label: 'A Caminho',
+          completed: widget.ordem.status == StatusOrdemPreparo.saiuParaEntrega ||
+              widget.ordem.status == StatusOrdemPreparo.entregue,
+          isCurrent: widget.ordem.status == StatusOrdemPreparo.saiuParaEntrega,
+        ),
       _LifecycleStep(
         label: 'Entregue',
         completed: widget.ordem.status == StatusOrdemPreparo.entregue,
@@ -1293,7 +1538,7 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     final isCozinha = widget.userRole?.toUpperCase() == 'COZINHA';
     final proxStatus = _proximoStatus;
     final podeReverter = !isCozinha && PermissaoService.podeRevertarStatus(widget.userRole) &&
-        _statusAnterior != null;
+        _opcoesReversao.isNotEmpty;
     final podeEditar = !isCozinha && PermissaoService.podeEditarPedido(widget.userRole) &&
         widget.ordem.status == StatusOrdemPreparo.pendente;
     final podeCancelar = !isCozinha && PermissaoService.podeCancelarPedido(widget.userRole) &&

@@ -53,13 +53,13 @@ class DatabaseInitializer {
     // 0. Inicializar Serviço de Logs unificado
     // ──────────────────────────────────────────────────────────────
     if (kIsWeb) {
-      LogService.init('', appVersion: 'v1.2.2');
+      LogService.init('', appVersion: AppConstants.version);
       await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso (Web).');
     } else if (!isTest) {
       // Pasta LOG criada no mesmo diretório onde o executável (.exe) está rodando
       final exeDir = p.dirname(Platform.resolvedExecutable);
       final logDir = p.join(exeDir, 'LOG');
-      LogService.init(logDir, appVersion: 'v1.2.2');
+      LogService.init(logDir, appVersion: AppConstants.version);
       await LogService.instance.info(LogModule.app, 'FINCORE Platform inicializado com sucesso.');
     } else {
       try {
@@ -418,8 +418,8 @@ class DatabaseInitializer {
     // 8. Inicializar Supabase SDK + SupabaseSyncService
     // ──────────────────────────────────────────────────────────────
     if (!isTest) {
-      var supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
-      var supabaseKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+      var supabaseUrl = dotenv.isInitialized ? (dotenv.env['SUPABASE_URL'] ?? '') : '';
+      var supabaseKey = dotenv.isInitialized ? (dotenv.env['SUPABASE_ANON_KEY'] ?? '') : '';
 
       if (supabaseUrl.isEmpty) {
         supabaseUrl = 'https://nlaxdeqbordmovukyypk.supabase.co';
@@ -448,14 +448,14 @@ class DatabaseInitializer {
       stopwatch.stop();
       final elapsedMs = stopwatch.elapsedMilliseconds;
       final elapsedStr = elapsedMs < 1000 ? '${elapsedMs}ms' : '${(elapsedMs / 1000).toStringAsFixed(2)}s';
-      final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
+      final supabaseUrl = dotenv.isInitialized ? (dotenv.env['SUPABASE_URL'] ?? '') : '';
       final supabaseShort = supabaseUrl.isNotEmpty
           ? '${supabaseUrl.replaceFirst('https://', '').split('.').first}.supabase.co'
           : 'nao configurado';
 
       await FincoreLogger.instance.beginCycle(
         LogModule.startup,
-        'INICIALIZACAO DO SISTEMA FINCORE v1.2.2',
+        'INICIALIZACAO DO SISTEMA FINCORE ${AppConstants.version}',
       );
       await LogService.instance.info(LogModule.startup, 'Banco SQLite local inicializado com sucesso (fincore_v3.db)');
       await LogService.instance.info(LogModule.startup, 'Arquitetura local-first ativa (sem Serverpod)');

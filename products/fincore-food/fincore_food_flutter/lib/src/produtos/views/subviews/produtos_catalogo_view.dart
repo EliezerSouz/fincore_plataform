@@ -19,6 +19,7 @@ import 'package:fincore_food_flutter/src/shared/presentation/widgets/fincore_sec
 import 'package:fincore_food_flutter/src/shared/presentation/validators/fincore_validators.dart';
 import 'package:fincore_food_flutter/src/shared/services/commercial_pricing_engine.dart';
 import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
+import 'package:fincore_food_flutter/src/estoque/controllers/planejamento_controller.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:uuid/uuid.dart';
@@ -693,6 +694,142 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
       final isNew = _selectedProduto == null;
       final id = isNew ? const Uuid().v4() : _selectedProduto!.id;
 
+      // Validação de segurança operacional: Não permitir inativar produto com estoque negativo ou reservas ativas sem ajuste
+      if (!_ativo && !isNew) {
+        final db = DependencyInjection().get<FincoreDatabase>();
+        final estoqueRow = await (db.select(db.estoqueProdutosTable)
+              ..where((t) => t.tenantId.equals(tenantCtx.tenantId) & t.produtoId.equals(id) & t.deletedAt.isNull()))
+            .getSingleOrNull();
+
+        if (estoqueRow != null) {
+          final fisico = estoqueRow.quantidadeAtual;
+          final reservado = estoqueRow.quantidadeReservada;
+
+          // Se o saldo físico no galpão estiver negativo (< 0), oferece ajuste para regularizar o inventário
+          if (fisico < 0) {
+            setState(() => _isSaving = false);
+            if (!mounted) return;
+            final bool? confirmarAjuste = await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (ctx) => AlertDialog(
+                backgroundColor: FincoreColors.surface,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: FincoreColors.border)),
+                title: const Row(
+                  children: [
+                    Icon(Icons.inventory_2_outlined, color: Color(0xFFFFA726), size: 24),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Regularizar Saldo Físico Negativo',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: FincoreColors.textPrimary),
+                      ),
+                    ),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'O produto "${_nomeCtrl.text}" possui saldo físico negativo no inventário:',
+                      style: const TextStyle(fontSize: 13, color: FincoreColors.textSecondary),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: FincoreColors.background,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: FincoreColors.border),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Saldo Físico Atual:', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
+                              Text('$fisico un.', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFE05C5C))),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Reservas em Aberto:', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
+                              Text('$reservado un.', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Deseja regularizar o saldo físico para 0 un.?\n\n🔒 As reservas e os pedidos dos clientes continuarão 100% PRESERVADOS para que a cozinha continue atendendo os pedidos já contratados.',
+                      style: TextStyle(fontSize: 12, color: FincoreColors.textMuted),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textMuted)),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: FincoreColors.primary,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: const Text('Regularizar Físico & Inativar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            );
+
+            if (confirmarAjuste != true) {
+              return;
+            }
+
+            setState(() => _isSaving = true);
+
+            // Ajusta apenas o saldo físico negativo para 0, preservando as reservas dos pedidos existentes
+            final agora = DateTime.now();
+            await db.into(db.movimentacoesEstoqueTable).insert(
+              MovimentacoesEstoqueTableCompanion.insert(
+                id: const Uuid().v4(),
+                tenantId: tenantCtx.tenantId,
+                produtoId: id,
+                tipo: 'inventario',
+                quantidade: (-fisico).abs(),
+                quantidadeAntes: fisico,
+                quantidadeDepois: 0,
+                quantidadeReservadaAntes: Value(reservado),
+                quantidadeReservadaDepois: Value(reservado),
+                motivo: const Value('Ajuste de saldo físico negativo para inativação comercial'),
+                operadorId: Value(tenantCtx.usuario.id),
+                dataHora: agora,
+                syncVersion: const Value(1),
+                syncStatus: SyncStatus.pending,
+                createdAt: agora,
+                updatedAt: agora,
+                createdBy: tenantCtx.usuario.id,
+                updatedBy: tenantCtx.usuario.id,
+              ),
+            );
+
+            await (db.update(db.estoqueProdutosTable)
+                  ..where((t) => t.id.equals(estoqueRow.id)))
+                .write(EstoqueProdutosTableCompanion(
+              quantidadeAtual: const Value(0),
+              updatedAt: Value(agora),
+              syncStatus: const Value(SyncStatus.pending),
+            ));
+          }
+        }
+      }
+
       final Map<String, dynamic> payloadMap = {
         'herdar_categoria': _herdarComercial,
         'herdar_estoque':   _herdarEstoque,
@@ -763,6 +900,11 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
       // Aplica os parâmetros no registro de estoque do produto
       final estoqueCtrl = DependencyInjection().get<EstoqueController>();
       await estoqueCtrl.aplicarParametrosProduto(produto.id);
+      await estoqueCtrl.carregarEstoque();
+      try {
+        final planeCtrl = DependencyInjection().get<PlanoProducaoController>();
+        await planeCtrl.refresh();
+      } catch (_) {}
 
       // Auto-vincular produto a tabelas de preço da categoria
       try {

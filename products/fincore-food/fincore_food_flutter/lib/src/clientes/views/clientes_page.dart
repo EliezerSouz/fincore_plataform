@@ -48,12 +48,15 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   final _regBuscaController = TextEditingController();
   String _regSearchQuery = '';
   String _regFiltroStatus = 'Todos';
+  final Set<String> _selectedRegioesIds = {};
 
   final _regiaoFormKey = GlobalKey<FormState>();
   final _regNomeCtrl = TextEditingController();
   final _regBairroCtrl = TextEditingController();
   final _regCepIniCtrl = TextEditingController();
   final _regCepFinCtrl = TextEditingController();
+  final _regDistMinCtrl = TextEditingController();
+  final _regDistMaxCtrl = TextEditingController();
   final _regValorCtrl = TextEditingController();
   final _regPedidoMinCtrl = TextEditingController();
   final _regPrazoCtrl = TextEditingController();
@@ -84,7 +87,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
     final syncService = DependencyInjection().tryGet<SupabaseSyncService>();
     if (syncService != null) {
       _syncSub = syncService.onDataSynced.listen((entity) {
-        if (entity == 'cliente' || entity == 'clientes' || entity.isEmpty) {
+        if (entity == 'cliente' || entity == 'clientes' || entity == 'pedido' || entity == 'pedidos' || entity.isEmpty) {
           if (mounted) {
             _controller.loadData();
           }
@@ -109,6 +112,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
     _regBairroCtrl.dispose();
     _regCepIniCtrl.dispose();
     _regCepFinCtrl.dispose();
+    _regDistMinCtrl.dispose();
+    _regDistMaxCtrl.dispose();
     _regValorCtrl.dispose();
     _regPedidoMinCtrl.dispose();
     _regPrazoCtrl.dispose();
@@ -528,6 +533,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
       _regBairroCtrl.clear();
       _regCepIniCtrl.clear();
       _regCepFinCtrl.clear();
+      _regDistMinCtrl.clear();
+      _regDistMaxCtrl.clear();
       _regValorCtrl.text = '0,00';
       _regPedidoMinCtrl.text = '0,00';
       _regPrazoCtrl.clear();
@@ -545,6 +552,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
       _regBairroCtrl.text = reg.bairro ?? '';
       _regCepIniCtrl.text = reg.cepInicial ?? '';
       _regCepFinCtrl.text = reg.cepFinal ?? '';
+      _regDistMinCtrl.text = reg.distanciaMinKm?.toString() ?? '';
+      _regDistMaxCtrl.text = reg.distanciaMaxKm?.toString() ?? '';
       _regValorCtrl.text = (reg.valorCentavos / 100.0).toStringAsFixed(2).replaceAll('.', ',');
       _regPedidoMinCtrl.text = (reg.pedidoMinimoCentavos / 100.0).toStringAsFixed(2).replaceAll('.', ',');
       _regPrazoCtrl.text = reg.prazoEstimado ?? '';
@@ -586,6 +595,12 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
 
     final int valorCentavos = _parseMoedaParaCentavos(_regValorCtrl.text);
     final int pedidoMinimoCentavos = _parseMoedaParaCentavos(_regPedidoMinCtrl.text);
+    final double? distMin = _regTipoRegra == TipoRegraTaxaEntrega.km
+        ? double.tryParse(_regDistMinCtrl.text.replaceAll(',', '.'))
+        : null;
+    final double? distMax = _regTipoRegra == TipoRegraTaxaEntrega.km
+        ? double.tryParse(_regDistMaxCtrl.text.replaceAll(',', '.'))
+        : null;
 
     final ok = await _controller.salvarTaxaEntrega(
       original: _selectedRegiao,
@@ -594,6 +609,8 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
       bairro: _regTipoRegra == TipoRegraTaxaEntrega.bairro ? _regBairroCtrl.text : null,
       cepInicial: _regTipoRegra == TipoRegraTaxaEntrega.cep ? _regCepIniCtrl.text : null,
       cepFinal: _regTipoRegra == TipoRegraTaxaEntrega.cep ? _regCepFinCtrl.text : null,
+      distanciaMinKm: distMin,
+      distanciaMaxKm: distMax,
       valorCentavos: valorCentavos,
       ativo: _regAtivo,
       pedidoMinimoCentavos: pedidoMinimoCentavos,
@@ -643,10 +660,60 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
           const SnackBar(content: Text('Região de entrega excluída com sucesso!')),
         );
         setState(() {
+          _selectedRegioesIds.remove(reg.id);
           _isInspectorRegiaoOpen = false;
           _selectedRegiao = null;
         });
       }
+    }
+  }
+
+  Future<void> _excluirRegioesEmLote() async {
+    final count = _selectedRegioesIds.length;
+    if (count == 0) return;
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Excluir $count região(ões)?'),
+        content: Text('Tem certeza que deseja excluir as $count regiões de entrega selecionadas?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FincoreColors.danger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir Todas'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    int excluidas = 0;
+    for (final id in _selectedRegioesIds.toList()) {
+      final ok = await _controller.excluirTaxaEntrega(id);
+      if (ok) excluidas++;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: FincoreColors.success,
+          content: Text('$excluidas região(ões) excluída(s) com sucesso!'),
+        ),
+      );
+      setState(() {
+        _selectedRegioesIds.clear();
+        _selectedRegiao = null;
+        _isInspectorRegiaoOpen = false;
+      });
     }
   }
 
@@ -1247,6 +1314,9 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
   }
 
   Widget _buildRegioesTablePanel(List<TaxaEntrega> list) {
+    final allSelected = list.isNotEmpty && list.every((r) => _selectedRegioesIds.contains(r.id));
+    final someSelected = list.any((r) => _selectedRegioesIds.contains(r.id)) && !allSelected;
+
     return Container(
       decoration: BoxDecoration(
         color: FincoreColors.surface,
@@ -1257,6 +1327,47 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Barra de Ações em Lote (quando houver regiões selecionadas)
+          if (_selectedRegioesIds.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: FincoreColors.danger.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: FincoreColors.danger.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, size: 18, color: FincoreColors.danger),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${_selectedRegioesIds.length} região(ões) selecionada(s)',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: FincoreColors.textPrimary),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    icon: const Icon(Icons.clear, size: 16),
+                    label: const Text('Desmarcar todas'),
+                    style: TextButton.styleFrom(foregroundColor: FincoreColors.textSecondary),
+                    onPressed: () => setState(() => _selectedRegioesIds.clear()),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.delete_forever, size: 16, color: Colors.white),
+                    label: Text('Excluir Selecionadas (${_selectedRegioesIds.length})'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: FincoreColors.danger,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                    ),
+                    onPressed: _excluirRegioesEmLote,
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -1271,14 +1382,31 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     color: FincoreColors.surfaceElevated,
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Expanded(flex: 3, child: Text('REGIÃO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                        Expanded(flex: 2, child: Text('TIPO REGRA', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                        Expanded(flex: 2, child: Text('TAXA', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                        Expanded(flex: 2, child: Text('PEDIDO MÍN.', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                        Expanded(flex: 2, child: Text('PRAZO', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
-                        Expanded(flex: 2, child: Text('STATUS', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        SizedBox(
+                          width: 36,
+                          child: Checkbox(
+                            value: someSelected ? null : allSelected,
+                            tristate: true,
+                            onChanged: (val) {
+                              setState(() {
+                                if (val == true) {
+                                  _selectedRegioesIds.addAll(list.map((r) => r.id));
+                                } else {
+                                  _selectedRegioesIds.clear();
+                                }
+                              });
+                            },
+                          ),
+                        ),
+                        const Expanded(flex: 3, child: Text('REGIÃO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        const Expanded(flex: 2, child: Text('TIPO REGRA', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        const Expanded(flex: 2, child: Text('TAXA', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        const Expanded(flex: 2, child: Text('PEDIDO MÍN.', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        const Expanded(flex: 2, child: Text('PRAZO', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        const Expanded(flex: 2, child: Text('STATUS', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
+                        const SizedBox(width: 84, child: Text('AÇÕES', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.textSecondary))),
                       ],
                     ),
                   ),
@@ -1294,6 +1422,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                             itemBuilder: (ctx, index) {
                               final reg = list[index];
                               final isSelected = _selectedRegiao?.id == reg.id && _isInspectorRegiaoOpen;
+                              final isChecked = _selectedRegioesIds.contains(reg.id);
 
                               final taxaStr = 'R\$ ${(reg.valorCentavos / 100.0).toStringAsFixed(2).replaceAll('.', ',')}';
                               final minStr = 'R\$ ${(reg.pedidoMinimoCentavos / 100.0).toStringAsFixed(2).replaceAll('.', ',')}';
@@ -1303,15 +1432,34 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                 tipoRegraStr = 'Bairro (${reg.bairro ?? ""})';
                               } else if (reg.tipoRegra == TipoRegraTaxaEntrega.cep) {
                                 tipoRegraStr = 'CEP (${reg.cepInicial ?? ""} - ${reg.cepFinal ?? ""})';
+                              } else if (reg.tipoRegra == TipoRegraTaxaEntrega.km) {
+                                tipoRegraStr = 'Faixa KM (${reg.distanciaMinKm ?? 0} a ${reg.distanciaMaxKm ?? "∞"} km)';
                               }
 
                               return InkWell(
                                 onTap: () => _selectRegiao(reg),
                                 child: Container(
-                                  color: isSelected ? FincoreColors.primary.withValues(alpha: 0.08) : Colors.transparent,
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  color: isChecked
+                                      ? FincoreColors.primary.withValues(alpha: 0.12)
+                                      : (isSelected ? FincoreColors.primary.withValues(alpha: 0.08) : Colors.transparent),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                                   child: Row(
                                     children: [
+                                      SizedBox(
+                                        width: 36,
+                                        child: Checkbox(
+                                          value: isChecked,
+                                          onChanged: (val) {
+                                            setState(() {
+                                              if (val == true) {
+                                                _selectedRegioesIds.add(reg.id);
+                                              } else {
+                                                _selectedRegioesIds.remove(reg.id);
+                                              }
+                                            });
+                                          },
+                                        ),
+                                      ),
                                       Expanded(
                                         flex: 3,
                                         child: Text(
@@ -1368,6 +1516,28 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                               ),
                                             ),
                                           ),
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 84,
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            IconButton(
+                                              icon: Icon(Icons.edit_outlined, size: 18, color: FincoreColors.primary),
+                                              tooltip: 'Editar Região',
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                              onPressed: () => _openEditModeRegiao(reg),
+                                            ),
+                                            IconButton(
+                                              icon: Icon(Icons.delete_outline, size: 18, color: FincoreColors.danger),
+                                              tooltip: 'Excluir Região',
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                              onPressed: () => _excluirRegiaoConfirma(reg),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -1428,11 +1598,15 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
               ? 'Por Bairro'
               : reg.tipoRegra == TipoRegraTaxaEntrega.cep
                   ? 'Por CEP'
-                  : 'Taxa Fixa Geral'),
+                  : reg.tipoRegra == TipoRegraTaxaEntrega.km
+                      ? 'Por Faixa de Distância (KM)'
+                      : 'Taxa Fixa Geral'),
           if (reg.tipoRegra == TipoRegraTaxaEntrega.bairro) ...[
             _buildInspectorInfoRow('Bairro Vinculado', reg.bairro ?? '--'),
           ] else if (reg.tipoRegra == TipoRegraTaxaEntrega.cep) ...[
             _buildInspectorInfoRow('Faixa de CEP', '${reg.cepInicial ?? ""} até ${reg.cepFinal ?? ""}'),
+          ] else if (reg.tipoRegra == TipoRegraTaxaEntrega.km) ...[
+            _buildInspectorInfoRow('Faixa de Distância', '${reg.distanciaMinKm ?? 0} km até ${reg.distanciaMaxKm ?? "sem limite"} km'),
           ],
           _buildInspectorInfoRow('Taxa de Entrega', taxaStr, isHighlight: true),
           _buildInspectorInfoRow('Pedido Mínimo', minStr),
@@ -1530,12 +1704,55 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                 }
               },
               items: const [
+                DropdownMenuItem(value: TipoRegraTaxaEntrega.km, child: Text('Por Faixa de Distância (KM)')),
                 DropdownMenuItem(value: TipoRegraTaxaEntrega.bairro, child: Text('Por Bairro')),
                 DropdownMenuItem(value: TipoRegraTaxaEntrega.cep, child: Text('Por Faixa de CEP')),
                 DropdownMenuItem(value: TipoRegraTaxaEntrega.fixo, child: Text('Taxa Fixa Geral')),
               ],
             ),
             const SizedBox(height: 16),
+
+            // Faixa de Distância em KM
+            if (_regTipoRegra == TipoRegraTaxaEntrega.km) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Distância Mínima (KM)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+                        const SizedBox(height: 6),
+                        FincoreTextField(
+                          controller: _regDistMinCtrl,
+                          hintText: 'Ex: 0 ou 2.0',
+                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d,.]'))],
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          validator: (v) => _regTipoRegra == TipoRegraTaxaEntrega.km && (v == null || v.trim().isEmpty) ? 'Obrigatório' : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Distância Máxima (KM)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+                        const SizedBox(height: 6),
+                        FincoreTextField(
+                          controller: _regDistMaxCtrl,
+                          hintText: 'Ex: 8.0 ou 12.0',
+                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d,.]'))],
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          validator: (v) => _regTipoRegra == TipoRegraTaxaEntrega.km && (v == null || v.trim().isEmpty) ? 'Obrigatório' : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Bairro
             if (_regTipoRegra == TipoRegraTaxaEntrega.bairro) ...[
@@ -2138,6 +2355,70 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                   Text(
                     c.telefone.isEmpty ? 'Sem telefone' : c.telefoneFormatado,
                     style: const TextStyle(fontSize: 13, color: FincoreColors.textSecondary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.surfaceElevated,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: FincoreColors.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.shopping_bag_outlined, size: 12, color: FincoreColors.primary),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${_controller.getCountPedidos(c.id.toString())} pedidos',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: FincoreColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.payments_outlined, size: 12, color: Color(0xFF10B981)),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Total: ${dinheiro(_controller.getTotalGastoCentavos(c.id.toString()))}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.insights_rounded, size: 12, color: Color(0xFFF59E0B)),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Ticket Médio: ${dinheiro(_controller.getTicketMedioCentavos(c.id.toString()))}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -3113,9 +3394,17 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
               return const Center(child: CircularProgressIndicator());
             }
 
+            final pedidosValidos = _controller.getPedidosDoCliente(c.id.toString())
+                .where((p) => p.status != 'cancelado')
+                .toList();
+
+            final totalGastoCentavos = _controller.getTotalGastoCentavos(c.id.toString());
+            final totalQtdPedidos = _controller.getCountPedidos(c.id.toString());
+            final ticketMedioCentavos = _controller.getTicketMedioCentavos(c.id.toString());
+
             final todosTitulos = contasCtrl.getTitulosPorCliente(c.id, clienteNome: c.nome);
 
-            if (todosTitulos.isEmpty) {
+            if (todosTitulos.isEmpty && pedidosValidos.isEmpty) {
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -3131,18 +3420,53 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
               );
             }
 
+            // Complementa o histórico completo com pedidos pagos no caixa à vista (ex: Dinheiro)
+            // que não geraram duplicata de contas a receber pendente
+            final titulosCompletos = List<TituloReceber>.from(todosTitulos);
+            for (final p in pedidosValidos) {
+              final jaExiste = todosTitulos.any((t) => t.pedidoId == p.id);
+              if (!jaExiste) {
+                titulosCompletos.add(
+                  TituloReceber(
+                    id: 'caixa_${p.id}',
+                    pedidoId: p.id,
+                    numeroPedido: p.numeroPedido,
+                    clienteId: p.clienteId,
+                    clienteNome: c.nome,
+                    clienteTelefone: c.telefone,
+                    formaPagamentoNome: p.formaPagamentoNome ?? 'Dinheiro (À Vista)',
+                    formaPagamentoTipo: 'dinheiro',
+                    valorTotalCentavos: p.valorTotalCentavos,
+                    status: StatusTituloReceber.recebido,
+                    dataEmissao: p.dataHoraCriacao,
+                    dataEntrega: p.dataHoraCriacao,
+                    dataVencimento: p.dataHoraCriacao,
+                    dataRecebimento: p.dataHoraCriacao,
+                    canalOrigem: p.canalOrigem,
+                  ),
+                );
+              }
+            }
+            titulosCompletos.sort((a, b) => b.dataEmissao.compareTo(a.dataEmissao));
+
             final titulosExibidos = apenasNotasPrazo
-                ? todosTitulos.where((t) => t.isNotaPrazo).toList()
-                : todosTitulos;
+                ? titulosCompletos.where((t) => t.isNotaPrazo).toList()
+                : titulosCompletos;
 
             // Pendências em aberto (Notas a Prazo / Fiado pendente + PIX aguardando validação de conta)
             final totalAReceberCentavos = todosTitulos
                 .where((t) => !t.isPagoPeloCliente && t.status != StatusTituloReceber.cancelado)
                 .fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
 
-            final totalRecebidoCentavos = todosTitulos
-                .where((t) => t.isPagoPeloCliente && t.status != StatusTituloReceber.cancelado)
-                .fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
+            final qtdPendentes = todosTitulos
+                .where((t) => !t.isPagoPeloCliente && t.status != StatusTituloReceber.cancelado)
+                .length;
+
+            final totalQuitadoCentavos = (totalGastoCentavos >= totalAReceberCentavos)
+                ? (totalGastoCentavos - totalAReceberCentavos)
+                : titulosCompletos.where((t) => t.isPagoPeloCliente).fold<int>(0, (sum, t) => sum + t.valorTotalCentavos);
+
+            final qtdLiquidados = totalQtdPedidos >= qtdPendentes ? (totalQtdPedidos - qtdPendentes) : titulosCompletos.where((t) => t.isPagoPeloCliente).length;
 
             final totalAtrasadoCentavos = todosTitulos
                 .where((t) => t.isNotaPrazo && t.status == StatusTituloReceber.atrasado)
@@ -3177,7 +3501,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                 Icon(Icons.receipt_long_rounded, size: 14, color: apenasNotasPrazo ? Colors.white : FincoreColors.textMuted),
                                 const SizedBox(width: 6),
                                 Text(
-                                  'Apenas Nota a Prazo (Fiado)',
+                                  'Apenas Nota a Prazo (${titulosCompletos.where((t) => t.isNotaPrazo).length})',
                                   style: TextStyle(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.bold,
@@ -3206,7 +3530,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                                 Icon(Icons.history_rounded, size: 14, color: !apenasNotasPrazo ? Colors.white : FincoreColors.textMuted),
                                 const SizedBox(width: 6),
                                 Text(
-                                  'Todo o Histórico (${todosTitulos.length})',
+                                  'Todo o Histórico (${titulosCompletos.length})',
                                   style: TextStyle(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.bold,
@@ -3223,30 +3547,63 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                 ),
                 const SizedBox(height: 16),
 
-                // Resumo de KPIs do Cliente
+                // Resumo de KPIs do Cliente: Total Compras, Ticket Médio, Pendente, Quitado
                 Row(
                   children: [
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: totalAReceberCentavos > 0
-                              ? const Color(0xFFF59E0B).withValues(alpha: 0.12)
-                              : FincoreColors.surfaceElevated,
+                          color: FincoreColors.surfaceElevated,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: totalAReceberCentavos > 0
-                                ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
-                                : FincoreColors.border,
-                          ),
+                          border: Border.all(color: FincoreColors.border),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'A RECEBER / PENDENTE',
+                              'TOTAL EM COMPRAS',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.bold,
+                                color: FincoreColors.textSecondary,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              dinheiro(totalGastoCentavos),
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                                color: FincoreColors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '$totalQtdPedidos pedido(s) realizados',
+                              style: const TextStyle(fontSize: 9.5, color: FincoreColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'TICKET MÉDIO',
+                              style: TextStyle(
+                                fontSize: 9.5,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xFFD97706),
                                 letterSpacing: 0.5,
@@ -3254,28 +3611,81 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              dinheiro(totalAReceberCentavos),
+                              dinheiro(ticketMedioCentavos),
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w900,
                                 color: Color(0xFFD97706),
                               ),
                             ),
-                            if (totalAtrasadoCentavos > 0) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                '${dinheiro(totalAtrasadoCentavos)} vencido',
-                                style: const TextStyle(fontSize: 10, color: Color(0xFFEF4444), fontWeight: FontWeight.bold),
-                              ),
-                            ],
+                            const SizedBox(height: 2),
+                            const Text(
+                              'Gasto médio por pedido',
+                              style: TextStyle(fontSize: 9.5, color: FincoreColors.textMuted),
+                            ),
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: totalAReceberCentavos > 0
+                              ? const Color(0xFFEF4444).withValues(alpha: 0.1)
+                              : FincoreColors.surfaceElevated,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: totalAReceberCentavos > 0
+                                ? const Color(0xFFEF4444).withValues(alpha: 0.4)
+                                : FincoreColors.border,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'A RECEBER / PENDENTE',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.bold,
+                                color: totalAReceberCentavos > 0 ? const Color(0xFFEF4444) : FincoreColors.textSecondary,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              dinheiro(totalAReceberCentavos),
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                                color: totalAReceberCentavos > 0 ? const Color(0xFFEF4444) : FincoreColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              totalAtrasadoCentavos > 0
+                                  ? '${dinheiro(totalAtrasadoCentavos)} vencido'
+                                  : '$qtdPendentes pendência(s)',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                color: totalAtrasadoCentavos > 0 ? const Color(0xFFEF4444) : FincoreColors.textMuted,
+                                fontWeight: totalAtrasadoCentavos > 0 ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           color: const Color(0xFF10B981).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(10),
@@ -3285,9 +3695,9 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'TOTAL QUITADO / VALIDADO',
+                              'TOTAL QUITADO / PAGO',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 9.5,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xFF059669),
                                 letterSpacing: 0.5,
@@ -3295,17 +3705,17 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              dinheiro(totalRecebidoCentavos),
+                              dinheiro(totalQuitadoCentavos),
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w900,
                                 color: Color(0xFF059669),
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '${todosTitulos.where((t) => t.isPagoPeloCliente).length} pedido(s) liquidados',
-                              style: const TextStyle(fontSize: 10, color: FincoreColors.textMuted),
+                              '$qtdLiquidados pedido(s) liquidados',
+                              style: const TextStyle(fontSize: 9.5, color: FincoreColors.textMuted),
                             ),
                           ],
                         ),

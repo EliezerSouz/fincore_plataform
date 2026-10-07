@@ -721,21 +721,23 @@ class ConfirmarVendaUseCase {
           return null;
         }
 
-        // Venda a Prazo / Faturado / Cartão (Débito e Crédito): não entram no caixa imediato;
-        // serão liquidados/quitados via Contas a Receber da Adquirente / Cliente
-        final isCartaoOuPrazo = formaRow.tipo == 'notaPrazo' ||
+        // Venda a Prazo / Faturado / Cartão (Débito e Crédito) / PIX: não entram no caixa físico imediato;
+        // entram em Contas a Receber (PIX a Receber / Adquirentes) para conferência e liquidação.
+        final isEletronicoOuPrazo = formaRow.tipo == 'notaPrazo' ||
             formaRow.tipo == 'cartaoCredito' ||
             formaRow.tipo == 'cartaoDebito' ||
             formaRow.tipo == 'cartao' ||
+            formaRow.tipo == 'pix' ||
             rowNomeLower.contains('prazo') ||
             rowNomeLower.contains('faturad') ||
             rowNomeLower.contains('cart') ||
             rowNomeLower.contains('créd') ||
             rowNomeLower.contains('cred') ||
             rowNomeLower.contains('déb') ||
-            rowNomeLower.contains('deb');
+            rowNomeLower.contains('deb') ||
+            rowNomeLower.contains('pix');
 
-        if (isCartaoOuPrazo) {
+        if (isEletronicoOuPrazo) {
           return null;
         }
 
@@ -743,14 +745,15 @@ class ConfirmarVendaUseCase {
       }
     }
 
-    // Se o método de pagamento textual indicar a prazo ou cartão
+    // Se o método de pagamento textual indicar a prazo, cartão ou PIX
     if (lowerMethod.contains('prazo') ||
         lowerMethod.contains('faturad') ||
         lowerMethod.contains('cart') ||
         lowerMethod.contains('créd') ||
         lowerMethod.contains('cred') ||
         lowerMethod.contains('déb') ||
-        lowerMethod.contains('deb')) {
+        lowerMethod.contains('deb') ||
+        lowerMethod.contains('pix')) {
       return null;
     }
 

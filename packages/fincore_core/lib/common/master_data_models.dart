@@ -29,6 +29,7 @@ enum TipoRegraTaxaEntrega {
   bairro,
   cep,
   fixo,
+  km,
 }
 
 class Categoria {
@@ -371,6 +372,8 @@ class TaxaEntrega {
   final String? bairro;
   final String? cepInicial;
   final String? cepFinal;
+  final double? distanciaMinKm;
+  final double? distanciaMaxKm;
   final int valorCentavos;
   final bool ativo;
   final int pedidoMinimoCentavos;
@@ -386,6 +389,8 @@ class TaxaEntrega {
     this.bairro,
     this.cepInicial,
     this.cepFinal,
+    this.distanciaMinKm,
+    this.distanciaMaxKm,
     required this.valorCentavos,
     required this.ativo,
     this.pedidoMinimoCentavos = 0,
@@ -402,6 +407,8 @@ class TaxaEntrega {
     String? bairro,
     String? cepInicial,
     String? cepFinal,
+    double? distanciaMinKm,
+    double? distanciaMaxKm,
     int? valorCentavos,
     bool? ativo,
     int? pedidoMinimoCentavos,
@@ -417,6 +424,8 @@ class TaxaEntrega {
       bairro: bairro ?? this.bairro,
       cepInicial: cepInicial ?? this.cepInicial,
       cepFinal: cepFinal ?? this.cepFinal,
+      distanciaMinKm: distanciaMinKm ?? this.distanciaMinKm,
+      distanciaMaxKm: distanciaMaxKm ?? this.distanciaMaxKm,
       valorCentavos: valorCentavos ?? this.valorCentavos,
       ativo: ativo ?? this.ativo,
       pedidoMinimoCentavos: pedidoMinimoCentavos ?? this.pedidoMinimoCentavos,

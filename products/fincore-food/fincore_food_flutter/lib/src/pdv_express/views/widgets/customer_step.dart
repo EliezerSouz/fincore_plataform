@@ -13,6 +13,7 @@ import 'package:fincore_core/fincore_core.dart';
 import 'package:fincore_core/repository/cliente_repository.dart';
 import 'package:uuid/uuid.dart';
 import 'package:fincore_food_flutter/src/clientes/views/widgets/cliente_form_dialog.dart';
+import 'package:fincore_food_flutter/src/shared/services/delivery_fee_service.dart';
 import '../../controllers/pdv_express_controller.dart';
 
 /// Tela de Identificação do Cliente e Agendamento & Entrega do PDV
@@ -302,39 +303,38 @@ class _CustomerStepState extends State<CustomerStep> {
   }
 
   Future<void> _calcularTaxaEntrega(int distanceMeters) async {
-    final bairro = _bairroCtrl.text.trim();
-    if (bairro.isNotEmpty) {
-      final taxaBairro = await widget.controller.taxaRepo.findByBairro(bairro);
-      if (taxaBairro != null && taxaBairro.valorCentavos > 0) {
-        final valorReais = (taxaBairro.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
-        _taxaCtrl.removeListener(_onEntregaFieldsChanged);
-        _taxaCtrl.text = valorReais;
-        _taxaCtrl.addListener(_onEntregaFieldsChanged);
+    try {
+      final taxas = await widget.controller.taxaRepo.findAll();
+      final config = widget.controller.empresaConfig;
+      final km = distanceMeters > 0 ? (distanceMeters / 1000.0) : null;
+      final bairro = _bairroCtrl.text.trim();
+      final cep = _cepCtrl.text.trim();
 
-        widget.controller.updateEntrega(
-          widget.controller.entrega.copyWith(
-            taxaEntregaCentavos: taxaBairro.valorCentavos,
-          ),
-        );
-        return;
+      int fallback = 0;
+      if (config != null && config.valorPorKmCentavos > 0 && km != null) {
+        fallback = (km * config.valorPorKmCentavos).round();
       }
-    }
 
-    final config = widget.controller.empresaConfig;
-    if (config != null && (config.taxaEntregaPorKm || config.valorPorKmCentavos > 0)) {
-      final km = distanceMeters / 1000.0;
-      final taxaCentavos = (km * config.valorPorKmCentavos).round();
-      final valorReais = (taxaCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+      final result = DeliveryFeeService.calcular(
+        taxas: taxas,
+        distanciaKm: km,
+        bairro: bairro.isNotEmpty ? bairro : null,
+        cep: cep.isNotEmpty ? cep : null,
+        fallbackCentavos: fallback,
+      );
 
+      final valorReais = (result.taxaCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
       _taxaCtrl.removeListener(_onEntregaFieldsChanged);
       _taxaCtrl.text = valorReais;
       _taxaCtrl.addListener(_onEntregaFieldsChanged);
 
       widget.controller.updateEntrega(
         widget.controller.entrega.copyWith(
-          taxaEntregaCentavos: taxaCentavos,
+          taxaEntregaCentavos: result.taxaCentavos,
         ),
       );
+    } catch (e) {
+      debugPrint('[CustomerStep] Erro ao calcular taxa de entrega: $e');
     }
   }
 

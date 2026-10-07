@@ -81,6 +81,6 @@ class SupabaseConnector extends CoreServerConnector {
   @override
   Map<String, String> get defaultHeaders => {
         ...super.defaultHeaders,
-        'apikey': dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+        'apikey': (dotenv.isInitialized ? dotenv.env['SUPABASE_ANON_KEY'] : null) ?? 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy',
       };
 }

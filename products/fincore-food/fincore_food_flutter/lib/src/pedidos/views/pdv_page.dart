@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_core/common/kds_models.dart';
 import 'package:fincore_core/common/master_data_models.dart';
-import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_food_flutter/src/pdv_express/views/pdv_express_screen.dart';
 
 /// Frente de Caixa (POS / PDV) e Criação de Novos Pedidos do Fincore Food
@@ -21,7 +20,7 @@ class PdvPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: PdvExpressScreen(
-        isEmbedded: true,
+        isEmbedded: ordemParaEditar == null && clienteInicial == null && repetirPedidoId == null,
         ordemParaEditar: ordemParaEditar,
         clienteInicial: clienteInicial,
         repetirPedidoId: repetirPedidoId,

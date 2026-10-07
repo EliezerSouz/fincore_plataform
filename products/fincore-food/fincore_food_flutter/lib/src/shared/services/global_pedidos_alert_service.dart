@@ -7,7 +7,8 @@ import 'package:fincore_core/di/dependency_injection.dart';
 import 'package:fincore_core/repository/empresa_configuracao_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'sound_service.dart';
-import '../widgets/pedidos_atencao_overlay.dart';
+import 'windows_focus_service.dart';
+import '../data/sync/supabase_sync_service.dart';
 
 /// Modelo de resumo para alertas operacionais globais de pedidos
 class PedidosAlertaResumo {
@@ -27,18 +28,25 @@ class PedidosAlertaResumo {
   bool get hasAny => totalAtrasados > 0 || totalUrgentes > 0 || totalAtencao > 0;
 }
 
-/// Serviço global de vigilância de pedidos atrasados e pendências operacionais.
+/// Serviço global de vigilância operacional de pedidos e novos pedidos recebidos.
 ///
-/// Executa em background em todo o aplicativo (independente da tela ativa).
-/// Toca alerta sonoro configurável e exibe overlay flutuante de alta prioridade.
+/// Executa em background em todo o aplicativo (independente da tela ativa no Windows).
+/// 1. Toca alerta sonoro configurável e vibrante.
+/// 2. Restaura e foca a janela do Windows se estiver minimizada ou em segundo plano.
+/// 3. Exibe overlay flutuante de novo pedido ou de pendências de entrega em qualquer tela.
+/// 4. Reage em tempo real aos eventos WebSocket do Supabase e executa polling frequente de segurança.
 class GlobalPedidosAlertService {
   static final GlobalPedidosAlertService _instance = GlobalPedidosAlertService._internal();
   factory GlobalPedidosAlertService() => _instance;
   GlobalPedidosAlertService._internal();
 
   Timer? _timer;
+  StreamSubscription? _syncSub;
   bool _isRunning = false;
   bool get isRunning => _isRunning;
+
+  final Set<String> _knownPedidoIds = {};
+  bool _isFirstLoadCompleted = false;
 
   PedidosAlertaResumo _ultimoResumo = const PedidosAlertaResumo(
     totalAtrasados: 0,
@@ -50,9 +58,11 @@ class GlobalPedidosAlertService {
 
   final ValueNotifier<PedidosAlertaResumo?> resumoNotifier = ValueNotifier<PedidosAlertaResumo?>(null);
   final ValueNotifier<PedidosAlertaResumo?> alertaOverlayNotifier = ValueNotifier<PedidosAlertaResumo?>(null);
+  final ValueNotifier<PedidoData?> novoPedidoOverlayNotifier = ValueNotifier<PedidoData?>(null);
 
   OverlayEntry? _overlayEntry;
   BuildContext? _shellContext;
+  BuildContext? get shellContext => _shellContext;
 
   /// Registra o contexto do Shell para permitir apresentação do Overlay flutuante
   void registerShellContext(BuildContext context) {
@@ -63,6 +73,19 @@ class GlobalPedidosAlertService {
   void start() {
     if (_isRunning) return;
     _isRunning = true;
+
+    // Escuta sincronizações e eventos Realtime do Supabase para notificação instantânea
+    try {
+      final syncService = DependencyInjection().tryGet<SupabaseSyncService>();
+      _syncSub = syncService?.onDataSynced.listen((entity) {
+        if (entity == 'ALL' ||
+            entity.toLowerCase().contains('pedido') ||
+            entity.toLowerCase().contains('ordem')) {
+          checkNow();
+        }
+      });
+    } catch (_) {}
+
     _scheduleNextCheck();
   }
 
@@ -71,7 +94,10 @@ class GlobalPedidosAlertService {
     _isRunning = false;
     _timer?.cancel();
     _timer = null;
+    _syncSub?.cancel();
+    _syncSub = null;
     dismissOverlay();
+    dismissNovoPedidoOverlay();
   }
 
   /// Reinicia imediatamente o ciclo de temporização com as configurações recém-salvas
@@ -86,11 +112,20 @@ class GlobalPedidosAlertService {
   Future<void> _scheduleNextCheck() async {
     if (!_isRunning) return;
 
+    // Sincroniza pedidos e ordens da nuvem para garantir captura de novos pedidos mesmo se o websocket oscilar
+    try {
+      final syncService = DependencyInjection().tryGet<SupabaseSyncService>();
+      if (syncService != null && await syncService.isOnline()) {
+        final db = DependencyInjection().get<FincoreDatabase>();
+        await syncService.pullAll(db, DateTime.fromMillisecondsSinceEpoch(0));
+      }
+    } catch (_) {}
+
     // Executa a verificação imediatamente
     await checkNow();
 
-    // Lê o intervalo configurado da empresa
-    int intervaloSegundos = 60;
+    // Lê o intervalo configurado da empresa (máximo 15 segundos para resposta ágil de novos pedidos)
+    int intervaloSegundos = 15;
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedInterval = prefs.getInt('alerta_sonoro_intervalo_segundos');
@@ -140,22 +175,53 @@ class GlobalPedidosAlertService {
         }
       } catch (_) {}
 
-      // Busca pedidos em aberto (confirmado, em_preparo) que não sejam uso interno
-      final pedidosPendentes = await (db.select(db.pedidosTable)
+      // Busca TODOS os pedidos ativos: 'pendente' (Cardápio Web), 'confirmado' e 'em_preparo'
+      final pedidosAtivos = await (db.select(db.pedidosTable)
             ..where((t) =>
                 t.tenantId.equals(activeTenantId) &
                 t.deletedAt.isNull() &
-                t.status.isIn(const ['confirmado', 'em_preparo']) &
+                t.status.isIn(const ['pendente', 'confirmado', 'em_preparo']) &
                 t.isUsoInterno.equals(false)))
           .get();
 
+      // ─── 1. Detecção de Novos Pedidos Recebidos ────────────────────────────
+      if (_isFirstLoadCompleted) {
+        final novosPedidos = pedidosAtivos.where((p) =>
+            !_knownPedidoIds.contains(p.id) &&
+            (p.status == 'pendente' || p.canalOrigem.toLowerCase().contains('cardapio') || p.status == 'confirmado')
+        ).toList();
+
+        if (novosPedidos.isNotEmpty) {
+          // Ordena pelo mais recente
+          novosPedidos.sort((a, b) => b.dataHoraCriacao.compareTo(a.dataHoraCriacao));
+          final pedidoMaisRecente = novosPedidos.first;
+
+          // 1. Toca o alerta sonoro de novo pedido
+          await SoundService.playNewOrderSound();
+
+          // 2. Foca e restaura a janela do Windows se estiver minimizada ou atrás de outros apps
+          WindowsFocusService.bringWindowToFront();
+
+          // 3. Notifica o Shell para exibir o banner flutuante em qualquer tela
+          novoPedidoOverlayNotifier.value = null;
+          novoPedidoOverlayNotifier.value = pedidoMaisRecente;
+        }
+      } else {
+        _isFirstLoadCompleted = true;
+      }
+
+      _knownPedidoIds.addAll(pedidosAtivos.map((p) => p.id));
+
+      // ─── 2. Detecção de Pedidos Atrasados / Próximos do Prazo ─────────────
       final now = DateTime.now();
       int atrasados = 0;
       int urgentes = 0;
       int atencao = 0;
       final List<PedidoData> criticos = [];
 
-      for (final p in pedidosPendentes) {
+      final pedidosEmAndamento = pedidosAtivos.where((p) => p.status == 'confirmado' || p.status == 'em_preparo').toList();
+
+      for (final p in pedidosEmAndamento) {
         DateTime deadline;
         if (p.dataHoraEntregaPrevista != null) {
           deadline = p.dataHoraEntregaPrevista!.toLocal();
@@ -186,16 +252,20 @@ class GlobalPedidosAlertService {
       _ultimoResumo = resumo;
       resumoNotifier.value = resumo;
 
-      // Dispara som e overlay se houver pendências críticas
+      // Dispara som e overlay se houver pendências críticas de prazo
       if (resumo.temPendenciasCriticas) {
-        // Toca som de urgência
-        await SoundService.playUrgentSound();
+        // Toca som de urgência se não acabou de tocar novo pedido
+        if (novoPedidoOverlayNotifier.value == null) {
+          await SoundService.playUrgentSound();
+        }
 
-        // Notifica o Shell para exibir o overlay com animação em qualquer tela
+        // Notifica o Shell para exibir o overlay de atrasos no canto inferior
         alertaOverlayNotifier.value = null;
         alertaOverlayNotifier.value = resumo;
       } else if (resumo.totalAtencao > 0) {
-        await SoundService.playAttentionSound();
+        if (novoPedidoOverlayNotifier.value == null) {
+          await SoundService.playAttentionSound();
+        }
         dismissOverlay();
       } else {
         dismissOverlay();
@@ -208,10 +278,15 @@ class GlobalPedidosAlertService {
     }
   }
 
-  /// Descarta o overlay visual
+  /// Descarta o overlay visual de atenção/atraso
   void dismissOverlay() {
     alertaOverlayNotifier.value = null;
     hideOverlay();
+  }
+
+  /// Descarta o overlay visual de novo pedido recebido
+  void dismissNovoPedidoOverlay() {
+    novoPedidoOverlayNotifier.value = null;
   }
 
   /// Esconde o overlay se inserido via OverlayState

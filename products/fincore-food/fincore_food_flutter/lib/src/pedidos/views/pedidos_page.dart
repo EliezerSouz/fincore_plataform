@@ -14,6 +14,7 @@ import 'package:fincore_food_flutter/src/pedidos/views/widgets/kanban_column.dar
 import 'package:fincore_food_flutter/src/pedidos/views/widgets/pedido_detail_drawer.dart';
 import 'package:fincore_food_flutter/src/cap/printing/print_capability.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/pdv_page.dart';
+import 'package:fincore_food_flutter/src/shared/presentation/shell/fincore_shell.dart';
 import 'package:fincore_food_flutter/src/shared/services/sound_service.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/whatsapp_dialog.dart';
 import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
@@ -228,6 +229,8 @@ class _PedidosPageState extends State<PedidosPage> {
                           : null,
                   onSolicitarMotivoReversao: (de, para) =>
                       _solicitarMotivoReversao(context, de, para),
+                  onSolicitarReversao: (ordem, opcoes) =>
+                      _solicitarReversaoComDestino(context, ordem, opcoes),
                 ),
               ),
             ),
@@ -584,7 +587,299 @@ class _PedidosPageState extends State<PedidosPage> {
     }
   }
 
-  // ── Diálogo de reversão ──────────────────────────────────────────────────
+  // ── Diálogo de reversão avançado com escolha de status destino ──────────
+
+  Future<({StatusOrdemPreparo destino, String motivo})?> _solicitarReversaoComDestino(
+    BuildContext context,
+    OrdemPreparo ordem,
+    List<StatusOrdemPreparo> opcoesDestino,
+  ) async {
+    if (opcoesDestino.isEmpty) return null;
+
+    final controller = TextEditingController();
+    String? motivoSelecionado;
+    StatusOrdemPreparo destinoSelecionado = opcoesDestino.first;
+    final isReversaoEntregue = ordem.status == StatusOrdemPreparo.entregue;
+
+    const motivosRapidos = [
+      'Cliente solicitou alteração',
+      'Erro no sabor ou quantidade',
+      'Retornado à cozinha',
+      'Item incorreto no pedido',
+      'Substituição de salgado',
+      'Problema logístico / endereço',
+    ];
+
+    String formatStatusName(StatusOrdemPreparo s) {
+      switch (s) {
+        case StatusOrdemPreparo.pendente:
+          return '⏳ Pendente';
+        case StatusOrdemPreparo.emPreparo:
+          return '🍳 Em Preparo';
+        case StatusOrdemPreparo.pronto:
+          return '✅ Pronto';
+        case StatusOrdemPreparo.saiuParaEntrega:
+          return '🛵 Saiu p/ Entrega';
+        case StatusOrdemPreparo.entregue:
+          return '📦 Entregue';
+        case StatusOrdemPreparo.cancelado:
+          return '🚫 Cancelado';
+      }
+    }
+
+    Color formatStatusColor(StatusOrdemPreparo s) {
+      switch (s) {
+        case StatusOrdemPreparo.pendente:
+          return const Color(0xFFF97316);
+        case StatusOrdemPreparo.emPreparo:
+          return const Color(0xFFF59E0B);
+        case StatusOrdemPreparo.pronto:
+          return const Color(0xFF10B981);
+        case StatusOrdemPreparo.saiuParaEntrega:
+          return const Color(0xFF06B6D4);
+        case StatusOrdemPreparo.entregue:
+          return const Color(0xFF10B981);
+        case StatusOrdemPreparo.cancelado:
+          return const Color(0xFFEF4444);
+      }
+    }
+
+    return showDialog<({StatusOrdemPreparo destino, String motivo})>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: FincoreColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(
+                isReversaoEntregue ? Icons.warning_amber_rounded : Icons.undo_outlined,
+                color: isReversaoEntregue ? FincoreColors.danger : const Color(0xFFF59E0B),
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                isReversaoEntregue ? '⚠️ Reverter Pedido Entregue' : 'Reverter Status do Pedido',
+                style: const TextStyle(
+                  color: FincoreColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isReversaoEntregue) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: FincoreColors.danger.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: FincoreColors.danger.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Icon(Icons.inventory_2_outlined, color: FincoreColors.danger, size: 20),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'ESTORNO AUTOMÁTICO DE ESTOQUE:\nEste pedido já foi ENTREGUE. Ao reverter, a baixa física de estoque será ESTORNADA e os itens retornarão para a reserva operacional de preparação.',
+                              style: TextStyle(
+                                color: FincoreColors.danger,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  Row(
+                    children: [
+                      const Text(
+                        'Status Atual: ',
+                        style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: formatStatusColor(ordem.status).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: formatStatusColor(ordem.status).withValues(alpha: 0.4)),
+                        ),
+                        child: Text(
+                          formatStatusName(ordem.status),
+                          style: TextStyle(
+                            color: formatStatusColor(ordem.status),
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Selecione para qual status deseja reverter:',
+                    style: TextStyle(
+                      color: FincoreColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: opcoesDestino.map((opt) {
+                      final isSelected = opt == destinoSelecionado;
+                      final cor = formatStatusColor(opt);
+                      return InkWell(
+                        onTap: () => setDialogState(() => destinoSelecionado = opt),
+                        borderRadius: BorderRadius.circular(10),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isSelected ? cor.withValues(alpha: 0.18) : FincoreColors.background,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isSelected ? cor : FincoreColors.border,
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isSelected) ...[
+                                Icon(Icons.check_circle_rounded, color: cor, size: 16),
+                                const SizedBox(width: 6),
+                              ],
+                              Text(
+                                formatStatusName(opt),
+                                style: TextStyle(
+                                  color: isSelected ? cor : FincoreColors.textPrimary,
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Motivo da Reversão (Obrigatório):',
+                    style: TextStyle(
+                      color: FincoreColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: motivosRapidos.map((m) {
+                      final isSel = motivoSelecionado == m;
+                      return InkWell(
+                        onTap: () => setDialogState(() {
+                          motivoSelecionado = m;
+                          controller.text = m;
+                        }),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isSel ? FincoreColors.primary : FincoreColors.background,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: isSel ? FincoreColors.primary : FincoreColors.border,
+                            ),
+                          ),
+                          child: Text(
+                            m,
+                            style: TextStyle(
+                              color: isSel ? Colors.white : FincoreColors.textSecondary,
+                              fontSize: 11,
+                              fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: controller,
+                    style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 13),
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      hintText: 'Descreva o motivo da reversão...',
+                      hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+                      filled: true,
+                      fillColor: FincoreColors.background,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: FincoreColors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: FincoreColors.primary),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancelar', style: TextStyle(color: FincoreColors.textMuted)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final txt = controller.text.trim();
+                if (txt.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Por favor, informe ou selecione o motivo da reversão.'),
+                      backgroundColor: FincoreColors.danger,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, (destino: destinoSelecionado, motivo: txt));
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF59E0B),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Confirmar Reversão', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Diálogo de reversão legado ───────────────────────────────────────────
 
   Future<String?> _solicitarMotivoReversao(
       BuildContext context, String deStatus, String paraStatus) async {
@@ -772,6 +1067,12 @@ class _PedidosPageState extends State<PedidosPage> {
   // ── Ação rápida do card ──────────────────────────────────────────────────
 
   StatusOrdemPreparo? _proximoStatus(OrdemPreparo o) {
+    final pedido = _controller.pedidosMap[o.pedidoId];
+    final parsed = DadosOrdemKanban.fromOrdem(o);
+    final isDelivery = (pedido?.tipoLogistica.toLowerCase().contains('entrega') ?? false) ||
+        parsed.tipoLogistica.toLowerCase().contains('entrega') ||
+        parsed.tipoLogistica.toLowerCase().contains('delivery');
+
     switch (o.status) {
       case StatusOrdemPreparo.pendente:
         return PermissaoService.podeIniciarPreparo(_userRole)
@@ -782,8 +1083,13 @@ class _PedidosPageState extends State<PedidosPage> {
             ? StatusOrdemPreparo.pronto
             : null;
       case StatusOrdemPreparo.pronto:
+        if (isDelivery) {
+          return PermissaoService.podeEntregar(_userRole)
+              ? StatusOrdemPreparo.saiuParaEntrega
+              : null;
+        }
         return PermissaoService.podeEntregar(_userRole)
-            ? StatusOrdemPreparo.saiuParaEntrega
+            ? StatusOrdemPreparo.entregue
             : null;
       case StatusOrdemPreparo.saiuParaEntrega:
         return PermissaoService.podeEntregar(_userRole)
@@ -795,6 +1101,12 @@ class _PedidosPageState extends State<PedidosPage> {
   }
 
   String _acaoRapidaLabel(OrdemPreparo o) {
+    final pedido = _controller.pedidosMap[o.pedidoId];
+    final parsed = DadosOrdemKanban.fromOrdem(o);
+    final isDelivery = (pedido?.tipoLogistica.toLowerCase().contains('entrega') ?? false) ||
+        parsed.tipoLogistica.toLowerCase().contains('entrega') ||
+        parsed.tipoLogistica.toLowerCase().contains('delivery');
+
     switch (o.status) {
       case StatusOrdemPreparo.pendente:
         if (_controller.isPedidoAguardandoAprovacao(o)) {
@@ -804,7 +1116,7 @@ class _PedidosPageState extends State<PedidosPage> {
       case StatusOrdemPreparo.emPreparo:
         return 'Pronto';
       case StatusOrdemPreparo.pronto:
-        return 'Saiu p/ Entrega';
+        return isDelivery ? 'Saiu p/ Entrega' : 'Entregar';
       case StatusOrdemPreparo.saiuParaEntrega:
         return 'Entregar';
       default:
@@ -842,16 +1154,25 @@ class _PedidosPageState extends State<PedidosPage> {
   Future<void> _abrirWhatsAppParaOrdem(OrdemPreparo o, {bool saiuParaEntrega = false}) async {
     try {
       final db = DependencyInjection().get<FincoreDatabase>();
-      final pedido = _controller.pedidosMap[o.pedidoId];
       final parsed = DadosOrdemKanban.fromOrdem(o);
 
-      String? tel = pedido?.clienteTelefoneAvulso;
-      String nome = pedido?.clienteNomeAvulso ?? parsed.cliente;
+      PedidoData? pedidoRow;
+      try {
+        pedidoRow = await (db.select(db.pedidosTable)
+              ..where((t) => t.id.equals(o.pedidoId)))
+            .getSingleOrNull();
+      } catch (_) {}
 
-      if (pedido?.clienteId != null && (tel == null || tel.isEmpty)) {
+      final pedidoMemoria = _controller.pedidosMap[o.pedidoId];
+
+      String? tel = pedidoRow?.clienteTelefoneAvulso ?? pedidoMemoria?.clienteTelefoneAvulso;
+      String nome = pedidoRow?.clienteNomeAvulso ?? pedidoMemoria?.clienteNomeAvulso ?? parsed.cliente;
+      final clienteId = pedidoRow?.clienteId ?? pedidoMemoria?.clienteId;
+
+      if (clienteId != null && (tel == null || tel.isEmpty)) {
         try {
           final clienteRow = await (db.select(db.clientesTable)
-                ..where((c) => c.id.equals(pedido!.clienteId!) & c.deletedAt.isNull()))
+                ..where((c) => c.id.equals(clienteId) & c.deletedAt.isNull()))
               .getSingleOrNull();
           if (clienteRow != null) {
             tel = clienteRow.telefone;
@@ -863,6 +1184,10 @@ class _PedidosPageState extends State<PedidosPage> {
       }
 
       if (tel == null || tel.isEmpty) {
+        tel = parsed.telefone;
+      }
+
+      if (tel.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -874,15 +1199,103 @@ class _PedidosPageState extends State<PedidosPage> {
         return;
       }
 
-      // Busca forma de pagamento para verificar se e PIX
+      // ── Itens do pedido ──────────────────────────────────────────
+      List<ItemPedidoData> itemRows = [];
+      try {
+        itemRows = await (db.select(db.itensPedidoTable)
+              ..where((t) => t.pedidoId.equals(o.pedidoId) & t.deletedAt.isNull()))
+            .get();
+      } catch (_) {}
+
+      List<Map<String, dynamic>> itensWhats = [];
+      if (itemRows.isNotEmpty) {
+        itensWhats = itemRows.map((it) => {
+          'nome': it.nomeProduto,
+          'qtd': it.quantidade,
+          'unit': it.valorUnitarioCentavos / 100.0,
+          'total': it.valorTotalCentavos / 100.0,
+          'obs': it.observacoes,
+        }).toList();
+      } else {
+        itensWhats = o.itens.map((it) {
+          final pUnit = _controller.precoUnitarioCentavos(it.produtoId);
+          final totalItemCentavos = (it.quantidade * pUnit).round();
+          return {
+            'nome': it.nomeProduto,
+            'qtd': it.quantidade,
+            'unit': pUnit / 100.0,
+            'total': totalItemCentavos / 100.0,
+            'obs': null,
+          };
+        }).toList();
+      }
+
+      // ── Endereço de entrega ───────────────────────────────────────
+      String? enderecoStr;
+      if (pedidoRow?.enderecoJson != null && pedidoRow!.enderecoJson!.isNotEmpty) {
+        try {
+          final map = jsonDecode(pedidoRow.enderecoJson!) as Map<String, dynamic>;
+          final logradouro = (map['logradouro'] as String?)?.trim() ?? '';
+          final numero = (map['numero'] as String?)?.trim() ?? '';
+          final bairro = (map['bairro'] as String?)?.trim() ?? '';
+          final cidade = (map['cidade'] as String?)?.trim() ?? '';
+          final complemento = (map['complemento'] as String?)?.trim() ?? '';
+          final ref = (map['pontoReferencia'] as String? ?? map['referencia'] as String?)?.trim() ?? '';
+
+          final parts = <String>[];
+          if (logradouro.isNotEmpty) {
+            parts.add(numero.isNotEmpty ? '$logradouro, $numero' : logradouro);
+          }
+          if (complemento.isNotEmpty) parts.add(complemento);
+          if (bairro.isNotEmpty) parts.add(bairro);
+          if (cidade.isNotEmpty) parts.add(cidade);
+          if (ref.isNotEmpty) parts.add('(Ref: $ref)');
+          if (parts.isNotEmpty) enderecoStr = parts.join(' - ');
+        } catch (_) {}
+      }
+      if (enderecoStr == null || enderecoStr.isEmpty) {
+        final endParsed = parsed.endereco;
+        final bairroParsed = parsed.bairro;
+        if (endParsed != null && endParsed.isNotEmpty) {
+          enderecoStr = endParsed + (bairroParsed != null && bairroParsed.isNotEmpty ? ' - $bairroParsed' : '');
+        }
+      }
+
+      // ── Data e Hora prevista ──────────────────────────────────────
+      final dt = pedidoRow?.dataHoraEntregaPrevista?.toLocal() ??
+                 pedidoRow?.dataHoraCriacao.toLocal() ??
+                 o.criadaEm.toLocal();
+      final dataStr = '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} às ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+      // ── Logística e Pagamento ─────────────────────────────────────
+      final tipoAtendimento = pedidoRow?.tipoLogistica ?? parsed.tipoLogistica;
+      final formaPagtoStr = pedidoRow?.formaPagamentoNome ?? parsed.pagamento;
+
+      // ── Valores monetários ────────────────────────────────────────
+      final subtotal = (pedidoRow != null && pedidoRow.valorSubtotalCentavos > 0)
+          ? (pedidoRow.valorSubtotalCentavos / 100.0)
+          : itensWhats.fold<double>(0.0, (acc, item) => acc + ((item['total'] as num?)?.toDouble() ?? 0.0));
+      final taxaEntrega = (pedidoRow?.valorTaxaEntregaCentavos ?? 0) / 100.0;
+      final taxaServico = (pedidoRow?.valorTaxaServicoCentavos ?? 0) / 100.0;
+      final total = (pedidoRow != null && pedidoRow.valorTotalCentavos > 0)
+          ? (pedidoRow.valorTotalCentavos / 100.0)
+          : (_controller.totalOrdemCentavos(o) / 100.0);
+
+      // ── Observações ───────────────────────────────────────────────
+      final obs = (pedidoRow?.observacoes != null && pedidoRow!.observacoes!.isNotEmpty)
+          ? pedidoRow.observacoes
+          : (parsed.observacoesLimpa.isNotEmpty ? parsed.observacoesLimpa : null);
+
+      // ── Busca forma de pagamento para verificar se é PIX ──────────
       String? pixChave;
       String? pixTipoChave;
       bool isPix = false;
+      final formaPagamentoId = pedidoRow?.formaPagamentoId ?? pedidoMemoria?.formaPagamentoId;
 
-      if (pedido?.formaPagamentoId != null) {
+      if (formaPagamentoId != null) {
         try {
           final fpRow = await (db.select(db.formasPagamentoTable)
-                ..where((f) => f.id.equals(pedido!.formaPagamentoId!) & f.deletedAt.isNull()))
+                ..where((f) => f.id.equals(formaPagamentoId) & f.deletedAt.isNull()))
               .getSingleOrNull();
           if (fpRow != null) {
             isPix = fpRow.tipo == 'pix' || (fpRow.pixChave != null && fpRow.pixChave!.isNotEmpty);
@@ -896,29 +1309,35 @@ class _PedidosPageState extends State<PedidosPage> {
 
       PixWhatsAppInfo? pixInfo;
       if (isPix && pixChave != null && pixChave.isNotEmpty) {
-        final totalCentavos = _controller.totalOrdemCentavos(o);
-        final config = await (db.select(db.empresaConfiguracaoTable)..limit(1)).getSingleOrNull();
+        try {
+          final totalCentavos = (total * 100).round();
+          final config = await (db.select(db.empresaConfiguracaoTable)..limit(1)).getSingleOrNull();
 
-        final copiaECola = PixGenerator.gerarCopiaCola(
-          chave: pixChave,
-          favorecido: (config?.pixFavorecido != null && config!.pixFavorecido!.isNotEmpty)
-              ? config.pixFavorecido!
-              : nome,
-          cidade: 'Sorocaba',
-          valor: totalCentavos / 100.0,
-          tipoChave: pixTipoChave,
-        );
+          final copiaECola = PixGenerator.gerarCopiaCola(
+            chave: pixChave,
+            favorecido: (config?.pixFavorecido != null && config!.pixFavorecido!.isNotEmpty)
+                ? config.pixFavorecido!
+                : nome,
+            cidade: 'Sorocaba',
+            valor: totalCentavos / 100.0,
+            tipoChave: pixTipoChave,
+          );
 
-        pixInfo = PixWhatsAppInfo(
-          chaveDisplay: pixChave,
-          tipoChave: pixTipoChave ?? 'PIX',
-          copiaECola: copiaECola,
-        );
+          pixInfo = PixWhatsAppInfo(
+            chaveDisplay: pixChave,
+            tipoChave: pixTipoChave ?? 'PIX',
+            copiaECola: copiaECola,
+          );
+        } catch (pixErr) {
+          debugPrint('[PedidosPage] Erro ao gerar PIX para WhatsApp: $pixErr');
+        }
       }
 
-      final numPedido = pedido?.numeroPedido != null
-          ? '#${pedido!.numeroPedido.toString().padLeft(6, '0')}'
-          : '#${o.pedidoId.length > 6 ? o.pedidoId.substring(0, 6).toUpperCase() : o.pedidoId.toUpperCase()}';
+      final numPedido = (pedidoRow?.numeroPedido != null)
+          ? '#${pedidoRow!.numeroPedido.toString().padLeft(6, '0')}'
+          : (pedidoMemoria?.numeroPedido != null
+              ? '#${pedidoMemoria!.numeroPedido.toString().padLeft(6, '0')}'
+              : '#${o.pedidoId.length > 6 ? o.pedidoId.substring(0, 6).toUpperCase() : o.pedidoId.toUpperCase()}');
 
       String? empresaNome;
       try {
@@ -931,23 +1350,36 @@ class _PedidosPageState extends State<PedidosPage> {
 
       if (!mounted) return;
 
+      final resumoWhats = WhatsAppService.gerarTextoResumoPedido(
+        nomeCliente: nome,
+        numeroPedidoOuId: numPedido.replaceAll('#', ''),
+        tipoAtendimento: tipoAtendimento,
+        dataHoraPrevista: dataStr,
+        itens: itensWhats,
+        subtotal: subtotal,
+        taxaEntrega: taxaEntrega,
+        taxaServico: taxaServico,
+        total: total,
+        formaPagamento: formaPagtoStr,
+        enderecoEntrega: tipoAtendimento.toLowerCase().contains('entrega') ? enderecoStr : null,
+        observacoes: obs,
+        nomeEmpresa: empresaNome,
+      );
+
       final initialMsg = saiuParaEntrega
           ? WhatsAppService.gerarTextoSaiuParaEntrega(
               nomeCliente: nome,
               numeroPedidoOuId: numPedido,
               nomeEmpresa: empresaNome,
             )
-          : WhatsAppService.gerarTextoContatoKanban(
-              nomeCliente: nome,
-              numeroPedidoOuId: numPedido,
-              nomeEmpresa: empresaNome,
-            );
+          : resumoWhats;
 
       await WhatsAppDialog.show(
         context,
         rawPhone: tel,
         clienteNome: nome,
         initialMessage: initialMsg,
+        enderecoCliente: enderecoStr,
         pixInfo: pixInfo,
         numeroPedido: numPedido,
         nomeEmpresa: empresaNome,
@@ -2626,12 +3058,8 @@ class _PedidosPageState extends State<PedidosPage> {
           // Botão Novo Pedido
           if (PermissaoService.podeCriarPedido(_userRole))
             ElevatedButton.icon(
-              onPressed: () async {
-                final result = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(builder: (_) => const PdvPage()),
-                );
-                if (result == true) await _controller.carregarOrdens();
+              onPressed: () {
+                FincoreShell.selectTab(context, 'pdv');
               },
               icon: const Icon(Icons.add_rounded, size: 16),
               label: const Text(

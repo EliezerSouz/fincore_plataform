@@ -229,6 +229,11 @@ class EstoqueController extends ChangeNotifier {
     await _carregar();
   }
 
+  /// Recarrega a lista de estoques e reconcilia as reservas ativas
+  Future<void> carregarEstoque() async {
+    await _carregar();
+  }
+
   List<EstoqueItem> get itensCriticos =>
       _itens.where((i) => i.status == EstoqueStatus.critico).toList();
 
@@ -304,12 +309,13 @@ class EstoqueController extends ChangeNotifier {
                 (p.quantidadePlanejada - p.quantidadeProduzida).clamp(0, 999999);
       }
 
-      // 2. Todos os produtos com controle de estoque ativo
+      // 2. Todos os produtos com controle de estoque ativo e PRODUTO ATIVO
       final produtos = await (
         _db.select(_db.produtosTable)
           ..where((t) =>
               t.tenantId.equals(tenantId) &
               t.deletedAt.isNull().equals(true) &
+              t.ativo.equals(true) &
               t.controlaEstoque.equals(true))
       ).get();
 
@@ -1242,6 +1248,11 @@ class EstoqueController extends ChangeNotifier {
             ..where((t) => t.pedidoId.equals(p.id) & t.deletedAt.isNull().equals(true)))
           .get();
       for (final item in itens) {
+        final prod = await (_db.select(_db.produtosTable)
+              ..where((t) => t.id.equals(item.produtoId)))
+            .getSingleOrNull();
+        if (prod == null || !prod.controlaEstoque) continue;
+
         reservasPorProduto[item.produtoId] =
             (reservasPorProduto[item.produtoId] ?? 0) + item.quantidade.toInt();
       }

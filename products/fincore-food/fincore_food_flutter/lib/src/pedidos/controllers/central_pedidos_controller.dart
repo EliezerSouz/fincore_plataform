@@ -1020,7 +1020,7 @@ class CentralPedidosController extends ChangeNotifier {
       final db = DependencyInjection().get<FincoreDatabase>();
       final now = DateTime.now().toUtc();
       final statusStr = switch (novoStatus) {
-        StatusOrdemPreparo.pendente        => 'confirmado',
+        StatusOrdemPreparo.pendente        => isPedidoAguardandoAprovacao(ordem) ? 'pendente' : 'confirmado',
         StatusOrdemPreparo.emPreparo       => 'em_preparo',
         StatusOrdemPreparo.pronto          => 'pronto',
         StatusOrdemPreparo.saiuParaEntrega => 'saiu_para_entrega',
@@ -1097,6 +1097,24 @@ class CentralPedidosController extends ChangeNotifier {
             .write(PedidosTableCompanion(
           syncVersion: Value(pedidoSyncVersion),
         ));
+
+        // Atualiza também os caches em memória do controller para refletir o status imediatamente na UI
+        if (_pedidosMap.containsKey(ordem.pedidoId)) {
+          final current = _pedidosMap[ordem.pedidoId]!;
+          _pedidosMap[ordem.pedidoId] = current.copyWith(
+            status: statusStr,
+            syncVersion: pedidoSyncVersion,
+            updatedAt: now,
+          );
+        }
+        final hIdx = _historicoPedidos.indexWhere((p) => p.id == ordem.pedidoId);
+        if (hIdx != -1) {
+          _historicoPedidos[hIdx] = _historicoPedidos[hIdx].copyWith(
+            status: statusStr,
+            syncVersion: pedidoSyncVersion,
+            updatedAt: now,
+          );
+        }
 
         await outboxService.enqueue(
           entity: 'Pedido',

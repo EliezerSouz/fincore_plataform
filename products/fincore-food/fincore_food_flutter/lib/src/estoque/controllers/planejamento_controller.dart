@@ -534,7 +534,7 @@ class PlanoProducaoController extends ChangeNotifier {
         final produto = await (_db.select(_db.produtosTable)
               ..where((t) => t.id.equals(item.produtoId)))
             .getSingleOrNull();
-        if (produto == null || !produto.controlaEstoque) continue;
+        if (produto == null || !produto.controlaEstoque || !produto.ativo) continue;
 
         final qtd = item.quantidade.toInt();
         final dataEntrega = pedido.dataHoraEntregaPrevista;
@@ -606,6 +606,7 @@ class PlanoProducaoController extends ChangeNotifier {
           ..where((t) =>
               t.tenantId.equals(tenantId) &
               t.controlaEstoque.equals(true) &
+              t.ativo.equals(true) &
               t.deletedAt.isNull().equals(true)))
         .get();
 
@@ -710,7 +711,7 @@ class PlanoProducaoController extends ChangeNotifier {
       final produto = await (_db.select(_db.produtosTable)
             ..where((t) => t.id.equals(item.produtoId)))
           .getSingleOrNull();
-      if (produto == null || !produto.controlaEstoque) continue;
+      if (produto == null || !produto.controlaEstoque || !produto.ativo) continue;
 
       final est = await (_db.select(_db.estoqueProdutosTable)
             ..where((t) =>
