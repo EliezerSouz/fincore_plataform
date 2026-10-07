@@ -1399,18 +1399,35 @@ function toast(msg, type = 'info', duration = 3500) {
   }, duration);
 }
 
+let _loadingTimeoutId = null;
 function showLoading(show, message = 'Carregando cardápio...') {
   const overlay = document.getElementById('loading-overlay');
   const textEl = document.getElementById('loading-text');
   if (textEl) textEl.textContent = message;
-  if (overlay) overlay.style.display = show ? 'flex' : 'none';
+  if (overlay) {
+    overlay.style.display = show ? 'flex' : 'none';
+    // Permite ao usuário clicar no overlay para fechar se travar
+    overlay.onclick = () => {
+      overlay.style.display = 'none';
+    };
+  }
+  if (_loadingTimeoutId) {
+    clearTimeout(_loadingTimeoutId);
+    _loadingTimeoutId = null;
+  }
+  if (show) {
+    // Trava de segurança absoluta: fecha automaticamente o loading se demorar mais de 3.5 segundos
+    _loadingTimeoutId = setTimeout(() => {
+      if (overlay) overlay.style.display = 'none';
+    }, 3500);
+  }
 }
 
 // ─── Gerenciamento de Navegação Unificada ─────────────────────────────
 function showScreen(screenId) {
   const isLogged = !!(state.session?.user || (state.profile && state.profile.id));
 
-  // Proteger checkout e áreas de conta com autenticação obrigatória
+  // Proteger checkout e áreas de conta com autenticação e cadastro completo
   if (screenId === 'screen-checkout') {
     if (!state.cart || state.cart.length === 0) {
       toast('Seu carrinho está vazio! Adicione itens do cardápio.', 'info');
@@ -1418,6 +1435,11 @@ function showScreen(screenId) {
     } else if (!isLogged) {
       state.redirectAfterAuth = 'screen-checkout';
       toast('🔐 Para sua segurança, faça login ou cadastre-se para finalizar seu pedido.', 'info', 4500);
+      screenId = 'screen-auth';
+    } else if (!isProfileComplete(state.profile)) {
+      state.redirectAfterAuth = 'screen-checkout';
+      prepareGoogleOnboardingUI(state.session?.user);
+      toast('📱 Complete seu WhatsApp e endereço de entrega para finalizar seu pedido.', 'info', 5000);
       screenId = 'screen-auth';
     }
   } else if ((screenId === 'screen-account' || screenId === 'screen-orders') && !isLogged) {
@@ -2375,23 +2397,25 @@ function setupHomeIntentShortcuts() {
 
 // ─── Pedido em Andamento com Stepper Kanban Real de 5 Etapas ──────────
 const KANBAN_STATUS_MAP = {
-  pendente:            { label: 'Recebido',             icon: '📋' },
-  recebido:            { label: 'Recebido',             icon: '📋' },
-  confirmado:          { label: 'Recebido',             icon: '📋' },
-  em_preparo:          { label: 'Em Preparação',        icon: '🍳' },
-  empreparo:           { label: 'Em Preparação',        icon: '🍳' },
-  pronto:              { label: 'Pronto',               icon: '📦' },
-  aguardando_retirada: { label: 'Pronto para Retirada', icon: '📦' },
-  saiu_para_entrega:   { label: 'Saiu para Entrega 🛵', icon: '🛵' },
-  saiuparaentrega:     { label: 'Saiu para Entrega 🛵', icon: '🛵' },
-  saiu_entrega:        { label: 'Saiu para Entrega 🛵', icon: '🛵' },
-  em_entrega:          { label: 'Saiu para Entrega 🛵', icon: '🛵' },
-  em_transito:         { label: 'Saiu para Entrega 🛵', icon: '🛵' },
-  a_caminho:           { label: 'A Caminho 🛵',         icon: '🛵' },
-  entregue:            { label: 'Entregue',             icon: '✅' },
-  concluido:           { label: 'Entregue',             icon: '✅' },
-  finalizado:          { label: 'Entregue',             icon: '✅' },
-  cancelado:           { label: 'Cancelado',            icon: '❌' },
+  pendente:            { label: 'Aguardando Confirmação', icon: '⏳' },
+  aguardando_aprovacao:{ label: 'Aguardando Confirmação', icon: '⏳' },
+  recebido:            { label: 'Confirmado pela Loja',   icon: '✅' },
+  confirmado:          { label: 'Confirmado pela Loja',   icon: '✅' },
+  aprovado:            { label: 'Confirmado pela Loja',   icon: '✅' },
+  em_preparo:          { label: 'Em Preparação',          icon: '🍳' },
+  empreparo:           { label: 'Em Preparação',          icon: '🍳' },
+  pronto:              { label: 'Pronto',                 icon: '📦' },
+  aguardando_retirada: { label: 'Pronto para Retirada',   icon: '📦' },
+  saiu_para_entrega:   { label: 'Saiu para Entrega 🛵',   icon: '🛵' },
+  saiuparaentrega:     { label: 'Saiu para Entrega 🛵',   icon: '🛵' },
+  saiu_entrega:        { label: 'Saiu para Entrega 🛵',   icon: '🛵' },
+  em_entrega:          { label: 'Saiu para Entrega 🛵',   icon: '🛵' },
+  em_transito:         { label: 'Saiu para Entrega 🛵',   icon: '🛵' },
+  a_caminho:           { label: 'A Caminho 🛵',           icon: '🛵' },
+  entregue:            { label: 'Entregue',               icon: '✅' },
+  concluido:           { label: 'Entregue',               icon: '✅' },
+  finalizado:          { label: 'Entregue',               icon: '✅' },
+  cancelado:           { label: 'Cancelado',              icon: '❌' },
 };
 
 async function renderActiveOrderWidget() {
@@ -2442,29 +2466,42 @@ async function renderActiveOrderWidget() {
   const rawStatus = String(o.status || 'pendente').toLowerCase().trim();
 
   // Status mapping para Kanban de 5 passos reais:
+  // 1: Aguardando confirmação da loja
+  // 2: Confirmado pela loja
+  // 3: Em preparação
+  // 4: Pronto / A caminho
+  // 5: Entregue
   let currentStep = 1;
-  let headline = '📋 Pedido recebido e confirmado pela cozinha!';
-  let icon = '📋';
+  let headline = '⏳ Recebemos sua solicitação! Aguardando confirmação da loja.';
+  let icon = '⏳';
 
   if (rawStatus.includes('saiu') || rawStatus.includes('entrega') || rawStatus.includes('transito') || rawStatus.includes('caminho')) {
     currentStep = 4;
     headline = '🛵 Seu pedido está a caminho!';
     icon = '🛵';
-  } else if (rawStatus.includes('pronto') || rawStatus.includes('aguardando')) {
-    currentStep = 3;
+  } else if (rawStatus.includes('pronto') || rawStatus.includes('aguardando_retirada')) {
+    currentStep = 4;
     headline = '📦 Seu pedido está pronto para entrega/retirada!';
     icon = '📦';
   } else if (rawStatus.includes('prepar') || rawStatus.includes('cozinha')) {
-    currentStep = 2;
+    currentStep = 3;
     headline = '🍳 Seu pedido está sendo preparado com carinho!';
     icon = '🍳';
+  } else if (rawStatus === 'confirmado' || rawStatus === 'recebido' || rawStatus === 'aprovado') {
+    currentStep = 2;
+    headline = '✅ Pedido confirmado pela loja! Na fila de preparo.';
+    icon = '✅';
+  } else {
+    currentStep = 1;
+    headline = '⏳ Recebemos sua solicitação! Aguardando confirmação da loja.';
+    icon = '⏳';
   }
 
   const steps = [
-    { num: 1, label: 'Recebido' },
-    { num: 2, label: 'Em Preparação' },
-    { num: 3, label: 'Pronto' },
-    { num: 4, label: 'A Caminho' },
+    { num: 1, label: 'Enviado' },
+    { num: 2, label: 'Confirmado' },
+    { num: 3, label: 'Em Preparo' },
+    { num: 4, label: 'Pronto / Rota' },
     { num: 5, label: 'Entregue' }
   ];
 
@@ -2636,7 +2673,7 @@ function updateCardQtyControl(produtoId, inCartQty, avail) {
         footerAction.innerHTML = `
           <div class="product-card-qty-ctrl" onclick="event.stopPropagation()">
             <button type="button" class="btn-qty-mini btn-qty-minus" data-prod-id="${produtoId}" aria-label="Diminuir quantidade">−</button>
-            <span class="qty-mini-value">${inCartQty}</span>
+            <span class="qty-mini-value" data-prod-id="${produtoId}" title="Toque para alterar a quantidade">${inCartQty}</span>
             <button type="button" class="btn-qty-mini btn-qty-plus" data-prod-id="${produtoId}" aria-label="Aumentar quantidade">+</button>
           </div>
         `;
@@ -2649,7 +2686,8 @@ function updateCardQtyControl(produtoId, inCartQty, avail) {
         `;
         footerAction.querySelector('.product-card-add-btn')?.addEventListener('click', (e) => {
           e.stopPropagation();
-          quickAddToCart(produtoId, 1);
+          const prod = state.produtos.find(p => p.id === produtoId);
+          if (prod) openProductModal(prod);
         });
       }
     }
@@ -2667,6 +2705,14 @@ function attachCardQtyEvents(container) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       quickAddToCart(btn.dataset.prodId, 1);
+    });
+  });
+  container.querySelectorAll('.qty-mini-value').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prodId = el.dataset.prodId || el.closest('.product-card')?.dataset.prodId;
+      const prod = state.produtos.find(p => p.id === prodId);
+      if (prod) openProductModal(prod);
     });
   });
 }
@@ -2723,7 +2769,7 @@ function createProductCardHtml(prod, showCatBadge = false) {
     actionSlotHtml = `
       <div class="product-card-qty-ctrl" onclick="event.stopPropagation()">
         <button type="button" class="btn-qty-mini btn-qty-minus" data-prod-id="${prod.id}" aria-label="Diminuir quantidade">−</button>
-        <span class="qty-mini-value">${inCartQty}</span>
+        <span class="qty-mini-value" data-prod-id="${prod.id}" title="Toque para alterar a quantidade">${inCartQty}</span>
         <button type="button" class="btn-qty-mini btn-qty-plus" data-prod-id="${prod.id}" aria-label="Aumentar quantidade">+</button>
       </div>
     `;
@@ -2763,9 +2809,9 @@ function createProductCardHtml(prod, showCatBadge = false) {
 
 function attachProductCardEvents(container) {
   container.querySelectorAll('.product-card').forEach(card => {
-    // Clique no card abre o modal detalhado (exceto se clicar no seletor de quantidade ou no botão adicionar)
+    // Clique no card abre o modal detalhado (exceto se clicar nos botões rápidos de mais e menos)
     card.addEventListener('click', (e) => {
-      if (e.target.closest('.product-card-qty-ctrl') || e.target.closest('.product-card-add-btn') || e.target.closest('.product-card-unavail-btn')) {
+      if (e.target.closest('.btn-qty-mini') || e.target.closest('.product-card-unavail-btn')) {
         return;
       }
       const prodId = card.dataset.prodId;
@@ -2777,7 +2823,9 @@ function attachProductCardEvents(container) {
     if (addBtn) {
       addBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        quickAddToCart(card.dataset.prodId, 1);
+        const prodId = card.dataset.prodId;
+        const prod = state.produtos.find(p => p.id === prodId);
+        if (prod) openProductModal(prod);
       });
     }
   });
@@ -2872,7 +2920,8 @@ function renderProductsGrid() {
 // ─── Modal de Produto Gastronômico ────────────────────────────────────
 function openProductModal(prod) {
   state.modalProduct = prod;
-  state.modalQty = 0;
+  const currentInCart = getCartQtyFor(prod.id);
+  state.modalQty = currentInCart > 0 ? currentInCart : 1;
 
   const modal = document.getElementById('product-modal');
   const nameEl = document.getElementById('modal-prod-name');
@@ -2904,7 +2953,7 @@ function openProductModal(prod) {
 
   if (catEl) catEl.textContent = `${catIcon} ${sanitizeCategoryName(prod.categoria_nome)}`;
   if (qtyInput) {
-    qtyInput.value = 0;
+    qtyInput.value = state.modalQty;
     qtyInput.min = '0';
   }
 
@@ -2998,14 +3047,19 @@ function openProductModal(prod) {
   }
   if (qtyInput) qtyInput.disabled = isInactive;
 
-  // Botões rápidos de incremento de lote (+1, +5, +10, +25, +50, +100)
+  // Botões rápidos de incremento / seleção de quantidade (+1, +5, +10, +25, +50, +100)
   document.querySelectorAll('.quick-qty-chip').forEach(chip => {
     chip.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (isInactive) return;
       const addQty = parseInt(chip.dataset.qty, 10) || 1;
-      state.modalQty = (parseInt(state.modalQty, 10) || 0) + addQty;
+      const cur = parseInt(state.modalQty, 10) || 0;
+      if (cur === 1 && addQty >= 5 && currentInCart === 0) {
+        state.modalQty = addQty;
+      } else {
+        state.modalQty = cur + addQty;
+      }
       if (qtyInput) qtyInput.value = state.modalQty;
       updateModalPrice();
     };
@@ -3024,12 +3078,14 @@ function closeProductModal() {
 function updateModalPrice() {
   if (!state.modalProduct) return;
   const prod = state.modalProduct;
-  const unitPrice = getPreco(prod, Math.max(1, state.modalQty));
-  const totalPrice = unitPrice * state.modalQty;
+  const currentInCart = getCartQtyFor(prod.id);
+  const qty = Math.max(0, parseInt(state.modalQty, 10) || 0);
+  const unitPrice = getPreco(prod, Math.max(1, qty));
+  const totalPrice = unitPrice * qty;
 
   const priceEl = document.getElementById('modal-prod-price');
   if (priceEl) {
-    if (state.modalQty > 0) {
+    if (qty > 0) {
       priceEl.innerHTML = `${fmt(totalPrice)} <small style="font-size:12px;color:var(--text-muted);font-weight:600">(${fmt(unitPrice)} /un)</small>`;
     } else {
       priceEl.innerHTML = `${fmt(unitPrice)} <small style="font-size:12px;color:var(--text-muted);font-weight:600">/unidade</small>`;
@@ -3039,16 +3095,27 @@ function updateModalPrice() {
   const addBtn = document.getElementById('modal-add-btn');
   const isInactive = prod.ativo === false || prod.status_comercial === 'indisponivel';
   if (addBtn && !isInactive) {
-    if (state.modalQty > 0) {
+    if (qty > 0) {
       addBtn.disabled = false;
       addBtn.style.opacity = '1';
       addBtn.style.cursor = 'pointer';
-      addBtn.innerHTML = `🛒 Adicionar ao Pedido • <span id="modal-btn-price">${fmt(totalPrice)}</span>`;
+      if (currentInCart > 0) {
+        addBtn.innerHTML = `🛒 Atualizar Pedido (${qty} un) • <span id="modal-btn-price">${fmt(totalPrice)}</span>`;
+      } else {
+        addBtn.innerHTML = `🛒 Adicionar ao Pedido (${qty} un) • <span id="modal-btn-price">${fmt(totalPrice)}</span>`;
+      }
     } else {
-      addBtn.disabled = true;
-      addBtn.style.opacity = '0.6';
-      addBtn.style.cursor = 'not-allowed';
-      addBtn.innerHTML = `🛒 Selecione a quantidade`;
+      if (currentInCart > 0) {
+        addBtn.disabled = false;
+        addBtn.style.opacity = '1';
+        addBtn.style.cursor = 'pointer';
+        addBtn.innerHTML = `🗑️ Remover do Pedido`;
+      } else {
+        addBtn.disabled = true;
+        addBtn.style.opacity = '0.6';
+        addBtn.style.cursor = 'not-allowed';
+        addBtn.innerHTML = `🛒 Digite a quantidade`;
+      }
     }
   } else if (addBtn && isInactive) {
     addBtn.disabled = true;
@@ -3062,7 +3129,7 @@ function updateModalPrice() {
     tiers.forEach(t => {
       const row = document.getElementById(`tier-row-${t.qtd_minima}`);
       if (row) {
-        const isActive = state.modalQty >= t.qtd_minima && (!t.qtd_maxima || state.modalQty <= t.qtd_maxima);
+        const isActive = qty >= t.qtd_minima && (!t.qtd_maxima || qty <= t.qtd_maxima);
         row.classList.toggle('active-tier', isActive);
       }
     });
@@ -4785,7 +4852,25 @@ function renderConfirmationPage(order) {
     pixContainer.style.display = 'none';
   }
 
-  renderTimeline(order.status || 'confirmado');
+  const subEl = document.getElementById('confirm-subtitle');
+  const rawSt = String(order.status || 'pendente').toLowerCase().trim();
+  if (subEl) {
+    if (rawSt === 'pendente' || rawSt === 'aguardando_aprovacao') {
+      subEl.innerHTML = 'Recebemos sua solicitação! Seu pedido está <strong>aguardando confirmação da loja</strong>.';
+    } else if (rawSt === 'confirmado' || rawSt === 'recebido' || rawSt === 'aprovado') {
+      subEl.innerHTML = 'Pedido <strong>confirmado pela loja</strong>! Já foi encaminhado para a fila de preparo.';
+    } else if (rawSt.includes('prepar')) {
+      subEl.innerHTML = 'Seu pedido está sendo <strong>preparado na cozinha</strong>!';
+    } else if (rawSt.includes('pronto')) {
+      subEl.innerHTML = 'Seu pedido está <strong>pronto</strong>!';
+    } else if (rawSt.includes('entrega') || rawSt.includes('caminho')) {
+      subEl.innerHTML = 'Seu pedido está <strong>a caminho da entrega</strong>!';
+    } else if (rawSt === 'entregue' || rawSt === 'concluido') {
+      subEl.innerHTML = 'Pedido <strong>entregue</strong> com sucesso! Bom apetite!';
+    }
+  }
+
+  renderTimeline(order.status || 'pendente');
 }
 
 function renderTimeline(status) {
@@ -4793,10 +4878,10 @@ function renderTimeline(status) {
   if (!container) return;
 
   const steps = [
-    { key: 'pendente',     label: 'Aguardando Aprovação' },
-    { key: 'confirmado',   label: 'Aprovado / Na Fila' },
+    { key: 'pendente',     label: 'Aguardando Confirmação' },
+    { key: 'confirmado',   label: 'Confirmado pela Loja' },
     { key: 'em_preparo',   label: 'Em Preparo' },
-    { key: 'pronto',       label: 'Pronto' },
+    { key: 'pronto',       label: 'Pronto / A Caminho' },
     { key: 'entregue',     label: 'Entregue' }
   ];
 
@@ -4805,8 +4890,8 @@ function renderTimeline(status) {
     if (s === 'pendente' || s === 'aguardando_aprovacao' || s === 'rascunho') return 0;
     if (s === 'recebido' || s === 'confirmado' || s === 'aprovado') return 1;
     if (s === 'em_preparo' || s === 'empreparo' || s === 'preparando') return 2;
-    if (s === 'pronto' || s === 'aguardando_retirada') return 3;
-    if (s === 'saiu_para_entrega' || s === 'saiuparaentrega' || s === 'saiu_entrega' || s === 'em_entrega' || s === 'em_transito' || s === 'entregue' || s === 'concluido' || s === 'finalizado') return 4;
+    if (s === 'pronto' || s === 'aguardando_retirada' || s === 'saiu_para_entrega' || s === 'saiuparaentrega' || s === 'saiu_entrega' || s === 'em_entrega' || s === 'em_transito' || s === 'a_caminho') return 3;
+    if (s === 'entregue' || s === 'concluido' || s === 'finalizado') return 4;
     return 0;
   };
 
@@ -4973,14 +5058,18 @@ function renderOrdersList() {
 
       // Mapeamento canônico: status operacional do Kanban
       const STATUS_CLIENTE = {
-        pendente:            '📋 Aguardando Aprovação',
-        recebido:            '📋 Aprovado / Na Fila',
-        confirmado:          '📋 Aprovado / Na Fila',
+        pendente:            '⏳ Aguardando Confirmação',
+        aguardando_aprovacao:'⏳ Aguardando Confirmação',
+        recebido:            '✅ Confirmado pela Loja',
+        confirmado:          '✅ Confirmado pela Loja',
+        aprovado:            '✅ Confirmado pela Loja',
         em_preparo:          '🍳 Em Preparação',
+        empreparo:           '🍳 Em Preparação',
         pronto:              '📦 Pronto',
         aguardando_retirada: '📦 Pronto para Retirada',
         saiu_entrega:        '🛵 Saiu para Entrega',
         em_entrega:          '🛵 Saiu para Entrega',
+        a_caminho:           '🛵 A Caminho',
         concluido:           '✅ Entregue',
         entregue:            '✅ Entregue',
         finalizado:          '✅ Entregue',
@@ -5109,18 +5198,22 @@ function openOrderDetailModal(order) {
 
   const st = String(order.status || 'pendente').toLowerCase().trim();
   const STATUS_MODAL_LABELS = {
-    pendente:            { label: '📋 Aguardando Aprovação', icon: '📋' },
-    recebido:            { label: '📋 Aprovado / Na Fila', icon: '📋' },
-    confirmado:          { label: '📋 Aprovado / Na Fila', icon: '📋' },
-    em_preparo:          { label: '🍳 Em Preparação', icon: '🍳' },
-    pronto:              { label: '📦 Pronto', icon: '📦' },
-    aguardando_retirada: { label: '📦 Pronto para Retirada', icon: '📦' },
-    saiu_entrega:        { label: '🛵 Saiu para Entrega', icon: '🛵' },
-    em_entrega:          { label: '🛵 Saiu para Entrega', icon: '🛵' },
-    concluido:           { label: '✅ Entregue', icon: '✅' },
-    entregue:            { label: '✅ Entregue', icon: '✅' },
-    finalizado:          { label: '✅ Entregue', icon: '✅' },
-    cancelado:           { label: '❌ Cancelado', icon: '❌' },
+    pendente:            { label: '⏳ Aguardando Confirmação', icon: '⏳' },
+    aguardando_aprovacao:{ label: '⏳ Aguardando Confirmação', icon: '⏳' },
+    recebido:            { label: '✅ Confirmado pela Loja',   icon: '✅' },
+    confirmado:          { label: '✅ Confirmado pela Loja',   icon: '✅' },
+    aprovado:            { label: '✅ Confirmado pela Loja',   icon: '✅' },
+    em_preparo:          { label: '🍳 Em Preparação',          icon: '🍳' },
+    empreparo:           { label: '🍳 Em Preparação',          icon: '🍳' },
+    pronto:              { label: '📦 Pronto',                 icon: '📦' },
+    aguardando_retirada: { label: '📦 Pronto para Retirada',   icon: '📦' },
+    saiu_entrega:        { label: '🛵 Saiu para Entrega',      icon: '🛵' },
+    em_entrega:          { label: '🛵 Saiu para Entrega',      icon: '🛵' },
+    a_caminho:           { label: '🛵 A Caminho',              icon: '🛵' },
+    concluido:           { label: '✅ Entregue',               icon: '✅' },
+    entregue:            { label: '✅ Entregue',               icon: '✅' },
+    finalizado:          { label: '✅ Entregue',               icon: '✅' },
+    cancelado:           { label: '❌ Cancelado',              icon: '❌' },
   };
   const statusInfo = STATUS_MODAL_LABELS[st] || { label: order.status || 'Pendente', icon: '⚡' };
 
@@ -5779,6 +5872,27 @@ async function handleRegister(e) {
       console.warn('Aviso ao sincronizar novo usuário no ERP:', e.message);
     }
 
+    // Pré-preenche os inputs do formulário de checkout imediatamente
+    const checkoutNome = document.getElementById('checkout-nome-cliente');
+    const checkoutPhone = document.getElementById('checkout-phone-cliente');
+    const checkoutLogr = document.getElementById('checkout-logradouro');
+    const checkoutNum = document.getElementById('checkout-numero');
+    const checkoutBair = document.getElementById('checkout-bairro');
+    const checkoutCid = document.getElementById('checkout-cidade');
+    const checkoutCep = document.getElementById('checkout-cep');
+    const checkoutUf = document.getElementById('checkout-uf');
+    const checkoutComp = document.getElementById('checkout-complemento');
+
+    if (checkoutNome) checkoutNome.value = nome;
+    if (checkoutPhone) checkoutPhone.value = formatPhone(phoneVal.clean);
+    if (checkoutLogr) checkoutLogr.value = logr;
+    if (checkoutNum) checkoutNum.value = num;
+    if (checkoutBair) checkoutBair.value = bair;
+    if (checkoutCid) checkoutCid.value = cid;
+    if (checkoutCep) checkoutCep.value = cep;
+    if (checkoutUf) checkoutUf.value = uf;
+    if (checkoutComp) checkoutComp.value = comp;
+
     // Restaura layout da tela de auth
     resetAuthLayout();
     updateHeaderUI();
@@ -5810,18 +5924,28 @@ function resetAuthLayout() {
   if (regBtn) regBtn.textContent = 'Criar minha conta';
 }
 
+function isProfileComplete(prof) {
+  if (!prof) return false;
+  const phone = String(prof.whatsapp || prof.telefone || '').replace(/\D/g, '');
+  const logr = String(prof.logradouro || '').trim();
+  const num = String(prof.numero || '').trim();
+  return phone.length >= 10 && logr.length > 0 && num.length > 0;
+}
+
 function prepareGoogleOnboardingUI(user) {
+  if (!user) return;
   const gContainer = document.getElementById('google-auth-container');
   const tabs = document.getElementById('auth-tabs');
   const banner = document.getElementById('google-onboarding-banner');
   const pwdGroup = document.getElementById('reg-password-group');
   const emailInput = document.getElementById('reg-email');
   const nameInput = document.getElementById('reg-name');
+  const phoneInput = document.getElementById('reg-whatsapp');
   const regBtn = document.getElementById('register-btn');
   const userNameEl = document.getElementById('gob-user-name');
 
-  const fullName = user.user_metadata?.full_name || user.user_metadata?.name || '';
-  const email = user.email || '';
+  const fullName = user.user_metadata?.full_name || user.user_metadata?.name || state.profile?.nome || '';
+  const email = user.email || state.profile?.email || '';
 
   if (gContainer) gContainer.style.display = 'none';
   if (tabs) tabs.style.display = 'none';
@@ -5832,7 +5956,7 @@ function prepareGoogleOnboardingUI(user) {
     userNameEl.textContent = `Olá, ${fullName.split(' ')[0]}!`;
   }
 
-  if (nameInput && !nameInput.value) {
+  if (nameInput && (!nameInput.value || nameInput.value === 'Cliente')) {
     nameInput.value = fullName;
   }
   if (emailInput) {
@@ -5840,15 +5964,83 @@ function prepareGoogleOnboardingUI(user) {
     emailInput.readOnly = true;
   }
 
+  // Preenche dados já existentes no perfil caso disponíveis
+  if (phoneInput && !phoneInput.value && state.profile?.whatsapp) {
+    phoneInput.value = formatPhone(state.profile.whatsapp);
+  }
+  const cepEl = document.getElementById('reg-cep');
+  const logrEl = document.getElementById('reg-logradouro');
+  const numEl = document.getElementById('reg-numero');
+  const bairEl = document.getElementById('reg-bairro');
+  const cidEl = document.getElementById('reg-cidade');
+  const ufEl = document.getElementById('reg-uf');
+  const compEl = document.getElementById('reg-complemento');
+
+  if (cepEl && !cepEl.value && state.profile?.cep) cepEl.value = state.profile.cep;
+  if (logrEl && !logrEl.value && state.profile?.logradouro) logrEl.value = state.profile.logradouro;
+  if (numEl && !numEl.value && state.profile?.numero) numEl.value = state.profile.numero;
+  if (bairEl && !bairEl.value && state.profile?.bairro) bairEl.value = state.profile.bairro;
+  if (cidEl && !cidEl.value && state.profile?.cidade) cidEl.value = state.profile.cidade;
+  if (ufEl && !ufEl.value && state.profile?.uf) ufEl.value = state.profile.uf;
+  if (compEl && !compEl.value && state.profile?.complemento) compEl.value = state.profile.complemento;
+
   if (regBtn) {
-    regBtn.textContent = 'Salvar Endereço e Continuar Pedido';
+    regBtn.textContent = '💾 Salvar e Continuar Pedido';
   }
 
-  // Ativa o formulário de cadastro
+  // Ativa o formulário de cadastro e oculta o formulário de login
   const formLogin = document.getElementById('form-login');
   const formReg = document.getElementById('form-register');
   if (formLogin) formLogin.style.display = 'none';
   if (formReg) formReg.style.display = 'block';
+
+  // Foco imediato no WhatsApp se estiver em branco
+  if (phoneInput && !phoneInput.value) {
+    setTimeout(() => phoneInput.focus(), 300);
+  }
+}
+
+async function checkExistingCustomerByPhone(rawPhone) {
+  const clean = String(rawPhone || '').replace(/\D/g, '');
+  const badge = document.getElementById('phone-check-status');
+  if (clean.length < 10) {
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+
+  try {
+    const targetTenant = state.tenantId || DEFAULT_TENANT_ID;
+    const { data: found } = await sb
+      .from('cardapio_clientes')
+      .select('*')
+      .eq('whatsapp', clean)
+      .eq('tenant_id', targetTenant)
+      .maybeSingle();
+
+    if (found && badge) {
+      badge.style.display = 'block';
+      badge.innerHTML = `✅ Cadastro anterior localizado (${found.nome || 'Cliente'}). Endereço pré-preenchido!`;
+      badge.className = 'phone-status-badge text-success';
+
+      const cepEl = document.getElementById('reg-cep');
+      const logrEl = document.getElementById('reg-logradouro');
+      const numEl = document.getElementById('reg-numero');
+      const bairEl = document.getElementById('reg-bairro');
+      const cidEl = document.getElementById('reg-cidade');
+      const ufEl = document.getElementById('reg-uf');
+      const compEl = document.getElementById('reg-complemento');
+
+      if (found.cep && cepEl && !cepEl.value) cepEl.value = found.cep;
+      if (found.logradouro && logrEl && !logrEl.value) logrEl.value = found.logradouro;
+      if (found.numero && numEl && !numEl.value) numEl.value = found.numero;
+      if (found.bairro && bairEl && !bairEl.value) bairEl.value = found.bairro;
+      if (found.cidade && cidEl && !cidEl.value) cidEl.value = found.cidade;
+      if (found.uf && ufEl && !ufEl.value) ufEl.value = found.uf;
+      if (found.complemento && compEl && !compEl.value) compEl.value = found.complemento;
+    } else if (badge) {
+      badge.style.display = 'none';
+    }
+  } catch (_) {}
 }
 
 async function loadUserProfile() {
@@ -5938,7 +6130,7 @@ async function loadUserProfile() {
   updateHeaderUI();
   populateAccountForm();
 
-  if (state.profile?.logradouro && state.profile?.whatsapp) {
+  if (isProfileComplete(state.profile)) {
     resetAuthLayout();
   } else {
     prepareGoogleOnboardingUI(user);
@@ -6192,13 +6384,45 @@ function initEventListeners() {
     }
   });
 
+  const modalQtyInput = document.getElementById('modal-qty-input');
+  if (modalQtyInput) {
+    modalQtyInput.addEventListener('focus', () => {
+      setTimeout(() => modalQtyInput.select(), 40);
+    });
+  }
+
   document.getElementById('modal-add-btn')?.addEventListener('click', () => {
-    if (state.modalProduct && state.modalQty > 0) {
-      addToCart(state.modalProduct, state.modalQty);
-      closeProductModal();
-    } else if (state.modalQty <= 0) {
-      toast('Selecione pelo menos 1 unidade para adicionar ao pedido.', 'info', 2500);
+    if (!state.modalProduct) return;
+    const prod = state.modalProduct;
+    const targetQty = parseInt(state.modalQty, 10) || 0;
+    const currentInCart = getCartQtyFor(prod.id);
+
+    if (targetQty <= 0) {
+      if (currentInCart > 0) {
+        removeFromCart(prod.id);
+        closeProductModal();
+        toast(`🗑️ ${prod.nome} removido do pedido.`, 'info', 2000);
+      } else {
+        toast('Informe pelo menos 1 unidade para adicionar ao pedido.', 'info', 2500);
+      }
+      return;
     }
+
+    const existing = state.cart.find(i => i.produto.id === prod.id);
+    if (existing) {
+      existing.qty = targetQty;
+      saveCart();
+      updateCartBar();
+      renderProductsGrid();
+      toast(`✅ Quantidade de ${prod.nome} atualizada para ${targetQty}! 🛒`, 'success', 2000);
+    } else {
+      state.cart.push({ produto: prod, qty: targetQty });
+      saveCart();
+      updateCartBar();
+      renderProductsGrid();
+      toast(`🛒 ${targetQty}x ${prod.nome} adicionado ao pedido!`, 'success', 2000);
+    }
+    closeProductModal();
   });
 
   // Checkout Controles
@@ -6502,6 +6726,25 @@ function initEventListeners() {
     if (e.target.id === 'user-drawer') closeDrawer();
   });
 
+  // Máscara e auto-link de WhatsApp no formulário de cadastro
+  const regPhoneInput = document.getElementById('reg-whatsapp');
+  if (regPhoneInput) {
+    regPhoneInput.addEventListener('input', (e) => {
+      let v = e.target.value.replace(/\D/g, '').slice(0, 11);
+      if (v.length > 6) {
+        v = `(${v.slice(0, 2)}) ${v.slice(2, 7)}-${v.slice(7)}`;
+      } else if (v.length > 2) {
+        v = `(${v.slice(0, 2)}) ${v.slice(2)}`;
+      }
+      e.target.value = v;
+
+      const clean = e.target.value.replace(/\D/g, '');
+      if (clean.length >= 10) {
+        checkExistingCustomerByPhone(clean);
+      }
+    });
+  }
+
   // Google Auth Button
   document.getElementById('btn-google-login')?.addEventListener('click', loginWithGoogle);
 
@@ -6517,6 +6760,13 @@ function initEventListeners() {
     if (el) {
       el.addEventListener('input', (e) => {
         formatCepInput(e);
+        const clean = e.target.value.replace(/\D/g, '');
+        if (clean.length === 8) {
+          const prefix = id.split('-')[0];
+          fetchViaCep(clean, prefix);
+        }
+      });
+      el.addEventListener('blur', (e) => {
         const clean = e.target.value.replace(/\D/g, '');
         if (clean.length === 8) {
           const prefix = id.split('-')[0];
@@ -6574,7 +6824,16 @@ async function initApp() {
         await loadUserProfile();
         await loadCustomerOrders(false);
 
-        // Se o cliente estava em fluxo de redirecionamento pós-login:
+        // Se faltam WhatsApp ou endereço no cadastro:
+        const complete = isProfileComplete(state.profile);
+        if (!complete) {
+          prepareGoogleOnboardingUI(newSession.user);
+          showScreen('screen-auth');
+          toast('🎉 Conectado com sucesso! Complete seu WhatsApp e endereço para fazer pedidos.', 'info', 5000);
+          return;
+        }
+
+        // Se o cliente já tem cadastro completo:
         if (state.redirectAfterAuth === 'screen-checkout') {
           state.redirectAfterAuth = null;
           showScreen('screen-checkout');
@@ -6586,7 +6845,6 @@ async function initApp() {
           state.redirectAfterAuth = null;
           showScreen('screen-orders');
         } else {
-          // Se estava na tela de login/cadastro, redireciona para a Home com os dados logados
           const activeScreen = document.querySelector('.screen.active')?.id;
           if (activeScreen === 'screen-auth') {
             showScreen('screen-home');
@@ -6615,8 +6873,13 @@ async function initApp() {
       await loadCustomerOrders();
     }
 
-    // 7. Exibe a tela inicial (Home Dashboard)
-    showScreen('screen-home');
+    // 7. Exibe a tela inicial ou tela de conclusão de cadastro caso logado e incompleto
+    if (state.session && !isProfileComplete(state.profile)) {
+      prepareGoogleOnboardingUI(state.session.user);
+      showScreen('screen-auth');
+    } else {
+      showScreen('screen-home');
+    }
 
     // 7.1 Rastreamento Público por Link / Token (?p=UUID ou ?pedido=UUID ou ?rastreio=UUID)
     const urlParams = new URLSearchParams(window.location.search);
