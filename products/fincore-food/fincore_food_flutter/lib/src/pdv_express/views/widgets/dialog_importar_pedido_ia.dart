@@ -666,38 +666,10 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
                   children: [
                     Row(
                       children: [
-                        // Quantidade com controles rápidos
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: FincoreColors.background,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: FincoreColors.border),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              InkWell(
-                                onTap: () {
-                                  if (item.quantidade > 1) {
-                                    setState(() => item.quantidade -= 1);
-                                  }
-                                },
-                                child: const Icon(Icons.remove, size: 14, color: FincoreColors.textSecondary),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
-                                child: Text(
-                                  item.quantidade.toStringAsFixed(item.quantidade.truncateToDouble() == item.quantidade ? 0 : 1),
-                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              InkWell(
-                                onTap: () => setState(() => item.quantidade += 1),
-                                child: const Icon(Icons.add, size: 14, color: FincoreColors.textSecondary),
-                              ),
-                            ],
-                          ),
+                        // Quantidade com controle digitável manual e botões rápidos
+                        _ItemQuantidadeInput(
+                          quantidade: item.quantidade,
+                          onChanged: (novaQtd) => setState(() => item.quantidade = novaQtd),
                         ),
                         const SizedBox(width: 8),
 
@@ -763,15 +735,6 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
                         ),
                       ],
                     ),
-                    if (item.observacoes != null && item.observacoes!.isNotEmpty) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(left: 42, top: 2),
-                        child: Text(
-                          'Obs: ${item.observacoes}',
-                          style: const TextStyle(color: FincoreColors.warning, fontSize: 11, fontStyle: FontStyle.italic),
-                        ),
-                      ),
-                    ],
                   ],
                 );
               },
@@ -1012,3 +975,133 @@ class _DialogConfigIaState extends State<_DialogConfigIa> {
     );
   }
 }
+
+/// Widget para controle e digitação manual da quantidade do item
+class _ItemQuantidadeInput extends StatefulWidget {
+  final double quantidade;
+  final ValueChanged<double> onChanged;
+
+  const _ItemQuantidadeInput({
+    required this.quantidade,
+    required this.onChanged,
+  });
+
+  @override
+  State<_ItemQuantidadeInput> createState() => _ItemQuantidadeInputState();
+}
+
+class _ItemQuantidadeInputState extends State<_ItemQuantidadeInput> {
+  late final TextEditingController _ctrl;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: _formatQty(widget.quantidade));
+    _focusNode = FocusNode();
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) {
+        _commit();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _ItemQuantidadeInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.quantidade != widget.quantidade && !_focusNode.hasFocus) {
+      _ctrl.text = _formatQty(widget.quantidade);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  String _formatQty(double q) {
+    return q.truncateToDouble() == q ? q.toInt().toString() : q.toString();
+  }
+
+  void _commit() {
+    final text = _ctrl.text.replaceAll(',', '.').trim();
+    final val = double.tryParse(text);
+    if (val != null && val > 0) {
+      widget.onChanged(val);
+    } else {
+      _ctrl.text = _formatQty(widget.quantidade);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: FincoreColors.background,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: _focusNode.hasFocus ? FincoreColors.primary : FincoreColors.border,
+          width: _focusNode.hasFocus ? 1.5 : 1.0,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: () {
+              if (widget.quantidade > 1) {
+                final nova = widget.quantidade - 1;
+                widget.onChanged(nova);
+                _ctrl.text = _formatQty(nova);
+              }
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Icon(Icons.remove, size: 14, color: FincoreColors.textSecondary),
+            ),
+          ),
+          SizedBox(
+            width: 48,
+            height: 26,
+            child: TextField(
+              controller: _ctrl,
+              focusNode: _focusNode,
+              textAlign: TextAlign.center,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 4),
+                border: InputBorder.none,
+              ),
+              onSubmitted: (_) => _commit(),
+              onChanged: (text) {
+                final val = double.tryParse(text.replaceAll(',', '.'));
+                if (val != null && val > 0) {
+                  widget.onChanged(val);
+                }
+              },
+            ),
+          ),
+          InkWell(
+            onTap: () {
+              final nova = widget.quantidade + 1;
+              widget.onChanged(nova);
+              _ctrl.text = _formatQty(nova);
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Icon(Icons.add, size: 14, color: FincoreColors.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+

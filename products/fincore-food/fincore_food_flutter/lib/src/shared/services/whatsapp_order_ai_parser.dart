@@ -417,9 +417,8 @@ class WhatsAppOrderAiParser {
   /// Limpa formatação Markdown do WhatsApp (*negrito*, _itálico_, ~tachado~)
   static String _limparFormatacaoWhatsApp(String str) {
     return str
-        .replaceAll(RegExp(r'^\s*[-•*]\s*'), '') // remove marcadores de lista
+        .replaceAll(RegExp(r'^\s*[-•*_]\s*'), '') // remove marcadores de lista como -, •, *, _
         .replaceAll('*', '')
-        .replaceAll('_', '')
         .replaceAll('~', '')
         .trim();
   }
@@ -567,8 +566,52 @@ class WhatsAppOrderAiParser {
       }
     }
 
+    // Padrão 3: Quantidade no final após dois pontos ou traço (ex: "coxinha: 90", "bolinha de queijo : 100", "risole - 45", "enroladinho :35")
+    if (!temQuantidadeIdentificada) {
+      final qtySufixoRegex = RegExp(
+        r'[:–-]\s*(\d+(?:[.,]\d+)?)\s*(?:un|unidades?|pct|porção|prato|cento|cx)?\s*$',
+        caseSensitive: false,
+      );
+      final suffixMatch = qtySufixoRegex.firstMatch(nomeItem);
+      if (suffixMatch != null) {
+        final qStr = suffixMatch.group(1)!.replaceAll(',', '.');
+        final q = double.tryParse(qStr);
+        if (q != null && q > 0) {
+          quantidade = q;
+          temQuantidadeIdentificada = true;
+          nomeItem = nomeItem.substring(0, suffixMatch.start).trim();
+        }
+      }
+    }
+
+    // Padrão 4: Quantidade no final separada por espaço ou x (ex: "coxinha x 90", "kibe 70", "pastel 50 un")
+    if (!temQuantidadeIdentificada) {
+      final qtyFinalEspacoRegex = RegExp(
+        r'(?:\s+(?:x|qtd:?|quantidade:?)?\s*|\s+)(\d+(?:[.,]\d+)?)\s*(?:un|unidades?|pct|porção|prato|cento|cx)?\s*$',
+        caseSensitive: false,
+      );
+      final finalMatch = qtyFinalEspacoRegex.firstMatch(nomeItem);
+      if (finalMatch != null) {
+        final qStr = finalMatch.group(1)!.replaceAll(',', '.');
+        final q = double.tryParse(qStr);
+        if (q != null && q > 0) {
+          final matchedEnd = finalMatch.group(0)!;
+          final bool temIndicador = matchedEnd.contains('x') ||
+              matchedEnd.contains('qtd') ||
+              matchedEnd.contains('un') ||
+              matchedEnd.contains('cento') ||
+              q >= 5;
+          if (temIndicador) {
+            quantidade = q;
+            temQuantidadeIdentificada = true;
+            nomeItem = nomeItem.substring(0, finalMatch.start).trim();
+          }
+        }
+      }
+    }
+
     // Limpa pontuação residual
-    nomeItem = nomeItem.replaceAll(RegExp(r'^[-–:\s]+|[-–:\s]+$'), '').trim();
+    nomeItem = nomeItem.replaceAll(RegExp(r'^[-–:_\s]+|[-–:_\s]+$'), '').trim();
     if (nomeItem.length < 2) return null;
 
     // 3. Cruzamento com o Catálogo de Produtos (Fuzzy Matching)
@@ -593,7 +636,7 @@ class WhatsAppOrderAiParser {
 
     return ItemPedidoIaParsed(
       textoOriginal: line,
-      nomeIdentificado: matchedProduct?.nome ?? nomeItem,
+      nomeIdentificado: (bestScore >= 0.50 && matchedProduct != null) ? matchedProduct.nome : nomeItem,
       quantidade: quantidade,
       observacoes: observacoes?.trim(),
       produtoMatched: bestScore >= 0.50 ? matchedProduct : null,

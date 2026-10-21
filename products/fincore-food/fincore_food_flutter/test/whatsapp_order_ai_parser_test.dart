@@ -137,5 +137,34 @@ Rua Brasil 50
       expect(resultado.itens.any((i) => i.produtoMatched?.id == 'prod-3'), isTrue);
       expect(resultado.itens.any((i) => i.produtoMatched?.id == 'prod-2'), isTrue);
     });
+
+    test('Deve extrair quantidades no final da linha após dois pontos (formato salgados)', () {
+      const mensagem = '''
+_ coxinha: 90
+_ bolinha de queijo : 100
+_ bolinha de Calabresa : 60
+_ risole de carne : 45
+_ risole de pizza : 65
+_ enroladinho de salsicha :35
+_ cigarrete : 80
+_ kibe : 70
+''';
+
+      final resultado = parser.parseLocal(mensagem, catalogoProdutos: catalogoMock);
+
+      expect(resultado.itens.length, 8);
+      expect(resultado.itens[0].nomeIdentificado.toLowerCase(), contains('coxinha'));
+      expect(resultado.itens[0].quantidade, 90.0);
+
+      expect(resultado.itens[1].nomeIdentificado.toLowerCase(), contains('bolinha de queijo'));
+      expect(resultado.itens[1].quantidade, 100.0);
+
+      expect(resultado.itens[2].quantidade, 60.0);
+      expect(resultado.itens[3].quantidade, 45.0);
+      expect(resultado.itens[4].quantidade, 65.0);
+      expect(resultado.itens[5].quantidade, 35.0);
+      expect(resultado.itens[6].quantidade, 80.0);
+      expect(resultado.itens[7].quantidade, 70.0);
+    });
   });
 }

@@ -1144,7 +1144,6 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                     child: _CaixaOperacionalBar(
                       controller: _finCtrl,
                       ordemParaEditar: widget.ordemParaEditar,
-                      onImportarWhatsApp: _abrirImportadorPedidoIa,
                       onVoltar: widget.onVoltarOuCancelar != null
                           ? (widget.ordemParaEditar != null
                               ? _confirmarSaidaEdicao
@@ -1296,14 +1295,12 @@ class _CaixaOperacionalBar extends StatelessWidget {
   final OrdemPreparo? ordemParaEditar;
   final VoidCallback? onVoltar;
   final VoidCallback onHelpShortcuts;
-  final VoidCallback? onImportarWhatsApp;
 
   const _CaixaOperacionalBar({
     required this.controller,
     this.ordemParaEditar,
     this.onVoltar,
     required this.onHelpShortcuts,
-    this.onImportarWhatsApp,
   });
 
   String _fmt(int centavos) =>
@@ -1384,24 +1381,6 @@ class _CaixaOperacionalBar extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                if (onImportarWhatsApp != null) ...[
-                  ElevatedButton.icon(
-                    onPressed: onImportarWhatsApp,
-                    icon: const Icon(Icons.auto_awesome_rounded, size: 14),
-                    label: const Text(
-                      'WhatsApp IA [F7]',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                ],
                 IconButton(
                   icon: const Icon(Icons.keyboard_outlined, color: FincoreColors.textSecondary, size: 20),
                   tooltip: 'Atalhos de Teclado',
@@ -1740,26 +1719,6 @@ class _CaixaOperacionalBar extends StatelessWidget {
               ),
 
               const SizedBox(width: 8),
-
-              // Botão Importar Pedido do WhatsApp (IA)
-              if (onImportarWhatsApp != null) ...[
-                ElevatedButton.icon(
-                  onPressed: onImportarWhatsApp,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 14),
-                  label: const Text(
-                    'WhatsApp IA [F7]',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF25D366),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
 
               // Botão de Ajuda de Atalhos
               IconButton(

@@ -939,11 +939,7 @@ class PdvExpressController extends ChangeNotifier {
           unitPrice = itemIa.precoSugeridoCentavos > 0 ? itemIa.precoSugeridoCentavos : 150;
         }
 
-        final nomeCompleto = itemIa.observacoes != null && itemIa.observacoes!.isNotEmpty
-            ? '${prod.nome} (${itemIa.observacoes})'
-            : prod.nome;
-
-        await addItem(prod.id, nomeCompleto, unitPrice, itemIa.quantidade);
+        await addItem(prod.id, prod.nome, unitPrice, itemIa.quantidade);
       }
     }
 
