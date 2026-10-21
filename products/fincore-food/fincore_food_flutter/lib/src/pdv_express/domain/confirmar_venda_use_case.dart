@@ -44,6 +44,7 @@ class ConfirmarVendaInput {
   final bool movimentarEstoque;
   final bool isUsoInterno;
   final bool isRetroativo;
+  final String? canalOrigem;
 
   const ConfirmarVendaInput({
     required this.pedido,
@@ -63,6 +64,7 @@ class ConfirmarVendaInput {
     this.movimentarEstoque = true,
     this.isUsoInterno = false,
     this.isRetroativo = false,
+    this.canalOrigem,
   });
 }
 
@@ -266,7 +268,7 @@ class ConfirmarVendaUseCase {
           enderecoJson: Value(input.enderecoJson),
           operadorId: Value(activeUser),
           dataHoraCriacao: input.pedido.dataHoraCriacao.toUtc(),
-          canalOrigem: const Value('pdv_express'),
+          canalOrigem: Value(input.canalOrigem ?? 'pdv_express'),
           dataHoraEntregaPrevista: Value(input.dataEntregaPrevista?.toUtc()),
           isUsoInterno: Value(input.isUsoInterno),
           syncVersion: const Value(1),
@@ -581,7 +583,7 @@ class ConfirmarVendaUseCase {
           'observacoes': input.pedido.observacoes,
           'isUsoInterno': input.isUsoInterno,
           'status': pedidoStatus,
-          'canalOrigem': 'pdv_express',
+          'canalOrigem': input.canalOrigem ?? 'pdv_express',
           'operadorId': activeUser,
           'dataHoraCriacao': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
           if (input.dataEntregaPrevista != null)

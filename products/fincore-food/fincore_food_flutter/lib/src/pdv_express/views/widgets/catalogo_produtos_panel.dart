@@ -12,12 +12,14 @@ class CatalogoProdutosPanel extends StatefulWidget {
   final PdvExpressController controller;
   final FocusNode searchFocusNode;
   final TextEditingController searchController;
+  final VoidCallback? onImportarWhatsApp;
 
   const CatalogoProdutosPanel({
     super.key,
     required this.controller,
     required this.searchFocusNode,
     required this.searchController,
+    this.onImportarWhatsApp,
   });
 
   @override
@@ -270,6 +272,37 @@ class _CatalogoProdutosPanelState extends State<CatalogoProdutosPanel> {
                         ),
                       ),
                     ),
+                    if (widget.onImportarWhatsApp != null) ...[
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: widget.onImportarWhatsApp,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          height: 40,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF25D366).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.45)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.auto_awesome_rounded, color: Color(0xFF25D366), size: 15),
+                              SizedBox(width: 6),
+                              Text(
+                                'WhatsApp IA',
+                                style: TextStyle(
+                                  color: Color(0xFF25D366),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 8),

@@ -1482,12 +1482,16 @@ class WhatsAppService {
       '{chave_pix_copia_cola}': (chavePixCopiaCola != null && chavePixCopiaCola.trim().isNotEmpty)
           ? chavePixCopiaCola.trim()
           : (chavePix != null ? chavePix.trim() : ''),
-      '{origem}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
-          ? 'Cardápio Digital Online'
-          : 'Atendimento Balcão / Frente de Caixa',
-      '{canal}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
-          ? 'Cardápio Web'
-          : 'PDV Balcão',
+      '{origem}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('whatsapp') || tipoPedido.toLowerCase().contains('ia')))
+          ? 'WhatsApp (IA / Atendimento)'
+          : (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
+              ? 'Cardápio Digital Online'
+              : 'Atendimento Balcão / Frente de Caixa',
+      '{canal}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('whatsapp') || tipoPedido.toLowerCase().contains('ia')))
+          ? 'WhatsApp Chat'
+          : (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
+              ? 'Cardápio Web'
+              : 'PDV Balcão',
     };
   }
 

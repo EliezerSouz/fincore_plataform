@@ -25,6 +25,7 @@ import 'package:fincore_pricing/pricing_engine.dart';
 import '../models/pricing_result.dart';
 import '../../cap/printing/print_capability.dart';
 import '../../shared/services/whatsapp_service.dart';
+import '../../shared/services/whatsapp_order_ai_parser.dart';
 
 import 'package:fincore_pricing/repository/tabela_precificacao_repository.dart';
 import 'package:fincore_pricing/repository/item_tabela_precificacao_repository.dart';
@@ -261,6 +262,13 @@ class PdvExpressController extends ChangeNotifier {
 
   String _paymentMethod = 'Dinheiro';
   String get paymentMethod => _selectedFormaPagamento?.nome ?? _paymentMethod;
+
+  String _canalOrigem = 'pdv_express';
+  String get canalOrigem => _canalOrigem;
+  void setCanalOrigem(String canal) {
+    _canalOrigem = canal;
+    notifyListeners();
+  }
 
   // Split Payment (AUD-006): fatias de pagamento compostas
   final List<PagamentoItemDraft> _splitPayments = [];
@@ -854,6 +862,96 @@ class PdvExpressController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Aplica no PDV os dados de um pedido interpretado por IA a partir do WhatsApp
+  Future<void> aplicarPedidoIa(PedidoIaParsedResult pedidoIa, {bool substituirCarrinho = false}) async {
+    if (substituirCarrinho) {
+      _cart.clear();
+    }
+
+    _canalOrigem = 'whatsapp_ia';
+
+    // 1. Cliente
+    if (pedidoIa.clienteNome != null || pedidoIa.clienteTelefone != null) {
+      String? clienteIdCadastrado;
+      // Procura cliente existente pelo telefone se houver
+      if (pedidoIa.clienteTelefone != null && pedidoIa.clienteTelefone!.isNotEmpty) {
+        final telLimpo = pedidoIa.clienteTelefone!.replaceAll(RegExp(r'\D'), '');
+        final achado = _clientes.where((c) {
+          final cTel = c.telefone.replaceAll(RegExp(r'\D'), '');
+          return cTel.isNotEmpty && (cTel == telLimpo || telLimpo.endsWith(cTel) || cTel.endsWith(telLimpo));
+        }).firstOrNull;
+        if (achado != null) {
+          clienteIdCadastrado = achado.id;
+        }
+      }
+
+      selectCustomer(
+        pedidoIa.clienteNome ?? 'Cliente WhatsApp',
+        pedidoIa.clienteTelefone ?? '',
+        clienteId: clienteIdCadastrado,
+      );
+    }
+
+    // 2. Destino / Entrega
+    final tipoDestino = pedidoIa.tipoLogistica == 'Retirada' ? 'Retirada' : 'Entrega';
+    int taxaCalculadaCentavos = 0;
+
+    if (tipoDestino == 'Entrega' && pedidoIa.bairro != null && pedidoIa.bairro!.isNotEmpty) {
+      try {
+        final taxaRow = await taxaRepo.findByBairro(pedidoIa.bairro!);
+        if (taxaRow != null) {
+          taxaCalculadaCentavos = taxaRow.valorCentavos;
+        }
+      } catch (_) {}
+    }
+
+    final obsOriginal = _entrega.observacoes;
+    final obsIa = '[Origem: WhatsApp / IA]${pedidoIa.observacoesGerais != null ? ' - ${pedidoIa.observacoesGerais}' : ''}';
+    final obsFinal = obsOriginal.isNotEmpty ? '$obsOriginal | $obsIa' : obsIa;
+
+    _entrega = _entrega.copyWith(
+      tipo: tipoDestino,
+      logradouro: pedidoIa.logradouro ?? _entrega.logradouro,
+      numero: pedidoIa.numero ?? _entrega.numero,
+      bairro: pedidoIa.bairro ?? _entrega.bairro,
+      referencia: pedidoIa.referencia ?? _entrega.referencia,
+      taxaEntregaCentavos: taxaCalculadaCentavos > 0 ? taxaCalculadaCentavos : _entrega.taxaEntregaCentavos,
+      trocoParaCentavos: () => pedidoIa.trocoParaCentavos ?? _entrega.trocoParaCentavos,
+      observacoes: obsFinal,
+    );
+
+    // 3. Forma de Pagamento
+    if (pedidoIa.formaPagamento != null && pedidoIa.formaPagamento!.isNotEmpty) {
+      setPaymentMethod(pedidoIa.formaPagamento!);
+    }
+
+    // 4. Adicionar Itens ao Carrinho
+    for (final itemIa in pedidoIa.itens) {
+      final prod = itemIa.produtoMatched;
+      if (prod != null) {
+        int unitPrice = 0;
+        try {
+          unitPrice = await pricingEngine.resolvePrice(
+            produtoId: prod.id,
+            quantidade: itemIa.quantidade.round(),
+          );
+        } catch (_) {
+          unitPrice = itemIa.precoSugeridoCentavos > 0 ? itemIa.precoSugeridoCentavos : 150;
+        }
+
+        final nomeCompleto = itemIa.observacoes != null && itemIa.observacoes!.isNotEmpty
+            ? '${prod.nome} (${itemIa.observacoes})'
+            : prod.nome;
+
+        await addItem(prod.id, nomeCompleto, unitPrice, itemIa.quantidade);
+      }
+    }
+
+    await _recalculatePrices();
+    _state = _cart.isNotEmpty ? PdvState.drafting : PdvState.idle;
+    notifyListeners();
+  }
+
   Future<void> _recalculatePrices() async {
     final unitPrices = <String, int>{};
     final groupSummaries = <GroupPricingSummary>[];
@@ -1082,6 +1180,7 @@ class PdvExpressController extends ChangeNotifier {
     _passoAtual = 0;
     _state = PdvState.idle;
     _pricingResult = const PricingResult(unitPrices: {}, groupSummaries: []);
+    _canalOrigem = 'pdv_express';
     _lastVenda = null;
     _resetTimer?.cancel();
     notifyListeners();
@@ -1307,6 +1406,7 @@ class PdvExpressController extends ChangeNotifier {
         movimentarEstoque: movimentarEstoque,
         isUsoInterno: isUsoInterno,
         isRetroativo: isRetroativo,
+        canalOrigem: _canalOrigem,
       ));
 
       try {

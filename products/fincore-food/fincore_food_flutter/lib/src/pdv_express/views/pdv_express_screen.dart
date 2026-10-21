@@ -10,6 +10,7 @@ import 'widgets/catalogo_produtos_panel.dart';
 import 'widgets/pedido_carrinho_panel.dart';
 import 'widgets/confirmacao_agendamento_modal.dart';
 import 'widgets/customer_selection_modal.dart';
+import 'widgets/dialog_importar_pedido_ia.dart';
 import 'package:fincore_core/fincore_core.dart';
 import '../../shared/services/whatsapp_service.dart';
 import '../../shared/services/pix_generator.dart';
@@ -217,6 +218,12 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       _alternarCicloDestino();
       return true;
     }
+    // F7 — Captura Inteligente WhatsApp (IA)
+    else if (key == LogicalKeyboardKey.f7) {
+      _flashKeyLabel('F7');
+      _abrirImportadorPedidoIa();
+      return true;
+    }
     // F8 — Operações de Caixa
     else if (key == LogicalKeyboardKey.f8) {
       _flashKeyLabel('F8');
@@ -250,6 +257,10 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       }
     }
     return false;
+  }
+
+  void _abrirImportadorPedidoIa() {
+    DialogImportarPedidoIa.show(context, controller: _controller);
   }
 
   Future<void> _confirmarSaidaEdicao() async {
@@ -1133,6 +1144,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                     child: _CaixaOperacionalBar(
                       controller: _finCtrl,
                       ordemParaEditar: widget.ordemParaEditar,
+                      onImportarWhatsApp: _abrirImportadorPedidoIa,
                       onVoltar: widget.onVoltarOuCancelar != null
                           ? (widget.ordemParaEditar != null
                               ? _confirmarSaidaEdicao
@@ -1169,6 +1181,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                               controller: _controller,
                               searchFocusNode: _searchFocusNode,
                               searchController: _searchController,
+                              onImportarWhatsApp: _abrirImportadorPedidoIa,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -1207,6 +1220,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       const _ShortcutEntry(key: 'F2', label: 'Busca Produtos'),
       const _ShortcutEntry(key: 'F4', label: 'Cliente'),
       const _ShortcutEntry(key: 'F6', label: 'Destino'),
+      const _ShortcutEntry(key: 'F7', label: 'WhatsApp IA'),
       const _ShortcutEntry(key: 'F8', label: 'Caixa'),
       const _ShortcutEntry(key: 'F10', label: 'Finalizar'),
       const _ShortcutEntry(key: 'ESC', label: 'Limpar'),
@@ -1282,12 +1296,14 @@ class _CaixaOperacionalBar extends StatelessWidget {
   final OrdemPreparo? ordemParaEditar;
   final VoidCallback? onVoltar;
   final VoidCallback onHelpShortcuts;
+  final VoidCallback? onImportarWhatsApp;
 
   const _CaixaOperacionalBar({
     required this.controller,
     this.ordemParaEditar,
     this.onVoltar,
     required this.onHelpShortcuts,
+    this.onImportarWhatsApp,
   });
 
   String _fmt(int centavos) =>
@@ -1368,6 +1384,24 @@ class _CaixaOperacionalBar extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
+                if (onImportarWhatsApp != null) ...[
+                  ElevatedButton.icon(
+                    onPressed: onImportarWhatsApp,
+                    icon: const Icon(Icons.auto_awesome_rounded, size: 14),
+                    label: const Text(
+                      'WhatsApp IA [F7]',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 IconButton(
                   icon: const Icon(Icons.keyboard_outlined, color: FincoreColors.textSecondary, size: 20),
                   tooltip: 'Atalhos de Teclado',
@@ -1706,6 +1740,26 @@ class _CaixaOperacionalBar extends StatelessWidget {
               ),
 
               const SizedBox(width: 8),
+
+              // Botão Importar Pedido do WhatsApp (IA)
+              if (onImportarWhatsApp != null) ...[
+                ElevatedButton.icon(
+                  onPressed: onImportarWhatsApp,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 14),
+                  label: const Text(
+                    'WhatsApp IA [F7]',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF25D366),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
 
               // Botão de Ajuda de Atalhos
               IconButton(
