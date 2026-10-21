@@ -872,24 +872,40 @@ class PdvExpressController extends ChangeNotifier {
 
     // 1. Cliente
     if (pedidoIa.clienteNome != null || pedidoIa.clienteTelefone != null) {
-      String? clienteIdCadastrado;
-      // Procura cliente existente pelo telefone se houver
+      Cliente? achado;
       if (pedidoIa.clienteTelefone != null && pedidoIa.clienteTelefone!.isNotEmpty) {
         final telLimpo = pedidoIa.clienteTelefone!.replaceAll(RegExp(r'\D'), '');
-        final achado = _clientes.where((c) {
+        achado = _clientes.where((c) {
           final cTel = c.telefone.replaceAll(RegExp(r'\D'), '');
           return cTel.isNotEmpty && (cTel == telLimpo || telLimpo.endsWith(cTel) || cTel.endsWith(telLimpo));
         }).firstOrNull;
-        if (achado != null) {
-          clienteIdCadastrado = achado.id;
-        }
       }
 
-      selectCustomer(
-        pedidoIa.clienteNome ?? 'Cliente WhatsApp',
-        pedidoIa.clienteTelefone ?? '',
-        clienteId: clienteIdCadastrado,
-      );
+      updateCliente(DadosCliente(
+        id: achado?.id,
+        nome: achado?.nome ?? pedidoIa.clienteNome ?? 'Cliente WhatsApp',
+        apelido: achado?.apelido,
+        telefone: achado?.telefone ?? pedidoIa.clienteTelefone ?? '',
+      ));
+
+      if (achado != null) {
+        try {
+          final locals = await localRepo.findByClienteId(achado.id);
+          if (locals.isNotEmpty) {
+            final addr = locals.first;
+            final taxaCadastrada = await taxaRepo.findByBairro(addr.bairro);
+            final valorCentavos = taxaCadastrada?.valorCentavos ?? 0;
+            _entrega = _entrega.copyWith(
+              logradouro: addr.logradouro,
+              numero: addr.numero,
+              bairro: addr.bairro,
+              referencia: addr.referencia,
+              cep: addr.cep,
+              taxaEntregaCentavos: valorCentavos > 0 ? valorCentavos : _entrega.taxaEntregaCentavos,
+            );
+          }
+        } catch (_) {}
+      }
     }
 
     // 2. Destino / Entrega

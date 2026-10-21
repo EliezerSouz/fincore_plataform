@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:uuid/uuid.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:intl/intl.dart';
-import 'package:uuid/uuid.dart';
 import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
+import 'package:fincore_food_flutter/src/shared/services/whatsapp_order_ai_parser.dart';
 
 /// Subview Oficial de Gestão e Configuração Dinâmica de Mensagens do WhatsApp (Fase D2)
 class MensagensWhatsAppView extends StatefulWidget {
@@ -43,6 +45,15 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
   EvolutionInstanceInfo? _instanceInfo;
   bool _isCheckingStatus = false;
   bool _isActionInProgress = false;
+
+  // ── Gestão de Inteligência Artificial (Gemini & NLP Local) ──
+  String _aiProvider = 'local';
+  final _aiApiKeyCtrl = TextEditingController();
+  final _aiModelCtrl = TextEditingController(text: 'gemini-1.5-flash');
+  bool _obscureAiApiKey = true;
+  bool _isTestandoGemini = false;
+  String? _geminiTesteResultado;
+  bool? _geminiTesteSucesso;
 
   static const List<Map<String, dynamic>> _categoriasVariaveis = [
     {
@@ -217,6 +228,7 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
       tenantId: _tenantId,
     );
     final pdvConfigCarregada = await WhatsAppService.getPdvConfig(tenantId: _tenantId);
+    final aiCfg = await WhatsAppOrderAiParser.carregarConfig();
 
     if (mounted) {
       setState(() {
@@ -224,6 +236,9 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
         _politicas = Map.from(politicasCarregadas);
         _templatesPorEvento = Map.from(templatesEventosCarregados);
         _pdvConfig = pdvConfigCarregada;
+        _aiProvider = aiCfg.provider;
+        _aiApiKeyCtrl.text = aiCfg.apiKey;
+        _aiModelCtrl.text = aiCfg.model.isNotEmpty ? aiCfg.model : 'gemini-1.5-flash';
         if (_templates.isNotEmpty) {
           _selecionarTemplate(_templates.first.id);
         }
@@ -252,6 +267,11 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
     final okP = await WhatsAppService.salvarPoliticasEventos(_politicas, tenantId: _tenantId);
     final okMap = await WhatsAppService.salvarTemplatesEventosConfigurados(_templatesPorEvento, tenantId: _tenantId);
     final okPdv = await WhatsAppService.salvarPdvConfig(_pdvConfig, tenantId: _tenantId);
+    await WhatsAppOrderAiParser.salvarConfig(AiProviderConfig(
+      provider: _aiProvider,
+      apiKey: _aiApiKeyCtrl.text.trim(),
+      model: _aiModelCtrl.text.trim(),
+    ));
     if (!mounted) return;
 
     if (okT && okP && okPdv && okMap) {
@@ -908,6 +928,11 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
                   icon: Icons.phone_android_rounded,
                   label: 'Aparelho WhatsApp',
                 ),
+                _buildSubTabButton(
+                  index: 4,
+                  icon: Icons.auto_awesome_rounded,
+                  label: 'IA & Gemini',
+                ),
               ],
             ),
           ),
@@ -926,6 +951,8 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
             _buildCardConfiguracaoPdv(),
           ] else if (_subAbaAtiva == 3) ...[
             _buildCardEvolutionApi(),
+          ] else if (_subAbaAtiva == 4) ...[
+            _buildCardInteligenciaArtificialIa(),
           ],
 
           const SizedBox(height: 24),
@@ -3440,6 +3467,511 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ),
+    );
+  }
+
+  Future<void> _testarChaveGemini() async {
+    final key = _aiApiKeyCtrl.text.trim();
+    if (key.isEmpty) {
+      setState(() {
+        _geminiTesteSucesso = false;
+        _geminiTesteResultado = 'Informe a Chave de API antes de testar a conexão.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isTestandoGemini = true;
+      _geminiTesteResultado = null;
+      _geminiTesteSucesso = null;
+    });
+
+    final res = await WhatsAppOrderAiParser.testarConexaoGemini(
+      key,
+      model: _aiModelCtrl.text.trim(),
+    );
+
+    if (mounted) {
+      setState(() {
+        _isTestandoGemini = false;
+        _geminiTesteSucesso = res['sucesso'] as bool? ?? false;
+        _geminiTesteResultado = res['mensagem'] as String? ?? '';
+      });
+    }
+  }
+
+  Widget _buildCardInteligenciaArtificialIa() {
+    final bool isGemini = _aiProvider == 'gemini';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── Card Superior: Status e Introdução ──
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isGemini
+                  ? const Color(0xFF38BDF8).withValues(alpha: 0.5)
+                  : const Color(0xFF10B981).withValues(alpha: 0.5),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: (isGemini ? const Color(0xFF38BDF8) : const Color(0xFF10B981)).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.auto_awesome_rounded,
+                  color: isGemini ? const Color(0xFF38BDF8) : const Color(0xFF10B981),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'Inteligência Artificial & Captura de Pedidos WhatsApp',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: FincoreColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isGemini
+                                ? const Color(0xFF38BDF8).withValues(alpha: 0.15)
+                                : const Color(0xFF10B981).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isGemini
+                                  ? const Color(0xFF38BDF8).withValues(alpha: 0.5)
+                                  : const Color(0xFF10B981).withValues(alpha: 0.5),
+                            ),
+                          ),
+                          child: Text(
+                            isGemini ? 'Google Gemini 1.5 Flash' : 'Motor Local Offline (0ms)',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: isGemini ? const Color(0xFF38BDF8) : const Color(0xFF10B981),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'O FINCORE Food conta com interpretação semântica inteligente capaz de ler mensagens copiadas do WhatsApp ou recebidas via Evolution API, identificando itens, quantidades (inclusive no padrão de buffet/salgados), cliente, formas de pagamento e endereço.',
+                      style: TextStyle(fontSize: 12, color: FincoreColors.textMuted, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Card 1: Seleção do Provedor de IA ──
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.tune_rounded, size: 16, color: FincoreColors.primary),
+                  SizedBox(width: 8),
+                  Text(
+                    'Modo Operacional da IA',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Opção 1: Motor Local Offline
+              InkWell(
+                onTap: () => setState(() => _aiProvider = 'local'),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _aiProvider == 'local'
+                        ? const Color(0xFF10B981).withValues(alpha: 0.10)
+                        : FincoreColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _aiProvider == 'local'
+                          ? const Color(0xFF10B981)
+                          : FincoreColors.border,
+                      width: _aiProvider == 'local' ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Radio<String>(
+                        value: 'local',
+                        groupValue: _aiProvider,
+                        activeColor: const Color(0xFF10B981),
+                        onChanged: (val) => setState(() => _aiProvider = val!),
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Motor Local Offline Nativo (Recomendado)',
+                                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  '• Grátis • Sem Cota • 0ms Latência',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Executa regex sintático e distância Levenshtein (Fuzzy Matching) diretamente na memória contra seu cadastro local do SQLite. Não requer conexão com internet e não gasta nenhuma cota de API.',
+                              style: TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // Opção 2: Google Gemini (Nuvem)
+              InkWell(
+                onTap: () => setState(() => _aiProvider = 'gemini'),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _aiProvider == 'gemini'
+                        ? const Color(0xFF38BDF8).withValues(alpha: 0.10)
+                        : FincoreColors.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _aiProvider == 'gemini'
+                          ? const Color(0xFF38BDF8)
+                          : FincoreColors.border,
+                      width: _aiProvider == 'gemini' ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Radio<String>(
+                        value: 'gemini',
+                        groupValue: _aiProvider,
+                        activeColor: const Color(0xFF38BDF8),
+                        onChanged: (val) => setState(() => _aiProvider = val!),
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Google Gemini 1.5 Flash (Nuvem / Multimodal)',
+                                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  '• Requer API Key • Suporta Áudios e Mensagens Complexas',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFF38BDF8), fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Envia a transcrição para os servidores de IA generativa do Google. Capaz de compreender linguagem coloquial, gírias, áudios e pedidos desestruturados com alta precisão contextual.',
+                              style: TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Card 2: Chave de API do Gemini e Teste de Conexão ──
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.key_rounded, size: 16, color: Color(0xFF38BDF8)),
+                  SizedBox(width: 8),
+                  Text(
+                    'Credenciais da API do Google Gemini',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: FincoreColors.textPrimary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Configure sua chave de API para habilitar os recursos em nuvem e a integração com áudios.',
+                style: TextStyle(fontSize: 11.5, color: FincoreColors.textMuted),
+              ),
+              const SizedBox(height: 14),
+
+              // Campo API Key
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Chave de API do Gemini (API Key)', style: TextStyle(fontSize: 11.5, color: FincoreColors.textSecondary, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _aiApiKeyCtrl,
+                    obscureText: _obscureAiApiKey,
+                    style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 12.5),
+                    decoration: InputDecoration(
+                      hintText: 'Cole sua chave de API (ex: AIzaSyD...)',
+                      hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+                      filled: true,
+                      fillColor: FincoreColors.surface,
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              _obscureAiApiKey ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                              size: 16,
+                              color: FincoreColors.textSecondary,
+                            ),
+                            tooltip: _obscureAiApiKey ? 'Mostrar Chave' : 'Ocultar Chave',
+                            onPressed: () => setState(() => _obscureAiApiKey = !_obscureAiApiKey),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.paste_rounded, size: 16, color: FincoreColors.textSecondary),
+                            tooltip: 'Colar da Área de Transferência',
+                            onPressed: () async {
+                              final data = await Clipboard.getData(Clipboard.kTextPlain);
+                              if (data?.text != null && data!.text!.trim().isNotEmpty) {
+                                setState(() => _aiApiKeyCtrl.text = data.text!.trim());
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: FincoreColors.border)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 10),
+
+              // Campo Modelo do Gemini
+              _buildInputField(
+                'Modelo Google Gemini',
+                _aiModelCtrl,
+                'gemini-1.5-flash',
+              ),
+
+              const SizedBox(height: 14),
+
+              // Barra de Ações: Testar Conexão e Salvar
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _isTestandoGemini ? null : _testarChaveGemini,
+                    icon: _isTestandoGemini
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.network_check_rounded, size: 16),
+                    label: Text(
+                      _isTestandoGemini ? 'Testando Conexão...' : 'Testar Chave do Gemini',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0284C7),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    onPressed: salvar,
+                    icon: const Icon(Icons.save_rounded, size: 16),
+                    label: const Text(
+                      'Salvar Configuração',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF16A34A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+              ),
+
+              // Mensagem de Feedback do Teste
+              if (_geminiTesteResultado != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _geminiTesteSucesso == true
+                        ? const Color(0x1A10B981)
+                        : const Color(0x1AEF4444),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _geminiTesteSucesso == true
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFFEF4444),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _geminiTesteSucesso == true ? Icons.verified_rounded : Icons.error_outline_rounded,
+                        size: 16,
+                        color: _geminiTesteSucesso == true ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _geminiTesteResultado!,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: _geminiTesteSucesso == true ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Card 3: Como Obter a Chave Gratuita no Google ──
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: FincoreColors.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.help_outline_rounded, size: 16, color: Color(0xFFF59E0B)),
+                  SizedBox(width: 8),
+                  Text(
+                    'Como Obter sua Chave Gratuita do Gemini (Passo a Passo)',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                '1. Acesse o portal oficial do Google: https://aistudio.google.com\n'
+                '2. Faça login com sua conta Google (Gmail).\n'
+                '3. No menu lateral ou no botão superior, clique em "Get API key".\n'
+                '4. Clique no botão azul "Create API key" (Crie uma nova chave gratuita).\n'
+                '5. Copie a chave gerada (iniciada por AIzaSy...) e cole no campo acima.\n'
+                '6. Clique em "Testar Chave do Gemini" e depois em "Salvar Configuração".',
+                style: TextStyle(fontSize: 11.5, color: FincoreColors.textSecondary, height: 1.5),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Card 4: Automação de Áudios via Evolution API ──
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.3)),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.mic_rounded, color: Color(0xFF38BDF8), size: 20),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Suporte a Áudios de WhatsApp',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '• No WhatsApp Web: basta usar o recurso nativo de transcrever áudio do WhatsApp, copiar o texto e clicar em "WhatsApp IA" no caixa.\n'
+                      '• Via Evolution API: com o webhook ativo e a chave do Gemini configurada, áudios recebidos de clientes podem ser convertidos automaticamente em Pré-Pedidos pendentes de aprovação no Frente de Caixa!',
+                      style: TextStyle(fontSize: 11.5, color: FincoreColors.textSecondary, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

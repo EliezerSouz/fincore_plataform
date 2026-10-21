@@ -28,12 +28,14 @@ class DialogImportarPedidoIa extends StatefulWidget {
 
 class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
   final TextEditingController _textController = TextEditingController();
+  final TextEditingController _telefoneController = TextEditingController();
   final WhatsAppOrderAiParser _parser = WhatsAppOrderAiParser();
 
   bool _isProcessing = false;
   PedidoIaParsedResult? _parsedResult;
   bool _substituirCarrinho = true;
   AiProviderConfig _aiConfig = const AiProviderConfig();
+  Cliente? _clienteLocalizado;
 
   @override
   void initState() {
@@ -47,7 +49,23 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
   @override
   void dispose() {
     _textController.dispose();
+    _telefoneController.dispose();
     super.dispose();
+  }
+
+  void _verificarClientePorTelefone(String raw) {
+    final limpo = raw.replaceAll(RegExp(r'\D'), '');
+    if (limpo.length >= 8) {
+      final achado = widget.controller.clientes.where((c) {
+        final cTel = c.telefone.replaceAll(RegExp(r'\D'), '');
+        return cTel.isNotEmpty && (cTel == limpo || limpo.endsWith(cTel) || cTel.endsWith(limpo));
+      }).firstOrNull;
+      setState(() => _clienteLocalizado = achado);
+    } else {
+      if (_clienteLocalizado != null) {
+        setState(() => _clienteLocalizado = null);
+      }
+    }
   }
 
   Future<void> _carregarConfiguracaoIa() async {
@@ -109,6 +127,18 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
         customConfig: _aiConfig,
       );
 
+      // Sincroniza cliente e telefone
+      if (_telefoneController.text.trim().isNotEmpty) {
+        result.clienteTelefone = _telefoneController.text.trim();
+      } else if (result.clienteTelefone != null && result.clienteTelefone!.isNotEmpty) {
+        _telefoneController.text = result.clienteTelefone!;
+        _verificarClientePorTelefone(result.clienteTelefone!);
+      }
+
+      if (_clienteLocalizado != null) {
+        result.clienteNome = _clienteLocalizado!.nome;
+      }
+
       if (mounted) {
         setState(() {
           _parsedResult = result;
@@ -129,20 +159,6 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
         content: Text(msg),
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  void _abrirConfiguracoesIa() {
-    showDialog(
-      context: context,
-      builder: (ctx) => _DialogConfigIa(
-        initialConfig: _aiConfig,
-        onSave: (newConfig) async {
-          await WhatsAppOrderAiParser.salvarConfig(newConfig);
-          setState(() => _aiConfig = newConfig);
-          _mostrarToast('Configurações de IA salvas com sucesso.');
-        },
       ),
     );
   }
@@ -181,6 +197,14 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
       );
 
       if (continuar != true) return;
+    }
+
+    // Propaga dados finais de cliente
+    if (_telefoneController.text.trim().isNotEmpty) {
+      _parsedResult!.clienteTelefone = _telefoneController.text.trim();
+    }
+    if (_clienteLocalizado != null) {
+      _parsedResult!.clienteNome = _clienteLocalizado!.nome;
     }
 
     await widget.controller.aplicarPedidoIa(
@@ -292,11 +316,6 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
           ),
           const Spacer(),
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: FincoreColors.textSecondary, size: 20),
-            tooltip: 'Configurar Provedor de IA (Gemini / OpenAI / Local)',
-            onPressed: _abrirConfiguracoesIa,
-          ),
-          IconButton(
             icon: const Icon(Icons.close_rounded, color: FincoreColors.textMuted, size: 22),
             onPressed: () => Navigator.of(context).pop(false),
           ),
@@ -311,6 +330,96 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ── Campo Opcional de Identificação do Cliente / Telefone ──
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: FincoreColors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: _clienteLocalizado != null
+                    ? const Color(0xFF10B981)
+                    : FincoreColors.border,
+                width: _clienteLocalizado != null ? 1.5 : 1.0,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.phone_iphone_rounded,
+                  size: 20,
+                  color: _clienteLocalizado != null ? const Color(0xFF10B981) : const Color(0xFF25D366),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _clienteLocalizado != null
+                            ? 'CLIENTE LOCALIZADO NO SISTEMA'
+                            : 'TELEFONE / WHATSAPP DO CLIENTE (OPCIONAL)',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: _clienteLocalizado != null ? const Color(0xFF10B981) : FincoreColors.textSecondary,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      TextField(
+                        controller: _telefoneController,
+                        keyboardType: TextInputType.phone,
+                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                        decoration: const InputDecoration(
+                          hintText: 'Digite o telefone do cliente para buscar no cadastro...',
+                          hintStyle: TextStyle(color: FincoreColors.textMuted, fontSize: 12, fontWeight: FontWeight.normal),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        onChanged: _verificarClientePorTelefone,
+                      ),
+                    ],
+                  ),
+                ),
+                if (_clienteLocalizado != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0x2610B981),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF10B981)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.person_rounded, size: 14, color: Color(0xFF10B981)),
+                        const SizedBox(width: 6),
+                        Text(
+                          _clienteLocalizado!.nome,
+                          style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else if (_telefoneController.text.isNotEmpty) ...[
+                  IconButton(
+                    icon: const Icon(Icons.clear_rounded, size: 16, color: FincoreColors.textMuted),
+                    tooltip: 'Limpar telefone',
+                    onPressed: () {
+                      _telefoneController.clear();
+                      _verificarClientePorTelefone('');
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ── Campo de Texto da Mensagem do WhatsApp ──
           Row(
             children: [
               Icon(Icons.paste_rounded, size: 16, color: FincoreColors.primary),
@@ -476,11 +585,17 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
                 children: [
                   _buildCardCliente(parsed),
                   const SizedBox(height: 10),
-                  _buildCardLogistica(parsed),
-                  const SizedBox(height: 10),
                   _buildCardItens(parsed),
-                  const SizedBox(height: 10),
-                  _buildCardPagamento(parsed),
+                  // Logística só é exibida se houver dados reais de entrega identificados
+                  if (parsed.logradouro != null || parsed.bairro != null) ...[
+                    const SizedBox(height: 10),
+                    _buildCardLogistica(parsed),
+                  ],
+                  // Pagamento só é exibido se houver forma de pagamento ou troco identificado
+                  if (parsed.formaPagamento != null || parsed.trocoParaCentavos != null) ...[
+                    const SizedBox(height: 10),
+                    _buildCardPagamento(parsed),
+                  ],
                 ],
               ),
             ),
@@ -491,31 +606,64 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
   }
 
   Widget _buildCardCliente(PedidoIaParsedResult parsed) {
+    final bool isCadastrado = _clienteLocalizado != null;
+    final bool temTelefone = (parsed.clienteTelefone != null && parsed.clienteTelefone!.isNotEmpty) ||
+        _telefoneController.text.trim().isNotEmpty;
+    final String telExibir = _telefoneController.text.trim().isNotEmpty
+        ? _telefoneController.text.trim()
+        : (parsed.clienteTelefone ?? 'Não informado');
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: FincoreColors.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: FincoreColors.border),
+        border: Border.all(
+          color: isCadastrado
+              ? const Color(0xFF10B981)
+              : FincoreColors.border,
+          width: isCadastrado ? 1.5 : 1.0,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.person_rounded, size: 16, color: FincoreColors.primary),
+              Icon(
+                Icons.person_rounded,
+                size: 16,
+                color: isCadastrado ? const Color(0xFF10B981) : FincoreColors.primary,
+              ),
               const SizedBox(width: 6),
-              const Text('Cliente Identificado', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+              const Text('Cliente do Pedido', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
               const Spacer(),
-              if (parsed.clienteNome != null || parsed.clienteTelefone != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0x3310B981),
-                    borderRadius: BorderRadius.circular(4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isCadastrado
+                      ? const Color(0x3310B981)
+                      : (temTelefone ? const Color(0x3338BDF8) : Colors.white.withValues(alpha: 0.08)),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: isCadastrado
+                        ? const Color(0xFF10B981)
+                        : (temTelefone ? const Color(0xFF38BDF8) : FincoreColors.border),
                   ),
-                  child: const Text('Identificado', style: TextStyle(color: FincoreColors.success, fontSize: 10, fontWeight: FontWeight.bold)),
                 ),
+                child: Text(
+                  isCadastrado
+                      ? '✓ Cliente Cadastrado'
+                      : (temTelefone ? 'Telefone Informado' : 'Consumidor Final'),
+                  style: TextStyle(
+                    color: isCadastrado
+                        ? FincoreColors.success
+                        : (temTelefone ? const Color(0xFF38BDF8) : FincoreColors.textMuted),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -527,7 +675,9 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
                   children: [
                     const Text('Nome', style: TextStyle(color: FincoreColors.textMuted, fontSize: 10)),
                     Text(
-                      parsed.clienteNome ?? 'Consumidor WhatsApp',
+                      isCadastrado
+                          ? _clienteLocalizado!.nome
+                          : (parsed.clienteNome ?? (temTelefone ? 'Cliente WhatsApp' : 'Consumidor Final')),
                       style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ],
@@ -539,9 +689,9 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
                   children: [
                     const Text('Telefone / WhatsApp', style: TextStyle(color: FincoreColors.textMuted, fontSize: 10)),
                     Text(
-                      parsed.clienteTelefone ?? 'Não informado',
+                      telExibir,
                       style: TextStyle(
-                        color: parsed.clienteTelefone != null ? const Color(0xFF25D366) : FincoreColors.textMuted,
+                        color: temTelefone ? const Color(0xFF25D366) : FincoreColors.textMuted,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                       ),
@@ -842,136 +992,6 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
             ),
         ],
       ),
-    );
-  }
-}
-
-/// Diálogo para Configurações do Provedor de IA
-class _DialogConfigIa extends StatefulWidget {
-  final AiProviderConfig initialConfig;
-  final ValueChanged<AiProviderConfig> onSave;
-
-  const _DialogConfigIa({
-    required this.initialConfig,
-    required this.onSave,
-  });
-
-  @override
-  State<_DialogConfigIa> createState() => _DialogConfigIaState();
-}
-
-class _DialogConfigIaState extends State<_DialogConfigIa> {
-  late String _provider;
-  late final TextEditingController _keyCtrl;
-  late final TextEditingController _modelCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _provider = widget.initialConfig.provider;
-    _keyCtrl = TextEditingController(text: widget.initialConfig.apiKey);
-    _modelCtrl = TextEditingController(text: widget.initialConfig.model);
-  }
-
-  @override
-  void dispose() {
-    _keyCtrl.dispose();
-    _modelCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: FincoreColors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: Row(
-        children: [
-          Icon(Icons.tune_rounded, color: FincoreColors.primary, size: 20),
-          const SizedBox(width: 8),
-          const Text('Configurar Provedor de IA', style: TextStyle(color: Colors.white, fontSize: 16)),
-        ],
-      ),
-      content: SizedBox(
-        width: 440,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Escolha como deseja que as mensagens do WhatsApp sejam interpretadas:',
-              style: TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 14),
-            RadioListTile<String>(
-              value: 'local',
-              groupValue: _provider,
-              title: const Text('Modo Local Offline (Recomendado)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-              subtitle: const Text('Instantâneo, 0ms de latência, não requer internet nem chave de API.', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11)),
-              onChanged: (val) => setState(() => _provider = val!),
-            ),
-            RadioListTile<String>(
-              value: 'gemini',
-              groupValue: _provider,
-              title: const Text('Google Gemini (Nuvem)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-              subtitle: const Text('Utiliza a API do Gemini (gemini-1.5-flash) para compreensão profunda de mensagens complexas.', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11)),
-              onChanged: (val) => setState(() => _provider = val!),
-            ),
-            RadioListTile<String>(
-              value: 'openai',
-              groupValue: _provider,
-              title: const Text('OpenAI ChatGPT (Nuvem)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-              subtitle: const Text('Utiliza a API da OpenAI (gpt-4o-mini).', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11)),
-              onChanged: (val) => setState(() => _provider = val!),
-            ),
-            if (_provider != 'local') ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _keyCtrl,
-                obscureText: true,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-                decoration: const InputDecoration(
-                  labelText: 'Chave de API (API Key)',
-                  labelStyle: TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
-                  hintText: 'Cole aqui sua chave sk-... ou AIza...',
-                  hintStyle: TextStyle(color: FincoreColors.textMuted, fontSize: 11),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _modelCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-                decoration: InputDecoration(
-                  labelText: 'Modelo Customizado (Opcional)',
-                  labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
-                  hintText: _provider == 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini',
-                  hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 11),
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            widget.onSave(AiProviderConfig(
-              provider: _provider,
-              apiKey: _keyCtrl.text.trim(),
-              model: _modelCtrl.text.trim(),
-            ));
-            Navigator.of(context).pop();
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: FincoreColors.primary),
-          child: const Text('Salvar'),
-        ),
-      ],
     );
   }
 }

@@ -134,6 +134,60 @@ class WhatsAppOrderAiParser {
     await prefs.setString(_kPrefModel, config.model);
   }
 
+  /// Testa a conectividade e a validade de uma chave de API do Gemini
+  static Future<Map<String, dynamic>> testarConexaoGemini(String apiKey, {String? model}) async {
+    final key = apiKey.trim();
+    if (key.isEmpty) {
+      return {'sucesso': false, 'mensagem': 'A Chave de API não pode estar vazia.'};
+    }
+
+    final selectedModel = (model != null && model.trim().isNotEmpty) ? model.trim() : 'gemini-1.5-flash';
+    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$selectedModel:generateContent?key=$key');
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': 'ping'}
+              ]
+            }
+          ],
+          'generationConfig': {
+            'maxOutputTokens': 5,
+          }
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        return {
+          'sucesso': true,
+          'mensagem': 'Conexão com Google Gemini ($selectedModel) estabelecida com sucesso!',
+        };
+      } else {
+        String detalhe = 'Status ${response.statusCode}';
+        try {
+          final errBody = jsonDecode(response.body);
+          if (errBody['error'] != null && errBody['error']['message'] != null) {
+            detalhe = errBody['error']['message'].toString();
+          }
+        } catch (_) {}
+        return {
+          'sucesso': false,
+          'mensagem': 'Erro na validação do Gemini: $detalhe',
+        };
+      }
+    } catch (e) {
+      return {
+        'sucesso': false,
+        'mensagem': 'Falha na comunicação com a API do Google: $e',
+      };
+    }
+  }
+
   /// Ponto de entrada principal para processar o texto
   Future<PedidoIaParsedResult> parseOrder(
     String rawText, {
