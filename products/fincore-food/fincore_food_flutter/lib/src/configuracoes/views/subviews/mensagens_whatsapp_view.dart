@@ -49,7 +49,7 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
   // ── Gestão de Inteligência Artificial (Gemini & NLP Local) ──
   String _aiProvider = 'local';
   final _aiApiKeyCtrl = TextEditingController();
-  final _aiModelCtrl = TextEditingController(text: 'gemini-1.5-flash');
+  final _aiModelCtrl = TextEditingController(text: 'gemini-2.5-flash');
   bool _obscureAiApiKey = true;
   bool _isTestandoGemini = false;
   String? _geminiTesteResultado;
@@ -238,7 +238,9 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
         _pdvConfig = pdvConfigCarregada;
         _aiProvider = aiCfg.provider;
         _aiApiKeyCtrl.text = aiCfg.apiKey;
-        _aiModelCtrl.text = aiCfg.model.isNotEmpty ? aiCfg.model : 'gemini-1.5-flash';
+        _aiModelCtrl.text = (aiCfg.model.isNotEmpty && aiCfg.model != 'gemini-1.5-flash')
+            ? aiCfg.model
+            : 'gemini-2.5-flash';
         if (_templates.isNotEmpty) {
           _selecionarTemplate(_templates.first.id);
         }
@@ -3496,6 +3498,12 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
         _isTestandoGemini = false;
         _geminiTesteSucesso = res['sucesso'] as bool? ?? false;
         _geminiTesteResultado = res['mensagem'] as String? ?? '';
+        if (res['modeloRecomendado'] != null) {
+          final rec = res['modeloRecomendado'] as String;
+          if (rec.isNotEmpty && rec != _aiModelCtrl.text.trim()) {
+            _aiModelCtrl.text = rec;
+          }
+        }
       });
     }
   }
@@ -3703,7 +3711,7 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
                             Row(
                               children: [
                                 Text(
-                                  'Google Gemini 1.5 Flash (Nuvem / Multimodal)',
+                                  'Google Gemini (Nuvem / Multimodal - Flash 2.5 / 2.0)',
                                   style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
                                 SizedBox(width: 8),
@@ -3811,7 +3819,17 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
               _buildInputField(
                 'Modelo Google Gemini',
                 _aiModelCtrl,
-                'gemini-1.5-flash',
+                'gemini-2.5-flash',
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _buildModelChip('gemini-2.5-flash', label: 'gemini-2.5-flash (Mais Recente)', isRecommended: true),
+                  _buildModelChip('gemini-2.0-flash', label: 'gemini-2.0-flash'),
+                  _buildModelChip('gemini-1.5-flash', label: 'gemini-1.5-flash (Legado)'),
+                ],
               ),
 
               const SizedBox(height: 14),
@@ -3972,6 +3990,50 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildModelChip(String modelCode, {required String label, bool isRecommended = false}) {
+    final bool isSelected = _aiModelCtrl.text.trim() == modelCode;
+    return InkWell(
+      onTap: () => setState(() => _aiModelCtrl.text = modelCode),
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isRecommended ? const Color(0xFF10B981).withValues(alpha: 0.20) : const Color(0xFF38BDF8).withValues(alpha: 0.20))
+              : FincoreColors.surface,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected
+                ? (isRecommended ? const Color(0xFF10B981) : const Color(0xFF38BDF8))
+                : FincoreColors.border,
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isSelected) ...[
+              Icon(
+                Icons.check_circle_rounded,
+                size: 12,
+                color: isRecommended ? const Color(0xFF10B981) : const Color(0xFF38BDF8),
+              ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                color: isSelected ? Colors.white : FincoreColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

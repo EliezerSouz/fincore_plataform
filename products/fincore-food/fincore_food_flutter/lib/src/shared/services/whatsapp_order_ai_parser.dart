@@ -119,10 +119,12 @@ class WhatsAppOrderAiParser {
   /// Carrega as configurações de IA salvas
   static Future<AiProviderConfig> carregarConfig() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedModel = prefs.getString(_kPrefModel) ?? '';
+    final model = (savedModel.isEmpty || savedModel == 'gemini-1.5-flash') ? 'gemini-2.5-flash' : savedModel;
     return AiProviderConfig(
       provider: prefs.getString(_kPrefProvider) ?? 'local',
       apiKey: prefs.getString(_kPrefApiKey) ?? '',
-      model: prefs.getString(_kPrefModel) ?? '',
+      model: model,
     );
   }
 
@@ -141,12 +143,65 @@ class WhatsAppOrderAiParser {
       return {'sucesso': false, 'mensagem': 'A Chave de API não pode estar vazia.'};
     }
 
-    final selectedModel = (model != null && model.trim().isNotEmpty) ? model.trim() : 'gemini-1.5-flash';
-    final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$selectedModel:generateContent?key=$key');
-
     try {
-      final response = await http.post(
-        url,
+      // 1. Consulta os modelos disponíveis e suportados para esta chave na API do Google
+      final listUrl = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?key=$key');
+      final listResp = await http.get(listUrl).timeout(const Duration(seconds: 10));
+
+      if (listResp.statusCode != 200) {
+        String detalhe = 'Status ${listResp.statusCode}';
+        try {
+          final errBody = jsonDecode(listResp.body);
+          if (errBody['error'] != null && errBody['error']['message'] != null) {
+            detalhe = errBody['error']['message'].toString();
+          }
+        } catch (_) {}
+        return {
+          'sucesso': false,
+          'mensagem': 'Erro na validação da Chave de API: $detalhe',
+        };
+      }
+
+      final listData = jsonDecode(listResp.body);
+      final rawModels = listData['models'] as List? ?? [];
+      final List<String> availableModels = [];
+
+      for (final m in rawModels) {
+        final supportedMethods = (m['supportedGenerationMethods'] as List?)?.map((e) => e.toString()).toList() ?? [];
+        if (supportedMethods.contains('generateContent')) {
+          final mName = (m['name']?.toString() ?? '').replaceFirst('models/', '');
+          if (mName.isNotEmpty) {
+            availableModels.add(mName);
+          }
+        }
+      }
+
+      String modelToUse = (model != null && model.trim().isNotEmpty) ? model.trim() : '';
+
+      // Se o modelo informado pelo usuário não existe ou foi descontinuado (ex: gemini-1.5-flash)
+      bool modelSubstituted = false;
+      if (modelToUse.isEmpty || !availableModels.contains(modelToUse)) {
+        // Encontra o melhor modelo disponível: 2.5-flash > 2.0-flash > qualquer flash > primeiro disponível
+        final bestFlash = availableModels.firstWhere(
+          (m) => m.contains('2.5-flash'),
+          orElse: () => availableModels.firstWhere(
+            (m) => m.contains('2.0-flash'),
+            orElse: () => availableModels.firstWhere(
+              (m) => m.contains('flash'),
+              orElse: () => availableModels.isNotEmpty ? availableModels.first : 'gemini-2.5-flash',
+            ),
+          ),
+        );
+        if (modelToUse.isNotEmpty && modelToUse != bestFlash) {
+          modelSubstituted = true;
+        }
+        modelToUse = bestFlash;
+      }
+
+      // 2. Faz um teste real de geração de conteúdo com o modelo selecionado
+      final generateUrl = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$modelToUse:generateContent?key=$key');
+      final genResp = await http.post(
+        generateUrl,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'contents': [
@@ -162,28 +217,34 @@ class WhatsAppOrderAiParser {
         }),
       ).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
+      if (genResp.statusCode == 200) {
+        final msg = modelSubstituted
+            ? 'Conexão estabelecida com sucesso! O modelo "${model?.trim()}" foi descontinuado pelo Google e atualizado automaticamente para "$modelToUse".'
+            : 'Conexão com Google Gemini ($modelToUse) estabelecida com sucesso!';
+
         return {
           'sucesso': true,
-          'mensagem': 'Conexão com Google Gemini ($selectedModel) estabelecida com sucesso!',
+          'mensagem': msg,
+          'modeloRecomendado': modelToUse,
+          'modelosDisponiveis': availableModels,
         };
       } else {
-        String detalhe = 'Status ${response.statusCode}';
+        String detalhe = 'Status ${genResp.statusCode}';
         try {
-          final errBody = jsonDecode(response.body);
+          final errBody = jsonDecode(genResp.body);
           if (errBody['error'] != null && errBody['error']['message'] != null) {
             detalhe = errBody['error']['message'].toString();
           }
         } catch (_) {}
         return {
           'sucesso': false,
-          'mensagem': 'Erro na validação do Gemini: $detalhe',
+          'mensagem': 'Erro na geração de conteúdo ($modelToUse): $detalhe',
         };
       }
     } catch (e) {
       return {
         'sucesso': false,
-        'mensagem': 'Falha na comunicação com a API do Google: $e',
+        'mensagem': 'Falha na comunicação com a API do Google Gemini: $e',
       };
     }
   }
@@ -843,26 +904,37 @@ $rawText
     Map<String, dynamic>? jsonResult;
 
     if (config.provider == 'gemini') {
-      final model = config.model.isNotEmpty ? config.model : 'gemini-1.5-flash';
-      final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${config.apiKey}');
+      var model = config.model.trim();
+      if (model.isEmpty || model == 'gemini-1.5-flash') {
+        model = 'gemini-2.5-flash';
+      }
 
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': '$systemPrompt\n\n$userPrompt'}
-              ]
+      Future<http.Response> executeGeminiCall(String m) {
+        final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent?key=${config.apiKey}');
+        return http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'contents': [
+              {
+                'parts': [
+                  {'text': '$systemPrompt\n\n$userPrompt'}
+                ]
+              }
+            ],
+            'generationConfig': {
+              'responseMimeType': 'application/json',
+              'temperature': 0.1,
             }
-          ],
-          'generationConfig': {
-            'responseMimeType': 'application/json',
-            'temperature': 0.1,
-          }
-        }),
-      ).timeout(const Duration(seconds: 12));
+          }),
+        ).timeout(const Duration(seconds: 12));
+      }
+
+      var response = await executeGeminiCall(model);
+      if (response.statusCode == 404 && model != 'gemini-2.0-flash') {
+        // Fallback automático para gemini-2.0-flash caso o modelo configurado não esteja disponível
+        response = await executeGeminiCall('gemini-2.0-flash');
+      }
 
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
