@@ -418,6 +418,7 @@ class EvolutionApiClient {
     final payload = {
       'number': phoneToSend,
       'text': textoMensagem,
+      'linkPreview': true,
     };
 
     HttpClient? client;
