@@ -957,6 +957,7 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
         numeroPedido: numeroPedidoReal.isNotEmpty ? numeroPedidoReal : null,
         pedidoId: _controller.lastPedidoId,
         tenantId: tenantId,
+        canalOrigem: 'pdv_balcao',
         itens: itensCopy,
         subtotal: subtotalCalc,
         desconto: descontoCalc,

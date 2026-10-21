@@ -151,6 +151,12 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
       'cor': Color(0xFF06B6D4),
       'tags': [
         {
+          'tag': '{link_avaliacao}',
+          'desc': 'Link direto para o cliente avaliar o pedido em 15 segundos na Web',
+          'badge': 'Avaliação Web',
+          'badgeColor': Color(0xFFF59E0B),
+        },
+        {
           'tag': '{link_rastreio}',
           'desc': 'Link oficial para o cliente rastrear o pedido em tempo real',
           'badge': 'Rastreio Web',
@@ -388,8 +394,15 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
         numeroOuIdPedido: '000104',
         tenantId: _tenantId,
       ),
+      '{link_avaliacao}': WhatsAppService.montarUrlAvaliacaoPedido(
+        baseUrl: WhatsAppService.baseUrlCardapioPadrao,
+        numeroOuIdPedido: '000104',
+        tenantId: _tenantId,
+      ),
       '{chave_pix}': 'pix@$_nomeEmpresaResolvido.com.br',
       '{chave_pix_copia_cola}': '00020126580014br.gov.bcb.pix011407389215640520400005303986540589.905802BR5915FINCORE FOOD6008SOROCABA62070503***6304ABCD',
+      '{origem}': 'Cardápio Digital Online',
+      '{canal}': 'Cardápio Web',
     };
 
     return WhatsAppService.interpolarTemplate(textoOriginal, dadosExemplo);
@@ -412,6 +425,7 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
       if (ev == 'pedido_aprovado') return WhatsAppService.kEventoPedidoAprovadoWeb;
       if (ev == 'pedido_pronto') return WhatsAppService.kEventoPedidoPronto;
       if (ev == 'saiu_entrega') return WhatsAppService.kEventoPedidoSaiuEntrega;
+      if (ev == 'pedido_entregue') return WhatsAppService.kEventoPedidoEntregue;
       if (ev == 'pedido_cancelado') return WhatsAppService.kEventoPedidoCancelado;
       return ev;
     }
@@ -532,6 +546,7 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
                         DropdownMenuItem(value: 'pedido_aprovado', child: Text('✅ Pedido Aprovado / Em Preparo')),
                         DropdownMenuItem(value: 'pedido_pronto', child: Text('🍕 Pedido Pronto (Balcão / Retirada)')),
                         DropdownMenuItem(value: 'saiu_entrega', child: Text('🛵 Saiu para Entrega (Delivery)')),
+                        DropdownMenuItem(value: 'pedido_entregue', child: Text('⭐ Pedido Entregue (Avaliação / Pós-Venda)')),
                         DropdownMenuItem(value: 'pedido_cancelado', child: Text('❌ Pedido Cancelado')),
                         DropdownMenuItem(value: 'geral', child: Text('💬 Geral / Contato Avulso')),
                       ],
@@ -1013,6 +1028,8 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
         return '🍕 Pedido Pronto';
       case 'saiu_entrega':
         return '🛵 Saiu para Entrega';
+      case 'pedido_entregue':
+        return '⭐ Pedido Entregue / Avaliação';
       case 'pedido_cancelado':
         return '❌ Pedido Cancelado';
       case 'geral':
@@ -1031,6 +1048,8 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
       eventoKey = WhatsAppService.kEventoPedidoPronto;
     } else if (ev == 'saiu_entrega') {
       eventoKey = WhatsAppService.kEventoPedidoSaiuEntrega;
+    } else if (ev == 'pedido_entregue') {
+      eventoKey = WhatsAppService.kEventoPedidoEntregue;
     } else if (ev == 'pedido_cancelado') {
       eventoKey = WhatsAppService.kEventoPedidoCancelado;
     }
@@ -2319,9 +2338,16 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
           ),
           const Divider(height: 24, color: FincoreColors.border),
           _buildLinhaPolitica(
+            eventoId: WhatsAppService.kEventoPedidoEntregue,
+            eventoChaveTemplate: 'pedido_entregue',
+            titulo: '5. Pedido Entregue & Avaliação (Pós-Venda)',
+            descricao: 'Avisa que o pedido foi entregue e convida o cliente a avaliar a experiência em 15 segundos na Web.',
+          ),
+          const Divider(height: 24, color: FincoreColors.border),
+          _buildLinhaPolitica(
             eventoId: WhatsAppService.kEventoPedidoCancelado,
             eventoChaveTemplate: 'pedido_cancelado',
-            titulo: '5. Pedido Cancelado (Estorno / Não Concretizado)',
+            titulo: '6. Pedido Cancelado (Estorno / Não Concretizado)',
             descricao: 'Avisa o cliente formalmente sobre o cancelamento do pedido e detalhes do estorno.',
           ),
         ],

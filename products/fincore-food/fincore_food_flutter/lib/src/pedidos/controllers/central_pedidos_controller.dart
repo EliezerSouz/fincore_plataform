@@ -1366,10 +1366,11 @@ class CentralPedidosController extends ChangeNotifier {
       }
     }
 
-    // Disparo Simulado da Mensageria (Fase C: Modo Simulação / Mock - sem envio real)
+    // Disparo da Mensageria (integrado com WhatsApp Service)
     final eventoSimulado = switch (novoStatus) {
       StatusOrdemPreparo.pronto          => WhatsAppService.kEventoPedidoPronto,
       StatusOrdemPreparo.saiuParaEntrega => WhatsAppService.kEventoPedidoSaiuEntrega,
+      StatusOrdemPreparo.entregue        => WhatsAppService.kEventoPedidoEntregue,
       StatusOrdemPreparo.cancelado       => WhatsAppService.kEventoPedidoCancelado,
       _                                  => null,
     };
@@ -1570,6 +1571,7 @@ class CentralPedidosController extends ChangeNotifier {
           rawPhone: telefone,
           clienteNome: nome,
           clienteAceitaWhatsapp: clienteAceita,
+          canalOrigem: pedidoRow.canalOrigem,
           valorTotalCentavos: pedidoRow.valorTotalCentavos,
           valorSubtotalCentavos: pedidoRow.valorSubtotalCentavos,
           valorDescontoCentavos: calcDescontoCentavos > 0 ? calcDescontoCentavos : 0,

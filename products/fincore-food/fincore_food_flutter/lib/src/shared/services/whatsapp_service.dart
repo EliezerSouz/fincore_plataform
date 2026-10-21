@@ -718,14 +718,16 @@ class WhatsAppService {
         id: 'avaliacao_pos_venda',
         titulo: 'Avaliação & Pós-Venda',
         emoji: '⭐',
-        descricao: 'Agradecimento pós-entrega solicitando feedback do cliente.',
+        descricao: 'Agradecimento pós-entrega com link para avaliação rápida da experiência do cliente.',
         categoria: 'marketing',
         isPadrao: true,
-        evento: 'saiu_entrega',
+        evento: 'pedido_entregue',
         ordem: 7,
-        conteudo: '❤️ *Olá, {cliente}!* Esperamos que sua experiência tenha sido incrível! ✨\n\n'
-            'Como estava o seu pedido da *$emp*? A sua opinião é muito valiosa para continuarmos melhorando cada vez mais! ⭐⭐⭐⭐⭐\n\n'
-            'Se puder nos contar o que achou, ficaremos muito felizes. Até o próximo pedido! 🚀😊',
+        conteudo: '❤️ *Olá, {primeiro_nome}!* Esperamos que sua experiência tenha sido maravilhosa! ✨\n\n'
+            'Seu pedido *#{pedido}* foi entregue com muito carinho pela *$emp*! 🍲😋\n\n'
+            'Poderia nos avaliar em 15 segundos? Sua opinião é essencial para mantermos a qualidade do nosso atendimento:\n'
+            '⭐ *Avalie seu pedido aqui:* {link_avaliacao}\n\n'
+            'Muito obrigado pela confiança e até o próximo pedido! 🚀🍕',
       ),
       WhatsAppTemplate(
         id: 'pedido_cancelado',
@@ -757,6 +759,7 @@ class WhatsAppService {
       kEventoPedidoAprovadoWeb: 'pedido_aprovado',
       kEventoPedidoPronto: 'pedido_pronto',
       kEventoPedidoSaiuEntrega: 'saiu_entrega',
+      kEventoPedidoEntregue: 'avaliacao_pos_venda',
       kEventoPedidoCancelado: 'pedido_cancelado',
     };
 
@@ -1294,6 +1297,24 @@ class WhatsAppService {
     return '$cleanBase${sep}pedido=$numClean$tenantParam';
   }
 
+  /// Monta a URL oficial de avaliação/pós-venda do pedido no Cardápio Digital Web.
+  /// Formato: {cardapio_url}/avaliacao.html?pedido={num_pedido}&tenant_id={tenant_id}
+  static String montarUrlAvaliacaoPedido({
+    required String baseUrl,
+    required String numeroOuIdPedido,
+    String? tenantId,
+  }) {
+    final cleanBase = baseUrl.trim().isNotEmpty
+        ? baseUrl.trim().replaceAll(RegExp(r'/+$'), '')
+        : 'https://fincore-cardapio-web.vercel.app';
+    final tId = tenantId ?? (TenantContext().hasContext ? TenantContext().tenantId : '');
+    final numClean = numeroOuIdPedido.replaceAll('#', '').trim();
+
+    final sep = cleanBase.contains('?') ? '&' : '?';
+    final tenantParam = (tId.isNotEmpty && !cleanBase.contains('tenant_id=')) ? '&tenant_id=$tId' : '';
+    return '$cleanBase/avaliacao.html${sep}pedido=$numClean$tenantParam';
+  }
+
   /// Monta o mapa completo de interpolação com as tags operacionais do Food Service,
   /// tags contextuais e tags inteligentes ({bloco_pix}, {bloco_endereco}).
   static Map<String, String> gerarVariaveisInterpolacao({
@@ -1303,6 +1324,7 @@ class WhatsAppService {
     String? pedidoId,
     String? tenantId,
     String? linkCardapioBase,
+    String? canalOrigem,
     List<Map<String, dynamic>>? itens,
     double? subtotal,
     double? desconto,
@@ -1323,6 +1345,7 @@ class WhatsAppService {
     String? mesa,
     String? linkCardapio,
     String? linkRastreio,
+    String? linkAvaliacao,
     String? chavePix,
     String? chavePixCopiaCola,
     String? formatoPix,
@@ -1372,6 +1395,10 @@ class WhatsAppService {
     final linkRastreioResolvido = (linkRastreio != null && linkRastreio.isNotEmpty)
         ? linkRastreio
         : montarUrlRastreioPedido(baseUrl: baseCardapio, numeroOuIdPedido: idParaRastreio, tenantId: tId);
+
+    final linkAvaliacaoResolvido = (linkAvaliacao != null && linkAvaliacao.isNotEmpty)
+        ? linkAvaliacao
+        : montarUrlAvaliacaoPedido(baseUrl: baseCardapio, numeroOuIdPedido: idParaRastreio, tenantId: tId);
 
     // Resoluções contextuais inteligentes
     final formaPagamentoResolvida = (formaPagamento != null && formaPagamento.trim().isNotEmpty)
@@ -1482,16 +1509,35 @@ class WhatsAppService {
       '{chave_pix_copia_cola}': (chavePixCopiaCola != null && chavePixCopiaCola.trim().isNotEmpty)
           ? chavePixCopiaCola.trim()
           : (chavePix != null ? chavePix.trim() : ''),
-      '{origem}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('whatsapp') || tipoPedido.toLowerCase().contains('ia')))
-          ? 'WhatsApp (IA / Atendimento)'
-          : (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
-              ? 'Cardápio Digital Online'
-              : 'Atendimento Balcão / Frente de Caixa',
-      '{canal}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('whatsapp') || tipoPedido.toLowerCase().contains('ia')))
-          ? 'WhatsApp Chat'
-          : (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
-              ? 'Cardápio Web'
-              : 'PDV Balcão',
+      '{link_avaliacao}': linkAvaliacaoResolvido,
+      '{origem}': (() {
+        final c = (canalOrigem ?? '').toLowerCase().trim();
+        final t = (tipoPedido ?? '').toLowerCase().trim();
+        if (c.contains('web') || c.contains('cardapio') || c.contains('online') || t.contains('web') || t.contains('online')) {
+          return 'Cardápio Digital Online';
+        }
+        if (c.contains('whatsapp') || c.contains('ia') || t.contains('whatsapp') || t.contains('ia')) {
+          return 'WhatsApp (IA / Atendimento)';
+        }
+        if (c.contains('mesa') || c.contains('comanda') || t.contains('mesa') || t.contains('comanda')) {
+          return 'Mesa / Comanda';
+        }
+        return 'Atendimento Balcão / Frente de Caixa';
+      })(),
+      '{canal}': (() {
+        final c = (canalOrigem ?? '').toLowerCase().trim();
+        final t = (tipoPedido ?? '').toLowerCase().trim();
+        if (c.contains('web') || c.contains('cardapio') || c.contains('online') || t.contains('web') || t.contains('online')) {
+          return 'Cardápio Web';
+        }
+        if (c.contains('whatsapp') || c.contains('ia') || t.contains('whatsapp') || t.contains('ia')) {
+          return 'WhatsApp Chat';
+        }
+        if (c.contains('mesa') || c.contains('comanda') || t.contains('mesa') || t.contains('comanda')) {
+          return 'Salão / Mesa';
+        }
+        return 'PDV Balcão';
+      })(),
     };
   }
 
@@ -1499,11 +1545,12 @@ class WhatsAppService {
 
   static const String _policiesStorageKeyPrefix = 'fincore_whatsapp_policies_';
 
-  // Identificadores canônicos dos 5 eventos operacionais do FINCORE
+  // Identificadores canônicos dos eventos operacionais do FINCORE
   static const String kEventoPedidoCriadoPdv = 'pedido_criado_pdv';
   static const String kEventoPedidoAprovadoWeb = 'pedido_aprovado_web';
   static const String kEventoPedidoPronto = 'pedido_pronto';
   static const String kEventoPedidoSaiuEntrega = 'saiu_entrega';
+  static const String kEventoPedidoEntregue = 'pedido_entregue';
   static const String kEventoPedidoCancelado = 'pedido_cancelado';
 
   // Chaves de idempotência processadas nesta sessão local
@@ -1543,6 +1590,7 @@ class WhatsAppService {
       kEventoPedidoAprovadoWeb: WhatsAppEventPolicy.desativado,
       kEventoPedidoPronto: WhatsAppEventPolicy.desativado,
       kEventoPedidoSaiuEntrega: WhatsAppEventPolicy.desativado,
+      kEventoPedidoEntregue: WhatsAppEventPolicy.desativado,
       kEventoPedidoCancelado: WhatsAppEventPolicy.desativado,
     };
 
@@ -1813,6 +1861,9 @@ class WhatsAppService {
       } else if (eventoId == kEventoPedidoPronto) {
         final t = templates.firstWhere((item) => item.id == 'pedido_pronto', orElse: () => templates.first);
         preview = t.conteudo;
+      } else if (eventoId == kEventoPedidoEntregue) {
+        final t = templates.firstWhere((item) => item.id == 'avaliacao_pos_venda', orElse: () => templates.first);
+        preview = t.conteudo;
       } else {
         final t = templates.firstWhere((item) => item.id == 'contato_pedido', orElse: () => templates.first);
         preview = t.conteudo;
@@ -1994,6 +2045,7 @@ class WhatsAppService {
     required String? rawPhone,
     required String clienteNome,
     required bool clienteAceitaWhatsapp,
+    String? canalOrigem,
     String? eventInstanceId, // Identificador estável da instância do evento (ex: 'E123', ID do Outbox, ID do Histórico)
     int? versaoPedido,       // Versão/Revision do pedido no banco de dados local
     DateTime? dataAlteracao, // Data/hora da última alteração do pedido
@@ -2056,6 +2108,7 @@ class WhatsAppService {
         numeroPedido: numeroPedido,
         pedidoId: pedidoId,
         tenantId: tenantId,
+        canalOrigem: canalOrigem,
         itens: itens,
         subtotal: valorSubtotalCentavos != null
             ? valorSubtotalCentavos / 100.0
@@ -2084,7 +2137,8 @@ class WhatsAppService {
       final mappingEventos = await getTemplatesEventosConfigurados(tenantId: tenantId);
       final templateIdVinculado = mappingEventos[eventoId] ??
           (eventoId == kEventoPedidoAprovadoWeb ? (mappingEventos['pedido_aprovado'] ?? mappingEventos['pedido_aprovado_web']) : null) ??
-          (eventoId == kEventoPedidoCriadoPdv ? mappingEventos['pedido_criado'] : null);
+          (eventoId == kEventoPedidoCriadoPdv ? mappingEventos['pedido_criado'] : null) ??
+          (eventoId == kEventoPedidoEntregue ? mappingEventos['pedido_entregue'] : null);
 
       // 3. Localiza template aplicável ao evento:
       WhatsAppTemplate? templateConfirmacao;
@@ -2100,12 +2154,18 @@ class WhatsAppService {
               t.ativo &&
               (t.evento == eventoId ||
                   (eventoId == kEventoPedidoCriadoPdv && (t.evento == 'pedido_criado' || t.id == 'comprovante')) ||
-                  (eventoId == kEventoPedidoAprovadoWeb && (t.evento == 'pedido_aprovado' || t.evento == 'pedido_aprovado_web' || t.id == 'pedido_aprovado'))))
+                  (eventoId == kEventoPedidoAprovadoWeb && (t.evento == 'pedido_aprovado' || t.evento == 'pedido_aprovado_web' || t.id == 'pedido_aprovado')) ||
+                  (eventoId == kEventoPedidoEntregue && (t.evento == 'pedido_entregue' || t.id == 'avaliacao_pos_venda'))))
           .firstOrNull;
 
       // C. Se for pedido cancelado e ainda não achou, busca o template de cancelamento
       if (templateConfirmacao == null && eventoId == kEventoPedidoCancelado) {
         templateConfirmacao = templates.where((t) => t.id == 'pedido_cancelado').firstOrNull;
+      }
+
+      // D. Se for pedido entregue e ainda não achou, busca o template de avaliação pós-venda
+      if (templateConfirmacao == null && eventoId == kEventoPedidoEntregue) {
+        templateConfirmacao = templates.where((t) => t.id == 'avaliacao_pos_venda').firstOrNull;
       }
 
       // D. Fallback seguro: se NÃO for cancelamento, busca contato_pedido ou o primeiro

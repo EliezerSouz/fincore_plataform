@@ -57,7 +57,7 @@ async function loadCustomerAddresses() {
   const profileId = state.profile?.id;
 
   try {
-    let enderecos = [];
+    let enderecosRaw = [];
 
     // 1. Busca todos os endereços ativos do tenant em local_entrega
     const { data: locais, error } = await sb
@@ -68,20 +68,38 @@ async function loadCustomerAddresses() {
       .is('deletedAt', null);
 
     if (locais && locais.length > 0) {
-      enderecos = locais.filter(loc => {
+      enderecosRaw = locais.filter(loc => {
         if (clienteId && String(loc.clienteId) === String(clienteId)) return true;
         if (profileId && String(loc.clienteId) === String(profileId)) return true;
         return false;
       });
     }
 
+    // Helper para normalizar rua e número para evitar qualquer duplicidade visual
+    const normStreet = (s) => (s || '').toLowerCase().trim().replace(/^(rua|av|avenida|travessa|alameda|r\.)\s+/i, '').replace(/\s+/g, ' ');
+    const normNum = (n) => String(n || '').toLowerCase().trim();
+
+    // Deduplica endereços do local_entrega (mantém o que tiver mais detalhes)
+    const mapEnderecos = new Map();
+    for (const loc of enderecosRaw) {
+      const key = `${normStreet(loc.logradouro)}::${normNum(loc.numero)}`;
+      if (!mapEnderecos.has(key)) {
+        mapEnderecos.set(key, loc);
+      } else {
+        const existing = mapEnderecos.get(key);
+        // Se o novo tiver referência e o antigo não, substitui
+        if ((!existing.referencia && loc.referencia) || (existing.nomeIdentificador === 'Endereço Principal' && loc.nomeIdentificador !== 'Endereço Principal')) {
+          mapEnderecos.set(key, loc);
+        }
+      }
+    }
+
+    let enderecos = Array.from(mapEnderecos.values());
+
     // 2. Se o perfil em cardapio_clientes possui endereço e ele não está na lista, adiciona como opção
     if (state.profile?.logradouro) {
-      const hasSimilar = enderecos.some(e => 
-        e.logradouro && e.logradouro.toLowerCase().trim() === state.profile.logradouro.toLowerCase().trim() &&
-        String(e.numero || '').trim() === String(state.profile.numero || '').trim()
-      );
-      if (!hasSimilar) {
+      const profileKey = `${normStreet(state.profile.logradouro)}::${normNum(state.profile.numero)}`;
+      if (!mapEnderecos.has(profileKey)) {
         enderecos.unshift({
           id: 'profile_default',
           nomeIdentificador: 'Cadastrado no Perfil',
@@ -707,21 +725,37 @@ async function syncCustomerToErp(cust) {
       await sb.from('cliente').update(updates).eq('id', resolvedClientId);
     }
 
-    // 3. Sincronizar endereço na tabela 'local_entrega'
+    // 3. Sincronizar endereço na tabela 'local_entrega' (evitando duplicatas da mesma rua e número)
     if (cust.logradouro && cust.numero && resolvedClientId) {
       const { data: existingLocais } = await sb
         .from('local_entrega')
-        .select('id')
+        .select('id, logradouro, numero, referencia, nomeIdentificador')
         .eq('tenantId', tenantId)
         .eq('clienteId', resolvedClientId)
-        .limit(1);
+        .is('deletedAt', null);
 
-      if (!existingLocais || existingLocais.length === 0) {
+      const normStreet = (s) => (s || '').toLowerCase().trim().replace(/^(rua|av|avenida|travessa|alameda|r\.)\s+/i, '').replace(/\s+/g, ' ');
+      const normNum = (n) => String(n || '').toLowerCase().trim();
+      const currentKey = `${normStreet(cust.logradouro)}::${normNum(cust.numero)}`;
+
+      const duplicate = (existingLocais || []).find(l => `${normStreet(l.logradouro)}::${normNum(l.numero)}` === currentKey);
+
+      if (duplicate) {
+        // Já existe esse endereço: se tiver nova referência ou complemento, atualiza
+        const novaRef = cust.referencia || (cust.complemento ? `Compl: ${cust.complemento}` : '');
+        if (novaRef && !duplicate.referencia) {
+          await sb.from('local_entrega').update({
+            referencia: novaRef,
+            updatedAt: agora,
+            updatedBy: fallbackUserId
+          }).eq('id', duplicate.id);
+        }
+      } else {
         const { error: locErr } = await sb.from('local_entrega').insert({
           id: crypto.randomUUID(),
           tenantId: tenantId,
           clienteId: resolvedClientId,
-          nomeIdentificador: 'Endereço Principal',
+          nomeIdentificador: (existingLocais && existingLocais.length > 0) ? 'Outro Endereço' : 'Endereço Principal',
           logradouro: cust.logradouro,
           numero: cust.numero || 'S/N',
           bairro: cust.bairro || '',

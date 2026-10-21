@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0e12" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <title id="page-title">Avaliação do seu Pedido — Experiência do Cliente</title>
+  <meta name="description" content="Conte como foi sua experiência! Sua avaliação ajuda nosso restaurante a melhorar continuamente." />
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⭐</text></svg>" />
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    :root {
+      --bg: #0b0c10;
+      --card-bg: rgba(22, 24, 34, 0.82);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-sub: #9ca3af;
+      --primary: #f59e0b;
+      --primary-hover: #d97706;
+      --primary-glow: rgba(245, 158, 11, 0.25);
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.25);
+      --danger: #ef4444;
+      --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(245, 158, 11, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.10) 0px, transparent 50%);
+      background-attachment: fixed;
+      font-family: var(--font-family);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 32px 24px;
+      box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.6);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .brand-header {
+      margin-bottom: 24px;
+    }
+
+    .brand-logo {
+      width: 64px;
+      height: 64px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      box-shadow: 0 8px 20px var(--primary-glow);
+      margin-bottom: 12px;
+    }
+
+    .brand-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.3px;
+    }
+
+    .order-badge {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 12px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .section-title {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    .section-subtitle {
+      font-size: 14px;
+      color: var(--text-sub);
+      line-height: 1.5;
+      margin-bottom: 28px;
+    }
+
+    /* ─── Estrelas de Avaliação ───────────────────────────── */
+    .stars-container {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .star-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 38px;
+      color: #374151;
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      padding: 4px;
+      line-height: 1;
+    }
+
+    .star-btn:hover, .star-btn:focus-visible {
+      transform: scale(1.22);
+      outline: none;
+    }
+
+    .star-btn.active {
+      color: var(--primary);
+      filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.6));
+      transform: scale(1.08);
+    }
+
+    .rating-feedback-msg {
+      font-size: 15px;
+      font-weight: 600;
+      min-height: 24px;
+      color: var(--primary);
+      margin-bottom: 24px;
+      transition: all 0.2s ease;
+    }
+
+    /* ─── Chips / Tags Rápidas ────────────────────────────── */
+    .tags-section {
+      text-align: left;
+      margin-bottom: 24px;
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .tags-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .tags-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag-chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+
+    .tag-chip:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .tag-chip.selected {
+      background: rgba(245, 158, 11, 0.18);
+      border-color: var(--primary);
+      color: #fbbf24;
+      font-weight: 600;
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+    }
+
+    /* ─── Campo de Comentário Opcional ───────────────────── */
+    .comment-section {
+      text-align: left;
+      margin-bottom: 28px;
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .comment-textarea {
+      width: 100%;
+      height: 90px;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      padding: 12px 14px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .comment-textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+    }
+
+    .comment-textarea::placeholder {
+      color: #6b7280;
+    }
+
+    /* ─── Botão de Ação ──────────────────────────────────── */
+    .btn-submit {
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(245, 158, 11, 0.35);
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-submit:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 28px rgba(245, 158, 11, 0.45);
+    }
+
+    .btn-submit:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .btn-submit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    /* ─── Tela de Sucesso ────────────────────────────────── */
+    .success-view {
+      display: none;
+      animation: fadeIn 0.4s ease;
+    }
+
+    .success-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      animation: popSuccess 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes popSuccess {
+      0% { transform: scale(0); }
+      70% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+
+    .btn-cardapio {
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-decoration: none;
+    }
+
+    .btn-cardapio:hover {
+      box-shadow: 0 12px 28px rgba(16, 185, 129, 0.45);
+    }
+
+    .footer-note {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="card" id="feedback-card">
+      
+      <!-- Cabeçalho da Marca -->
+      <div class="brand-header">
+        <div class="brand-logo" id="brand-logo">🍽️</div>
+        <div class="brand-name" id="brand-name">Carregando...</div>
+        <div class="order-badge" id="order-badge" style="display: none;">Pedido #000000</div>
+      </div>
+
+      <!-- Formulário de Avaliação -->
+      <div id="form-view">
+        <h1 class="section-title" id="greeting-title">Como foi sua experiência?</h1>
+        <p class="section-subtitle" id="greeting-sub">Sua opinião é fundamental para mantermos a qualidade do nosso atendimento e produção.</p>
+
+        <!-- Seletor de Estrelas -->
+        <div class="stars-container" id="stars-container" role="radiogroup" aria-label="Avaliação em estrelas">
+          <button type="button" class="star-btn" data-rating="1" aria-label="1 estrela">★</button>
+          <button type="button" class="star-btn" data-rating="2" aria-label="2 estrelas">★</button>
+          <button type="button" class="star-btn" data-rating="3" aria-label="3 estrelas">★</button>
+          <button type="button" class="star-btn" data-rating="4" aria-label="4 estrelas">★</button>
+          <button type="button" class="star-btn" data-rating="5" aria-label="5 estrelas">★</button>
+        </div>
+
+        <div class="rating-feedback-msg" id="rating-msg">Toque nas estrelas para avaliar</div>
+
+        <!-- Tags Rápidas -->
+        <div class="tags-section" id="tags-section">
+          <span class="tags-label" id="tags-label">O que você mais gostou?</span>
+          <div class="tags-grid" id="tags-grid">
+            <!-- Renderizado dinamicamente -->
+          </div>
+        </div>
+
+        <!-- Comentário Opcional -->
+        <div class="comment-section" id="comment-section">
+          <span class="tags-label">Quer deixar uma mensagem? (opcional)</span>
+          <textarea class="comment-textarea" id="comment-text" placeholder="Conte mais detalhes da sua experiência..."></textarea>
+        </div>
+
+        <!-- Botão de Envio -->
+        <button type="button" class="btn-submit" id="btn-submit" disabled>
+          <span>Enviar Avaliação</span>
+          <span id="btn-icon">✨</span>
+        </button>
+      </div>
+
+      <!-- Tela de Sucesso pós-avaliação -->
+      <div class="success-view" id="success-view">
+        <div class="success-icon">🎉</div>
+        <h2 class="section-title">Muito obrigado!</h2>
+        <p class="section-subtitle">Sua avaliação foi recebida com sucesso. Toda a nossa equipe agradece pelo seu carinho e preferência!</p>
+
+        <a href="/" class="btn-cardapio" id="btn-cardapio-link">
+          <span>🍕 Fazer Novo Pedido no Cardápio</span>
+        </a>
+      </div>
+
+      <div class="footer-note">
+        FINCORE Food Service • Plataforma Gourmet
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    'use strict';
+
+    const SUPABASE_URL = 'https://nlaxdeqbordmovukyypk.supabase.co';
+    const SUPABASE_ANON = 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy';
+    const DEFAULT_TENANT_ID = '65109ff8-443f-41ce-94c8-8311dfc79764'; // Delivery do Eli
+
+    const { createClient } = supabase;
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    // Parâmetros da URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const tenantIdParam = urlParams.get('tenant_id') || DEFAULT_TENANT_ID;
+    const pedidoParam = urlParams.get('pedido') || '';
+
+    // Estado local da tela de avaliação
+    let selectedRating = 0;
+    const selectedTags = new Set();
+    let orderData = null;
+    let tenantData = null;
+
+    const POSITIVE_TAGS = [
+      '🚀 Entrega rápida',
+      '🍲 Comida quentinha',
+      '😋 Sabor maravilhoso',
+      '📦 Embalagem impecável',
+      '👨‍🍳 Ótima apresentação',
+      '💰 Bom custo-benefício'
+    ];
+
+    const NEGATIVE_TAGS = [
+      '⏳ Demora na entrega',
+      '❄️ Chegou frio',
+      '⚠️ Faltou item no pedido',
+      '📦 Embalagem danificada',
+      '🧂 Sabor diferente do esperado',
+      '📞 Dificuldade de contato'
+    ];
+
+    const RATING_MESSAGES = {
+      1: 'Poxa, sentimos muito! O que deu errado? 😞',
+      2: 'Precisamos melhorar! O que podemos fazer melhor? 😕',
+      3: 'Razoável! Conta pra gente o que achou. 😐',
+      4: 'Muito bom! Quase perfeito, faltou pouco! 😊',
+      5: 'Excelente! Ficamos muito felizes que você adorou! 😍🎉'
+    };
+
+    // Elementos DOM
+    const brandNameEl = document.getElementById('brand-name');
+    const brandLogoEl = document.getElementById('brand-logo');
+    const orderBadgeEl = document.getElementById('order-badge');
+    const starsContainer = document.getElementById('stars-container');
+    const ratingMsgEl = document.getElementById('rating-msg');
+    const tagsSection = document.getElementById('tags-section');
+    const tagsLabel = document.getElementById('tags-label');
+    const tagsGrid = document.getElementById('tags-grid');
+    const commentSection = document.getElementById('comment-section');
+    const commentText = document.getElementById('comment-text');
+    const btnSubmit = document.getElementById('btn-submit');
+    const formView = document.getElementById('form-view');
+    const successView = document.getElementById('success-view');
+    const cardapioLinkEl = document.getElementById('btn-cardapio-link');
+
+    // Inicialização
+    async function init() {
+      // Configura link do cardápio digital
+      cardapioLinkEl.href = `/?tenant_id=${tenantIdParam}`;
+
+      await carregarDados();
+      configurarEventos();
+    }
+
+    async function carregarDados() {
+      try {
+        // 1. Carrega dados da empresa / tenant
+        const { data: emp, error: empErr } = await sb
+          .from('empresa')
+          .select('nomeFantasia, razaoSocial, logoUrl')
+          .eq('tenantId', tenantIdParam)
+          .limit(1)
+          .maybeSingle();
+
+        if (emp) {
+          tenantData = emp;
+          const nomeLoja = emp.nomeFantasia || emp.razaoSocial || 'Nossa Loja';
+          brandNameEl.textContent = nomeLoja;
+          document.title = `Avaliação — ${nomeLoja}`;
+        } else {
+          brandNameEl.textContent = 'Restaurante & Delivery';
+        }
+
+        // 2. Carrega dados do pedido se informado
+        if (pedidoParam) {
+          orderBadgeEl.style.display = 'inline-block';
+          const cleanPedido = pedidoParam.replace('#', '').trim();
+          orderBadgeEl.textContent = `Pedido #${cleanPedido.substring(0, 8)}`;
+
+          // Busca se o pedido existe
+          const { data: ped } = await sb
+            .from('pedido')
+            .select('id, numero, clienteNome, clienteTelefone, canalOrigem')
+            .eq('tenantId', tenantIdParam)
+            .or(`id.eq.${cleanPedido},numero.eq.${cleanPedido}`)
+            .limit(1)
+            .maybeSingle();
+
+          if (ped) {
+            orderData = ped;
+            if (ped.clienteNome) {
+              const primeiroNome = ped.clienteNome.split(' ')[0];
+              document.getElementById('greeting-title').textContent = `Olá, ${primeiroNome}! Como foi sua experiência?`;
+            }
+
+            // Verifica se este pedido já foi avaliado anteriormente
+            const { data: jaAvaliado } = await sb
+              .from('avaliacoes_pedidos')
+              .select('id, nota, tags, comentario')
+              .eq('tenant_id', tenantIdParam)
+              .or(`pedido_id.eq.${ped.id},numero_pedido.eq.${ped.numero}`)
+              .limit(1)
+              .maybeSingle();
+
+            if (jaAvaliado) {
+              mostrarSucesso(true);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Aviso ao carregar dados do pedido:', err);
+      }
+    }
+
+    function configurarEventos() {
+      const starBtns = starsContainer.querySelectorAll('.star-btn');
+
+      starBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const rating = parseInt(btn.dataset.rating, 10);
+          setRating(rating);
+        });
+
+        btn.addEventListener('mouseenter', () => {
+          const rating = parseInt(btn.dataset.rating, 10);
+          highlightStars(rating);
+        });
+      });
+
+      starsContainer.addEventListener('mouseleave', () => {
+        highlightStars(selectedRating);
+      });
+
+      btnSubmit.addEventListener('click', enviarAvaliacao);
+    }
+
+    function highlightStars(rating) {
+      const starBtns = starsContainer.querySelectorAll('.star-btn');
+      starBtns.forEach(btn => {
+        const r = parseInt(btn.dataset.rating, 10);
+        btn.classList.toggle('active', r <= rating);
+      });
+    }
+
+    function setRating(rating) {
+      selectedRating = rating;
+      highlightStars(rating);
+      ratingMsgEl.textContent = RATING_MESSAGES[rating] || '';
+
+      // Mostra as tags correspondentes
+      tagsSection.style.display = 'block';
+      commentSection.style.display = 'block';
+      btnSubmit.removeAttribute('disabled');
+
+      const isPositive = rating >= 4;
+      tagsLabel.textContent = isPositive ? 'O que você mais gostou?' : 'O que podemos melhorar?';
+
+      const tagList = isPositive ? POSITIVE_TAGS : NEGATIVE_TAGS;
+      selectedTags.clear();
+
+      tagsGrid.innerHTML = tagList.map(t => {
+        return `<div class="tag-chip" data-tag="${t}">${t}</div>`;
+      }).join('');
+
+      tagsGrid.querySelectorAll('.tag-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const t = chip.dataset.tag;
+          if (selectedTags.has(t)) {
+            selectedTags.delete(t);
+            chip.classList.remove('selected');
+          } else {
+            selectedTags.add(t);
+            chip.classList.add('selected');
+          }
+        });
+      });
+    }
+
+    async function enviarAvaliacao() {
+      if (selectedRating === 0) return;
+
+      btnSubmit.setAttribute('disabled', 'true');
+      btnSubmit.innerHTML = `<span>Gravando avaliação...</span> <span class="spinner">⏳</span>`;
+
+      try {
+        const payload = {
+          tenant_id: tenantIdParam,
+          pedido_id: orderData?.id || null,
+          numero_pedido: orderData?.numero || pedidoParam.replace('#', '').trim() || null,
+          cliente_nome: orderData?.clienteNome || 'Cliente',
+          cliente_telefone: orderData?.clienteTelefone || null,
+          nota: selectedRating,
+          tags: Array.from(selectedTags),
+          comentario: commentText.value.trim() || null,
+          origem: 'cardapio_web',
+          created_at: new Date().toISOString()
+        };
+
+        const { error } = await sb.from('avaliacoes_pedidos').insert(payload);
+        if (error) throw error;
+
+        mostrarSucesso(false);
+      } catch (err) {
+        console.error('Erro ao enviar avaliação:', err);
+        alert('Ocorreu um erro ao enviar sua avaliação: ' + err.message);
+        btnSubmit.removeAttribute('disabled');
+        btnSubmit.innerHTML = `<span>Tentar Novamente</span> ✨`;
+      }
+    }
+
+    function mostrarSucesso(jaAvaliado = false) {
+      formView.style.display = 'none';
+      successView.style.display = 'block';
+      if (jaAvaliado) {
+        successView.querySelector('.section-title').textContent = 'Pedido já avaliado!';
+        successView.querySelector('.section-subtitle').textContent = 'Você já compartilhou seu feedback sobre este pedido. Muito obrigado pela sua colaboração!';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

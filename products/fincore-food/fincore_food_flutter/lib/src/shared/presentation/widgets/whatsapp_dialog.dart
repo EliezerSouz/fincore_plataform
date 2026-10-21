@@ -59,6 +59,8 @@ class WhatsAppDialog extends StatefulWidget {
   final String? mesa;
   final String? linkCardapio;
   final String? linkRastreio;
+  final String? linkAvaliacao;
+  final String? canalOrigem;
   final String? pedidoId;
   final String? enderecoEmpresa;
   final String? statusPagamento;
@@ -78,6 +80,7 @@ class WhatsAppDialog extends StatefulWidget {
     this.pixInfo,
     this.numeroPedido,
     this.pedidoId,
+    this.canalOrigem,
     this.itens,
     this.subtotal,
     this.desconto,
@@ -96,6 +99,7 @@ class WhatsAppDialog extends StatefulWidget {
     this.mesa,
     this.linkCardapio,
     this.linkRastreio,
+    this.linkAvaliacao,
   });
 
   /// Abre o modal de WhatsApp
@@ -129,6 +133,8 @@ class WhatsAppDialog extends StatefulWidget {
     String? mesa,
     String? linkCardapio,
     String? linkRastreio,
+    String? linkAvaliacao,
+    String? canalOrigem,
   }) {
     return showDialog<bool>(
       context: context,
@@ -144,6 +150,7 @@ class WhatsAppDialog extends StatefulWidget {
         pixInfo: pixInfo,
         numeroPedido: numeroPedido,
         pedidoId: pedidoId,
+        canalOrigem: canalOrigem,
         itens: itens,
         subtotal: subtotal,
         desconto: desconto,
@@ -162,6 +169,7 @@ class WhatsAppDialog extends StatefulWidget {
         mesa: mesa,
         linkCardapio: linkCardapio,
         linkRastreio: linkRastreio,
+        linkAvaliacao: linkAvaliacao,
       ),
     );
   }
@@ -242,8 +250,10 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
       previsaoEntrega: widget.previsaoEntrega,
       entregador: widget.entregador,
       mesa: widget.mesa,
+      canalOrigem: widget.canalOrigem,
       linkCardapio: widget.linkCardapio,
       linkRastreio: widget.linkRastreio,
+      linkAvaliacao: widget.linkAvaliacao,
       chavePix: widget.pixInfo?.chaveDisplay,
       chavePixCopiaCola: widget.pixInfo?.copiaECola,
     );

@@ -296,6 +296,65 @@ void main() {
       expect(msgAprovado, contains('📍 *Endereço de Entrega:* Rua Professora Nádia Prancic Bento, 398'));
       expect(msgAprovado, isNot(contains('{"cep"')));
     });
+
+    test('Cenário 8: Resolução precisa de {canal} e {origem} a partir de canalOrigem e tipoPedido', () {
+      // 1. Pedido vindo do Cardápio Web
+      final varsWeb = WhatsAppService.gerarVariaveisInterpolacao(
+        clienteNome: 'Eliezer',
+        nomeEmpresa: 'Delivery do Eli',
+        numeroPedido: '200',
+        canalOrigem: 'cardapio_web',
+        tipoPedido: 'Entrega',
+      );
+      expect(varsWeb['{canal}'], equals('Cardápio Web'));
+      expect(varsWeb['{origem}'], equals('Cardápio Digital Online'));
+
+      // 2. Pedido vindo do WhatsApp / IA
+      final varsWhats = WhatsAppService.gerarVariaveisInterpolacao(
+        clienteNome: 'Lucas',
+        nomeEmpresa: 'Delivery do Eli',
+        numeroPedido: '201',
+        canalOrigem: 'whatsapp_ia',
+        tipoPedido: 'Entrega',
+      );
+      expect(varsWhats['{canal}'], equals('WhatsApp Chat'));
+      expect(varsWhats['{origem}'], equals('WhatsApp (IA / Atendimento)'));
+
+      // 3. Pedido feito diretamente no Balcão do PDV
+      final varsBalcao = WhatsAppService.gerarVariaveisInterpolacao(
+        clienteNome: 'João',
+        nomeEmpresa: 'Delivery do Eli',
+        numeroPedido: '202',
+        canalOrigem: 'pdv_balcao',
+        tipoPedido: 'Retirada',
+      );
+      expect(varsBalcao['{canal}'], equals('PDV Balcão'));
+      expect(varsBalcao['{origem}'], equals('Atendimento Balcão / Frente de Caixa'));
+    });
+
+    test('Cenário 9: Link inteligente {link_avaliacao} e template de pós-venda vinculado a pedido_entregue', () {
+      final vars = WhatsAppService.gerarVariaveisInterpolacao(
+        clienteNome: 'Eliezer Severino',
+        nomeEmpresa: 'Delivery do Eli',
+        numeroPedido: '555',
+        pedidoId: 'e89c-44af-88bb',
+        tenantId: '65109ff8-443f-41ce-94c8-8311dfc79764',
+        canalOrigem: 'cardapio_web',
+      );
+
+      expect(vars['{primeiro_nome}'], equals('Eliezer'));
+      expect(vars['{link_avaliacao}'], contains('/avaliacao.html?pedido=e89c-44af-88bb'));
+      expect(vars['{link_avaliacao}'], contains('tenant_id=65109ff8-443f-41ce-94c8-8311dfc79764'));
+
+      final padroes = WhatsAppService.getTemplatesPadrao(nomeEmpresa: 'Delivery do Eli');
+      final templateAvaliacao = padroes.firstWhere((t) => t.id == 'avaliacao_pos_venda');
+      expect(templateAvaliacao.evento, equals('pedido_entregue'));
+
+      final msgInterpolada = WhatsAppService.interpolarTemplate(templateAvaliacao.conteudo, vars);
+      expect(msgInterpolada, contains('Olá, Eliezer!'));
+      expect(msgInterpolada, contains('Seu pedido *#555* foi entregue com muito carinho'));
+      expect(msgInterpolada, contains(vars['{link_avaliacao}']!));
+    });
   });
 }
 
