@@ -1298,10 +1298,11 @@ class WhatsAppService {
   }
 
   /// Monta a URL oficial de avaliação/pós-venda do pedido no Cardápio Digital Web.
-  /// Formato: {cardapio_url}/avaliacao.html?pedido={num_pedido}&tenant_id={tenant_id}
+  /// Formato: {cardapio_url}/avaliacao.html?pedido={id_ou_num}&num={num_pedido}&tenant_id={tenant_id}
   static String montarUrlAvaliacaoPedido({
     required String baseUrl,
     required String numeroOuIdPedido,
+    String? numeroExibicao,
     String? tenantId,
   }) {
     final cleanBase = baseUrl.trim().isNotEmpty
@@ -1309,10 +1310,14 @@ class WhatsAppService {
         : 'https://fincore-cardapio-web.vercel.app';
     final tId = tenantId ?? (TenantContext().hasContext ? TenantContext().tenantId : '');
     final numClean = numeroOuIdPedido.replaceAll('#', '').trim();
+    final numExibClean = (numeroExibicao != null && numeroExibicao.trim().isNotEmpty && numeroExibicao.trim() != numClean)
+        ? numeroExibicao.replaceAll('#', '').trim()
+        : '';
 
     final sep = cleanBase.contains('?') ? '&' : '?';
+    final numParam = numExibClean.isNotEmpty ? '&num=$numExibClean' : '';
     final tenantParam = (tId.isNotEmpty && !cleanBase.contains('tenant_id=')) ? '&tenant_id=$tId' : '';
-    return '$cleanBase/avaliacao.html${sep}pedido=$numClean$tenantParam';
+    return '$cleanBase/avaliacao.html${sep}pedido=$numClean$numParam$tenantParam';
   }
 
   /// Monta o mapa completo de interpolação com as tags operacionais do Food Service,
@@ -1398,7 +1403,12 @@ class WhatsAppService {
 
     final linkAvaliacaoResolvido = (linkAvaliacao != null && linkAvaliacao.isNotEmpty)
         ? linkAvaliacao
-        : montarUrlAvaliacaoPedido(baseUrl: baseCardapio, numeroOuIdPedido: idParaRastreio, tenantId: tId);
+        : montarUrlAvaliacaoPedido(
+            baseUrl: baseCardapio,
+            numeroOuIdPedido: idParaRastreio,
+            numeroExibicao: numPedidoId.isNotEmpty ? numPedidoId : null,
+            tenantId: tId,
+          );
 
     // Resoluções contextuais inteligentes
     final formaPagamentoResolvida = (formaPagamento != null && formaPagamento.trim().isNotEmpty)

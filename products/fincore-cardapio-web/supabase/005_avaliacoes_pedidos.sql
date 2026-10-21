@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.avaliacoes_pedidos (
 CREATE INDEX IF NOT EXISTS idx_avaliacoes_tenant_id ON public.avaliacoes_pedidos(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_avaliacoes_pedido_id ON public.avaliacoes_pedidos(pedido_id);
 CREATE INDEX IF NOT EXISTS idx_avaliacoes_created_at ON public.avaliacoes_pedidos(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_avaliacoes_unique_pedido ON public.avaliacoes_pedidos (tenant_id, pedido_id) WHERE pedido_id IS NOT NULL;
 
 ALTER TABLE public.avaliacoes_pedidos ENABLE ROW LEVEL SECURITY;
 

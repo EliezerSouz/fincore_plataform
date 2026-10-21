@@ -426,6 +426,7 @@
     const urlParams = new URLSearchParams(window.location.search);
     const tenantIdParam = urlParams.get('tenant_id') || DEFAULT_TENANT_ID;
     const pedidoParam = urlParams.get('pedido') || '';
+    const numParam = urlParams.get('num') || '';
 
     // Estado local da tela de avaliação
     let selectedRating = 0;
@@ -487,7 +488,7 @@
     async function carregarDados() {
       try {
         // 1. Carrega dados da empresa / tenant
-        const { data: emp, error: empErr } = await sb
+        const { data: emp } = await sb
           .from('empresa')
           .select('nomeFantasia, razaoSocial, logoUrl')
           .eq('tenantId', tenantIdParam)
@@ -504,39 +505,113 @@
         }
 
         // 2. Carrega dados do pedido se informado
-        if (pedidoParam) {
-          orderBadgeEl.style.display = 'inline-block';
-          const cleanPedido = pedidoParam.replace('#', '').trim();
-          orderBadgeEl.textContent = `Pedido #${cleanPedido.substring(0, 8)}`;
+        const cleanPedido = (pedidoParam || '').replace('#', '').trim();
+        const cleanNum = (numParam || '').replace('#', '').trim();
 
-          // Busca se o pedido existe
-          const { data: ped } = await sb
-            .from('pedido')
-            .select('id, numero, clienteNome, clienteTelefone, canalOrigem')
-            .eq('tenantId', tenantIdParam)
-            .or(`id.eq.${cleanPedido},numero.eq.${cleanPedido}`)
-            .limit(1)
-            .maybeSingle();
+        if (cleanNum) {
+          orderBadgeEl.style.display = 'inline-block';
+          orderBadgeEl.textContent = `Pedido #${cleanNum}`;
+        }
+
+        if (cleanPedido || cleanNum) {
+          const isUuid = cleanPedido.includes('-');
+          const numOnly = parseInt(cleanNum || cleanPedido, 10);
+
+          let ped = null;
+
+          // Busca A: por UUID se fornecido
+          if (isUuid) {
+            const { data: pedUuid } = await sb
+              .from('pedido')
+              .select('id, tenantId, numeroPedido, clienteNomeAvulso, clienteTelefoneAvulso, clienteId, canalOrigem')
+              .eq('id', cleanPedido)
+              .maybeSingle();
+            if (pedUuid) ped = pedUuid;
+          }
+
+          // Busca B: por numeroPedido
+          if (!ped && !isNaN(numOnly) && numOnly > 0) {
+            const { data: pedNumRows } = await sb
+              .from('pedido')
+              .select('id, tenantId, numeroPedido, clienteNomeAvulso, clienteTelefoneAvulso, clienteId, canalOrigem')
+              .eq('tenantId', tenantIdParam)
+              .eq('numeroPedido', numOnly)
+              .order('createdAt', { ascending: false })
+              .limit(1);
+            if (pedNumRows && pedNumRows.length > 0) {
+              ped = pedNumRows[0];
+            }
+          }
+
+          // Busca C: fallback geral por id
+          if (!ped && cleanPedido) {
+            const { data: pedAny } = await sb
+              .from('pedido')
+              .select('id, tenantId, numeroPedido, clienteNomeAvulso, clienteTelefoneAvulso, clienteId, canalOrigem')
+              .eq('id', cleanPedido)
+              .maybeSingle();
+            if (pedAny) ped = pedAny;
+          }
 
           if (ped) {
             orderData = ped;
-            if (ped.clienteNome) {
-              const primeiroNome = ped.clienteNome.split(' ')[0];
+
+            // Resolve dados do cliente
+            let nomeCli = ped.clienteNomeAvulso || '';
+            let telCli = ped.clienteTelefoneAvulso || '';
+
+            // Se o pedido estiver vinculado a clienteId e faltar nome ou telefone, consulta tabela cliente
+            if (ped.clienteId && (!nomeCli || !telCli)) {
+              try {
+                const { data: cliData } = await sb
+                  .from('cliente')
+                  .select('nome, telefone, celular, whatsapp')
+                  .eq('id', ped.clienteId)
+                  .maybeSingle();
+                if (cliData) {
+                  if (!nomeCli) nomeCli = cliData.nome || '';
+                  if (!telCli) telCli = cliData.whatsapp || cliData.celular || cliData.telefone || '';
+                }
+              } catch (_) {}
+            }
+
+            orderData._resolvedClienteNome = nomeCli || 'Cliente';
+            orderData._resolvedClienteTelefone = telCli || null;
+            orderData._resolvedNumeroPedido = (ped.numeroPedido != null) ? String(ped.numeroPedido) : (cleanNum || cleanPedido);
+
+            // Atualiza badge com número legível
+            orderBadgeEl.style.display = 'inline-block';
+            orderBadgeEl.textContent = `Pedido #${orderData._resolvedNumeroPedido}`;
+
+            // Saudação personalizada
+            if (nomeCli) {
+              const primeiroNome = nomeCli.split(' ')[0];
               document.getElementById('greeting-title').textContent = `Olá, ${primeiroNome}! Como foi sua experiência?`;
             }
 
-            // Verifica se este pedido já foi avaliado anteriormente
-            const { data: jaAvaliado } = await sb
+            // 3. Prevenção de avaliações duplicadas: verifica se este pedido já foi avaliado
+            let evalQuery = sb
               .from('avaliacoes_pedidos')
-              .select('id, nota, tags, comentario')
-              .eq('tenant_id', tenantIdParam)
-              .or(`pedido_id.eq.${ped.id},numero_pedido.eq.${ped.numero}`)
-              .limit(1)
-              .maybeSingle();
+              .select('id, nota, tags, comentario, created_at')
+              .eq('tenant_id', tenantIdParam);
+
+            if (ped.id && ped.numeroPedido != null) {
+              evalQuery = evalQuery.or(`pedido_id.eq.${ped.id},numero_pedido.eq.${ped.numeroPedido}`);
+            } else if (ped.id) {
+              evalQuery = evalQuery.eq('pedido_id', ped.id);
+            } else if (orderData._resolvedNumeroPedido) {
+              evalQuery = evalQuery.eq('numero_pedido', orderData._resolvedNumeroPedido);
+            }
+
+            const { data: jaAvaliado } = await evalQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
 
             if (jaAvaliado) {
-              mostrarSucesso(true);
+              mostrarSucesso(true, jaAvaliado);
+              return;
             }
+          } else if (cleanNum) {
+            orderBadgeEl.style.display = 'inline-block';
+            orderBadgeEl.textContent = `Pedido #${cleanNum}`;
           }
         }
       } catch (err) {
@@ -615,12 +690,31 @@
       btnSubmit.innerHTML = `<span>Gravando avaliação...</span> <span class="spinner">⏳</span>`;
 
       try {
+        const cleanPedido = (pedidoParam || '').replace('#', '').trim();
+        const numFinal = orderData?._resolvedNumeroPedido || (numParam ? numParam.replace('#', '').trim() : (cleanPedido || null));
+
+        // Checagem preventiva contra duplicidade
+        if (orderData?.id) {
+          const { data: jaExiste } = await sb
+            .from('avaliacoes_pedidos')
+            .select('id, nota')
+            .eq('tenant_id', tenantIdParam)
+            .eq('pedido_id', orderData.id)
+            .limit(1)
+            .maybeSingle();
+
+          if (jaExiste) {
+            mostrarSucesso(true, jaExiste);
+            return;
+          }
+        }
+
         const payload = {
           tenant_id: tenantIdParam,
-          pedido_id: orderData?.id || null,
-          numero_pedido: orderData?.numero || pedidoParam.replace('#', '').trim() || null,
-          cliente_nome: orderData?.clienteNome || 'Cliente',
-          cliente_telefone: orderData?.clienteTelefone || null,
+          pedido_id: orderData?.id || (cleanPedido.includes('-') ? cleanPedido : null),
+          numero_pedido: numFinal,
+          cliente_nome: orderData?._resolvedClienteNome || 'Cliente',
+          cliente_telefone: orderData?._resolvedClienteTelefone || null,
           nota: selectedRating,
           tags: Array.from(selectedTags),
           comentario: commentText.value.trim() || null,
@@ -629,7 +723,14 @@
         };
 
         const { error } = await sb.from('avaliacoes_pedidos').insert(payload);
-        if (error) throw error;
+        if (error) {
+          // Se for erro de duplicidade única do Postgres (code 23505)
+          if (error.code === '23505' || (error.message && error.message.includes('unique'))) {
+            mostrarSucesso(true);
+            return;
+          }
+          throw error;
+        }
 
         mostrarSucesso(false);
       } catch (err) {
@@ -640,12 +741,13 @@
       }
     }
 
-    function mostrarSucesso(jaAvaliado = false) {
+    function mostrarSucesso(jaAvaliado = false, dadosAvaliacao = null) {
       formView.style.display = 'none';
       successView.style.display = 'block';
       if (jaAvaliado) {
         successView.querySelector('.section-title').textContent = 'Pedido já avaliado!';
-        successView.querySelector('.section-subtitle').textContent = 'Você já compartilhou seu feedback sobre este pedido. Muito obrigado pela sua colaboração!';
+        const notaMsg = (dadosAvaliacao && dadosAvaliacao.nota) ? ` com nota ⭐ ${dadosAvaliacao.nota}/5` : '';
+        successView.querySelector('.section-subtitle').textContent = `Você já avaliou este pedido${notaMsg}. Toda a nossa equipe agradece pelo seu feedback e preferência!`;
       }
     }
 
