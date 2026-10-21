@@ -872,14 +872,11 @@ class PdvExpressController extends ChangeNotifier {
 
     // 1. Cliente
     if (pedidoIa.clienteNome != null || pedidoIa.clienteTelefone != null) {
-      Cliente? achado;
-      if (pedidoIa.clienteTelefone != null && pedidoIa.clienteTelefone!.isNotEmpty) {
-        final telLimpo = pedidoIa.clienteTelefone!.replaceAll(RegExp(r'\D'), '');
-        achado = _clientes.where((c) {
-          final cTel = c.telefone.replaceAll(RegExp(r'\D'), '');
-          return cTel.isNotEmpty && (cTel == telLimpo || telLimpo.endsWith(cTel) || cTel.endsWith(telLimpo));
-        }).firstOrNull;
-      }
+      final achado = WhatsAppOrderAiParser.encontrarMelhorMatchCliente(
+        clientes: _clientes,
+        telefone: pedidoIa.clienteTelefone,
+        nome: pedidoIa.clienteNome,
+      );
 
       updateCliente(DadosCliente(
         id: achado?.id,

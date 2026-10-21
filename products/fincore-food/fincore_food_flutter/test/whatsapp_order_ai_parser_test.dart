@@ -166,5 +166,62 @@ _ kibe : 70
       expect(resultado.itens[6].quantidade, 80.0);
       expect(resultado.itens[7].quantidade, 70.0);
     });
+
+    test('Deve extrair nome do remetente e itens de conversa copiada do WhatsApp com timestamps', () {
+      const mensagemConversa = '''
+[08:45, 20/10/2026] Lucas S&S União Quimica: Oi bom dia
+[08:45, 20/10/2026] Lucas S&S União Quimica: Tudo bem?
+[08:45, 20/10/2026] Lucas S&S União Quimica: Passando pra confirmar a quantidade de salgadinhos com vcs
+[09:04, 20/10/2026] Lucas S&S União Quimica: _ coxinha: 90
+_ bolinha de queijo : 100
+_ bolinha de Calabresa : 60
+_ risole de carne : 45
+_ risole de pizza : 65
+_ enroladinho de salsicha :35
+_ cigarrete : 80
+_ kibe : 70
+''';
+
+      final resultado = parser.parseLocal(mensagemConversa);
+
+      expect(resultado.clienteNome, 'Lucas S&S União Quimica');
+      expect(resultado.itens.length, 8);
+      expect(resultado.itens[0].nomeIdentificado, 'coxinha');
+      expect(resultado.itens[0].quantidade, 90.0);
+      expect(resultado.itens[1].nomeIdentificado, 'bolinha de queijo');
+      expect(resultado.itens[1].quantidade, 100.0);
+
+      // Testa a busca inteligente de cliente por nome/substring
+      final agora = DateTime.now();
+      final clientesDb = [
+        Cliente(
+          id: 'cli-1',
+          tenantId: 't1',
+          nome: 'Lucas União Química',
+          telefone: '19987654321',
+          observacoes: '',
+          ativo: true,
+          metadata: SyncMetadata(version: 1, createdAt: agora, updatedAt: agora, createdBy: 'u', updatedBy: 'u'),
+        ),
+        Cliente(
+          id: 'cli-2',
+          tenantId: 't1',
+          nome: 'Padaria Central',
+          telefone: '19999999999',
+          observacoes: '',
+          ativo: true,
+          metadata: SyncMetadata(version: 1, createdAt: agora, updatedAt: agora, createdBy: 'u', updatedBy: 'u'),
+        ),
+      ];
+
+      final match = WhatsAppOrderAiParser.encontrarMelhorMatchCliente(
+        clientes: clientesDb,
+        nome: resultado.clienteNome,
+      );
+
+      expect(match, isNotNull);
+      expect(match!.id, 'cli-1');
+      expect(match.nome, 'Lucas União Química');
+    });
   });
 }

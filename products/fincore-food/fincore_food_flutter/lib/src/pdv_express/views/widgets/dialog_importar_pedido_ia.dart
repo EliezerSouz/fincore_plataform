@@ -54,18 +54,16 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
   }
 
   void _verificarClientePorTelefone(String raw) {
-    final limpo = raw.replaceAll(RegExp(r'\D'), '');
-    if (limpo.length >= 8) {
-      final achado = widget.controller.clientes.where((c) {
-        final cTel = c.telefone.replaceAll(RegExp(r'\D'), '');
-        return cTel.isNotEmpty && (cTel == limpo || limpo.endsWith(cTel) || cTel.endsWith(limpo));
-      }).firstOrNull;
-      setState(() => _clienteLocalizado = achado);
-    } else {
-      if (_clienteLocalizado != null) {
-        setState(() => _clienteLocalizado = null);
-      }
-    }
+    _verificarCliente(telefone: raw);
+  }
+
+  void _verificarCliente({String? telefone, String? nome}) {
+    final achado = WhatsAppOrderAiParser.encontrarMelhorMatchCliente(
+      clientes: widget.controller.clientes,
+      telefone: telefone ?? _telefoneController.text.trim(),
+      nome: nome ?? _parsedResult?.clienteNome,
+    );
+    setState(() => _clienteLocalizado = achado);
   }
 
   Future<void> _carregarConfiguracaoIa() async {
@@ -132,11 +130,22 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
         result.clienteTelefone = _telefoneController.text.trim();
       } else if (result.clienteTelefone != null && result.clienteTelefone!.isNotEmpty) {
         _telefoneController.text = result.clienteTelefone!;
-        _verificarClientePorTelefone(result.clienteTelefone!);
       }
 
-      if (_clienteLocalizado != null) {
-        result.clienteNome = _clienteLocalizado!.nome;
+      // Busca inteligente do cliente na base local por telefone e por nome
+      final achado = WhatsAppOrderAiParser.encontrarMelhorMatchCliente(
+        clientes: widget.controller.clientes,
+        telefone: result.clienteTelefone,
+        nome: result.clienteNome,
+      );
+
+      _clienteLocalizado = achado;
+      if (achado != null) {
+        result.clienteNome = achado.nome;
+        if (_telefoneController.text.trim().isEmpty && achado.telefone.isNotEmpty) {
+          result.clienteTelefone = achado.telefone;
+          _telefoneController.text = achado.telefone;
+        }
       }
 
       if (mounted) {

@@ -3834,7 +3834,7 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
 
               const SizedBox(height: 14),
 
-              // Barra de Ações: Testar Conexão e Salvar
+              // Barra de Ações: Testar Conexão
               Row(
                 children: [
                   ElevatedButton.icon(
@@ -3852,21 +3852,6 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0284C7),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    onPressed: salvar,
-                    icon: const Icon(Icons.save_rounded, size: 16),
-                    label: const Text(
-                      'Salvar Configuração',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF16A34A),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

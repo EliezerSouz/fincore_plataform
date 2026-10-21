@@ -355,10 +355,42 @@ class WhatsAppOrderAiParser {
       tipoLogistica = 'Retirada';
     }
 
+    // Regex para identificar cabeçalhos típicos de conversas exportadas ou copiadas do WhatsApp:
+    // Ex: "[08:45, 20/10/2026] Lucas S&S União Quimica: Oi bom dia"
+    // Ex: "20/10/2026 08:45 - Lucas S&S: Tudo bem?"
+    final headerRegex = RegExp(
+      r'^(?:\[\d{1,2}:\d{2}(?::\d{2})?(?:,\s*\d{1,2}[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?)?\]|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}[,\s]+\d{1,2}:\d{2}(?::\d{2})?\s*[-–])\s*([^:\n]+?):\s*(.*)$',
+    );
+
     // 5. Varredura Linha a Linha para Campos Estruturados e Itens
-    for (final line in lines) {
-      final cleanLine = _limparFormatacaoWhatsApp(line);
+    for (final rawLine in lines) {
+      String lineToProcess = rawLine;
+
+      // Se a linha começar com cabeçalho de mensagem do WhatsApp, extrai o remetente
+      final headerMatch = headerRegex.firstMatch(rawLine);
+      if (headerMatch != null) {
+        final sender = headerMatch.group(1)!.trim();
+        lineToProcess = headerMatch.group(2)!.trim();
+
+        // Se o remetente for um telefone
+        final digitsSender = sender.replaceAll(RegExp(r'\D'), '');
+        if (digitsSender.length >= 8 && RegExp(r'^\+?\d[\d\s\-\(\)]+$').hasMatch(sender)) {
+          clienteTelefone ??= _formatarTelefone(digitsSender);
+        } else if (sender.isNotEmpty) {
+          final senderLower = sender.toLowerCase();
+          if (!senderLower.startsWith('você') &&
+              !senderLower.startsWith('voce') &&
+              senderLower != 'eu' &&
+              !senderLower.contains('atendimento') &&
+              !senderLower.contains('suporte')) {
+            clienteNome ??= sender;
+          }
+        }
+      }
+
+      final cleanLine = _limparFormatacaoWhatsApp(lineToProcess);
       final lowerLine = cleanLine.toLowerCase();
+      if (cleanLine.isEmpty) continue;
 
       // Linhas puramente de cabeçalho ou separadores
       if (lowerLine.contains('novo pedido') ||
@@ -528,6 +560,87 @@ class WhatsAppOrderAiParser {
       metodoProcessamento: 'local_nlp',
     );
   }
+
+  /// Localiza o cliente mais compatível na base local por telefone ou por nome/apelido
+  static Cliente? encontrarMelhorMatchCliente({
+    required List<Cliente> clientes,
+    String? telefone,
+    String? nome,
+  }) {
+    if (clientes.isEmpty) return null;
+
+    // 1. Busca prioritária por telefone
+    if (telefone != null && telefone.trim().isNotEmpty) {
+      final limpo = telefone.replaceAll(RegExp(r'\D'), '');
+      if (limpo.length >= 8) {
+        final porTel = clientes.where((c) {
+          final cTel = c.telefone.replaceAll(RegExp(r'\D'), '');
+          return cTel.isNotEmpty && (cTel == limpo || limpo.endsWith(cTel) || cTel.endsWith(limpo));
+        }).firstOrNull;
+        if (porTel != null) return porTel;
+      }
+    }
+
+    // 2. Busca inteligente por Nome ou Apelido
+    if (nome != null && nome.trim().isNotEmpty) {
+      final nomeNorm = _normalizarTextoParaComparacao(nome);
+      if (nomeNorm.length < 2) return null;
+
+      // 2.1 Match Exato
+      for (final c in clientes) {
+        final cNomeNorm = _normalizarTextoParaComparacao(c.nome);
+        if (cNomeNorm == nomeNorm) return c;
+        if (c.apelido != null && _normalizarTextoParaComparacao(c.apelido!) == nomeNorm) return c;
+      }
+
+      // 2.2 Match por Substring / Contenção / Tokens Relevantes
+      Cliente? melhorCandidato;
+      double melhorScore = 0.0;
+
+      final tokensNome = nomeNorm.split(RegExp(r'\s+')).where((t) => t.length > 2).toSet();
+
+      for (final c in clientes) {
+        final cNomeNorm = _normalizarTextoParaComparacao(c.nome);
+        final cApelidoNorm = c.apelido != null ? _normalizarTextoParaComparacao(c.apelido!) : '';
+
+        // Contenção direta (um contém o outro)
+        if (cNomeNorm.length >= 3 && (nomeNorm.contains(cNomeNorm) || cNomeNorm.contains(nomeNorm))) {
+          final score = 0.90 + (cNomeNorm.length / (nomeNorm.length + cNomeNorm.length)) * 0.09;
+          if (score > melhorScore) {
+            melhorScore = score;
+            melhorCandidato = c;
+          }
+        } else if (cApelidoNorm.length >= 3 && (nomeNorm.contains(cApelidoNorm) || cApelidoNorm.contains(nomeNorm))) {
+          return c; // Apelido direto
+        } else {
+          // Tokens em comum (ex: "Lucas", "União", "Química")
+          final tokensCliente = cNomeNorm.split(RegExp(r'\s+')).where((t) => t.length > 2).toSet();
+          final intersecao = tokensNome.intersection(tokensCliente).length;
+          if (intersecao >= 1) {
+            final score = 0.60 + (intersecao * 0.15);
+            if (score > melhorScore) {
+              melhorScore = score;
+              melhorCandidato = c;
+            }
+          } else {
+            // Levenshtein fuzzy
+            final sim = calcularSimilaridade(cNomeNorm, nomeNorm);
+            if (sim >= 0.70 && sim > melhorScore) {
+              melhorScore = sim;
+              melhorCandidato = c;
+            }
+          }
+        }
+      }
+
+      if (melhorCandidato != null && melhorScore >= 0.65) {
+        return melhorCandidato;
+      }
+    }
+
+    return null;
+  }
+
 
   /// Limpa formatação Markdown do WhatsApp (*negrito*, _itálico_, ~tachado~)
   static String _limparFormatacaoWhatsApp(String str) {
