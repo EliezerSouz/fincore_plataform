@@ -9,11 +9,14 @@ class PdvPage extends StatelessWidget {
   final OrdemPreparo? ordemParaEditar;
   final Cliente? clienteInicial;
   final String? repetirPedidoId;
+  final VoidCallback? onVoltarOuCancelar;
+
   const PdvPage({
     super.key,
     this.ordemParaEditar,
     this.clienteInicial,
     this.repetirPedidoId,
+    this.onVoltarOuCancelar,
   });
 
   @override
@@ -24,6 +27,7 @@ class PdvPage extends StatelessWidget {
         ordemParaEditar: ordemParaEditar,
         clienteInicial: clienteInicial,
         repetirPedidoId: repetirPedidoId,
+        onVoltarOuCancelar: onVoltarOuCancelar,
       ),
     );
   }

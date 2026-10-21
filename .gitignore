@@ -45,4 +45,6 @@ backups/
 fincore_food/
 releases/
 *.dpapi
-
+.env
+.env.*
+!.env.example

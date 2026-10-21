@@ -78,27 +78,6 @@ class _SignupPageState extends State<SignupPage> {
     }
   }
 
-  Future<void> _cadastrarComGoogle() async {
-    setState(() => _isLoading = true);
-    try {
-      final redirectUrl = kIsWeb ? null : 'io.supabase.fincore://login-callback/';
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: redirectUrl,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao conectar com Google: $e'),
-            backgroundColor: FincoreColors.danger,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
 
   Future<void> _submitSignup() async {
     if (!_formKey.currentState!.validate()) return;
@@ -299,124 +278,149 @@ class _SignupPageState extends State<SignupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: FincoreColors.background,
+      backgroundColor: const Color(0xFF090D1A),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: FincoreColors.textPrimary),
+          tooltip: 'Voltar ao Login',
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 450),
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: FincoreColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: FincoreColors.border, width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                )
-              ]
-            ),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'CRIAR CONTA',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: FincoreColors.textPrimary,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _currentStep == 0 
-                        ? 'Etapa 1 de 2: Seus Dados de Acesso'
-                        : 'Etapa 2 de 2: Dados do Estabelecimento',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: FincoreColors.primary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  LinearProgressIndicator(
-                    value: (_currentStep + 1) / 2,
-                    backgroundColor: FincoreColors.border,
-                    valueColor: AlwaysStoppedAnimation(FincoreColors.primary),
-                    minHeight: 6,
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 380),
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: _currentStep == 0 ? _buildStep1() : _buildStep2(),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      if (_currentStep > 0)
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _isLoading ? null : _prevStep,
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: FincoreColors.border),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: const Text('VOLTAR', style: TextStyle(color: FincoreColors.textPrimary)),
-                          ),
-                        )
-                      else
-                        const Spacer(),
-                      
-                      if (_currentStep > 0) const SizedBox(width: 16),
-
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _nextStep,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: FincoreColors.primary,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  height: 18,
-                                  width: 18,
-                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                )
-                              : Text(_currentStep == 0 ? 'AVANÇAR' : 'CADASTRAR', 
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFF090D1A),
+              Color(0xFF0F172A),
+              Color(0xFF131D38),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 860),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 36),
+              decoration: BoxDecoration(
+                color: FincoreColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: FincoreColors.border, width: 1.2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    blurRadius: 30,
+                    offset: const Offset(0, 14),
                   ),
                 ],
+              ),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'CRIAR CONTA',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: FincoreColors.textPrimary,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _currentStep == 0 
+                          ? 'Etapa 1 de 2: Seus Dados de Acesso'
+                          : 'Etapa 2 de 2: Dados do Estabelecimento',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: FincoreColors.primary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    LinearProgressIndicator(
+                      value: (_currentStep + 1) / 2,
+                      backgroundColor: FincoreColors.border,
+                      valueColor: AlwaysStoppedAnimation(FincoreColors.primary),
+                      minHeight: 6,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    const SizedBox(height: 28),
+                    
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: _currentStep == 0 ? _buildStep1() : _buildStep2(),
+                    ),
+
+                    const SizedBox(height: 32),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        if (_currentStep > 0)
+                          Expanded(
+                            flex: 1,
+                            child: OutlinedButton(
+                              onPressed: _isLoading ? null : _prevStep,
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: FincoreColors.border, width: 1.2),
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text(
+                                'VOLTAR',
+                                style: TextStyle(
+                                  color: FincoreColors.textPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          const Spacer(),
+                        
+                        if (_currentStep > 0) const SizedBox(width: 20),
+
+                        Expanded(
+                          flex: 1,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _nextStep,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: FincoreColors.primary,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              elevation: 2,
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : Text(
+                                    _currentStep == 0 ? 'AVANÇAR' : 'CADASTRAR', 
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -430,169 +434,155 @@ class _SignupPageState extends State<SignupPage> {
       key: const ValueKey('step1'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Botão de Cadastro Rápido com Google
-        SizedBox(
-          width: double.infinity,
-          height: 46,
-          child: OutlinedButton(
-            onPressed: _isLoading ? null : _cadastrarComGoogle,
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: FincoreColors.border, width: 1.2),
-              backgroundColor: FincoreColors.background.withValues(alpha: 0.5),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _nameController,
+                style: const TextStyle(color: FincoreColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'Nome Completo',
+                  hintText: 'Seu nome e sobrenome',
+                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                  prefixIcon: const Icon(Icons.person_outline, color: FincoreColors.textMuted),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: FincoreColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: FincoreColors.primary),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) return 'Informe seu nome completo';
+                  if (value.trim().length < 3) return 'Nome muito curto';
+                  return null;
+                },
               ),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
+            const SizedBox(width: 16),
+            Expanded(
+              child: TextFormField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                style: const TextStyle(color: FincoreColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'E-mail Válido',
+                  hintText: 'exemplo@seuemail.com',
+                  hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                  prefixIcon: const Icon(Icons.email_outlined, color: FincoreColors.textMuted),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: FincoreColors.border),
                   ),
-                  child: const Icon(
-                    Icons.g_mobiledata_rounded,
-                    color: Color(0xFF4285F4),
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Cadastrar com o Google',
-                  style: TextStyle(
-                    color: FincoreColors.textPrimary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
-              ],
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) return 'Informe seu e-mail';
+                  final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+                  if (!emailRegex.hasMatch(value.trim())) {
+                    return 'Informe um e-mail válido (ex: contato@empresa.com.br)';
+                  }
+                  return null;
+                },
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // Divisor
-        Row(
-          children: [
-            Expanded(child: Container(height: 1, color: FincoreColors.border)),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: Text('ou crie com e-mail e senha', style: TextStyle(color: FincoreColors.textMuted, fontSize: 11)),
-            ),
-            Expanded(child: Container(height: 1, color: FincoreColors.border)),
           ],
         ),
-        const SizedBox(height: 14),
-
-        TextFormField(
-          controller: _nameController,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            labelText: 'Nome Completo',
-            labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-            prefixIcon: const Icon(Icons.person_outline, color: FincoreColors.textMuted),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
-            ),
-          ),
-          validator: (value) {
-            if (value == null || value.trim().isEmpty) return 'Informe seu nome completo';
-            if (value.trim().length < 3) return 'Nome muito curto';
-            return null;
-          },
-        ),
-        const SizedBox(height: 14),
-        TextFormField(
-          controller: _emailController,
-          keyboardType: TextInputType.emailAddress,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            labelText: 'E-mail Válido',
-            hintText: 'exemplo@seuemail.com',
-            hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 12),
-            labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-            prefixIcon: const Icon(Icons.email_outlined, color: FincoreColors.textMuted),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
-            ),
-          ),
-          validator: (value) {
-            if (value == null || value.trim().isEmpty) return 'Informe seu e-mail';
-            final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
-            if (!emailRegex.hasMatch(value.trim())) {
-              return 'Informe um e-mail válido (ex: contato@empresa.com.br)';
-            }
-            return null;
-          },
-        ),
-        const SizedBox(height: 14),
-        TextFormField(
-          controller: _passwordController,
-          obscureText: _obscureText,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            labelText: 'Senha de Acesso',
-            labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-            prefixIcon: const Icon(Icons.lock_outlined, color: FincoreColors.textMuted),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscureText ? Icons.lock_outlined : Icons.lock_open_outlined,
-                color: FincoreColors.textMuted,
+        const SizedBox(height: 18),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _passwordController,
+                obscureText: _obscureText,
+                style: const TextStyle(color: FincoreColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'Senha de Acesso',
+                  hintText: 'Mínimo de 8 caracteres',
+                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                  prefixIcon: const Icon(Icons.lock_outlined, color: FincoreColors.textMuted),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureText ? Icons.lock_outlined : Icons.lock_open_outlined,
+                      color: FincoreColors.textMuted,
+                    ),
+                    onPressed: () => setState(() => _obscureText = !_obscureText),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: FincoreColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: FincoreColors.primary),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) return 'Informe uma senha';
+                  if (value.length < 8) return 'Mínimo de 8 caracteres';
+                  if (!value.contains(RegExp(r'[0-9]'))) return 'Deve conter pelo menos 1 número';
+                  if (!value.contains(RegExp(r'[A-Z]'))) return 'Deve conter pelo menos 1 letra maiúscula';
+                  return null;
+                },
               ),
-              onPressed: () => setState(() => _obscureText = !_obscureText),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
+            const SizedBox(width: 16),
+            Expanded(
+              child: TextFormField(
+                controller: _confirmPasswordController,
+                obscureText: _obscureText,
+                style: const TextStyle(color: FincoreColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'Confirmar Senha',
+                  hintText: 'Repita sua senha',
+                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                  prefixIcon: const Icon(Icons.lock_outlined, color: FincoreColors.textMuted),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: FincoreColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: FincoreColors.primary),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) return 'Repita sua senha';
+                  if (value != _passwordController.text) return 'As senhas não coincidem';
+                  return null;
+                },
+              ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
-            ),
-          ),
-          validator: (value) {
-            if (value == null || value.isEmpty) return 'Informe uma senha';
-            if (value.length < 8) return 'Mínimo de 8 caracteres';
-            if (!value.contains(RegExp(r'[0-9]'))) return 'Deve conter pelo menos 1 número';
-            if (!value.contains(RegExp(r'[A-Z]'))) return 'Deve conter pelo menos 1 letra maiúscula';
-            return null;
-          },
+          ],
         ),
-        const SizedBox(height: 14),
-        TextFormField(
-          controller: _confirmPasswordController,
-          obscureText: _obscureText,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            labelText: 'Confirmar Senha',
-            labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-            prefixIcon: const Icon(Icons.lock_outlined, color: FincoreColors.textMuted),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
-            ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: FincoreColors.background.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: FincoreColors.border.withValues(alpha: 0.5)),
           ),
-          validator: (value) {
-            if (value == null || value.isEmpty) return 'Repita sua senha';
-            if (value != _passwordController.text) return 'As senhas não coincidem';
-            return null;
-          },
+          child: const Row(
+            children: [
+              Icon(Icons.info_outline, size: 16, color: FincoreColors.textMuted),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'A senha deve conter no mínimo 8 caracteres, incluindo pelo menos 1 número e 1 letra maiúscula.',
+                  style: TextStyle(fontSize: 12, color: FincoreColors.textMuted),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -603,47 +593,57 @@ class _SignupPageState extends State<SignupPage> {
       key: const ValueKey('step2'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextFormField(
-          controller: _razaoSocialController,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            labelText: 'Razão Social / Nome da Empresa',
-            labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-            prefixIcon: const Icon(Icons.business_outlined, color: FincoreColors.textMuted),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
-            ),
-          ),
-          validator: (value) {
-            if (value == null || value.trim().isEmpty) return 'Informe a Razão Social';
-            return null;
-          },
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          controller: _nomeFantasiaController,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            labelText: 'Nome Fantasia (Como é conhecido)',
-            labelStyle: const TextStyle(color: FincoreColors.textSecondary),
-            prefixIcon: const Icon(Icons.storefront_outlined, color: FincoreColors.textMuted),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _razaoSocialController,
+                style: const TextStyle(color: FincoreColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'Razão Social / Nome da Empresa',
+                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                  prefixIcon: const Icon(Icons.business_outlined, color: FincoreColors.textMuted),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: FincoreColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: FincoreColors.primary),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) return 'Informe a Razão Social';
+                  return null;
+                },
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: TextFormField(
+                controller: _nomeFantasiaController,
+                style: const TextStyle(color: FincoreColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'Nome Fantasia (Como é conhecido)',
+                  labelStyle: const TextStyle(color: FincoreColors.textSecondary),
+                  prefixIcon: const Icon(Icons.storefront_outlined, color: FincoreColors.textMuted),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: FincoreColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: FincoreColors.primary),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: TextFormField(
@@ -655,21 +655,21 @@ class _SignupPageState extends State<SignupPage> {
                   labelStyle: const TextStyle(color: FincoreColors.textSecondary),
                   prefixIcon: const Icon(Icons.badge_outlined, color: FincoreColors.textMuted),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: const BorderSide(color: FincoreColors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) return 'Informe CNPJ/CPF';
+                  if (value == null || value.trim().isEmpty) return 'Informe o CNPJ/CPF';
                   return null;
                 },
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 16),
             Expanded(
               child: TextFormField(
                 controller: _telefoneController,
@@ -681,11 +681,11 @@ class _SignupPageState extends State<SignupPage> {
                   labelStyle: const TextStyle(color: FincoreColors.textSecondary),
                   prefixIcon: const Icon(Icons.phone_outlined, color: FincoreColors.textMuted),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: const BorderSide(color: FincoreColors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: FincoreColors.primary),
                   ),
                 ),
@@ -697,14 +697,14 @@ class _SignupPageState extends State<SignupPage> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 18),
 
         // ─── ENDEREÇO DO ESTABELECIMENTO COM VIACEP ─────────────────────────
         Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: FincoreColors.background,
-            borderRadius: BorderRadius.circular(10),
+            color: FincoreColors.background.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: FincoreColors.border),
           ),
           child: Column(
@@ -712,13 +712,33 @@ class _SignupPageState extends State<SignupPage> {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.location_on_outlined, color: Color(0xFF10B981), size: 18),
-                  SizedBox(width: 6),
-                  Text('Endereço do Estabelecimento', style: TextStyle(color: FincoreColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 12.5)),
+                  Icon(Icons.location_on_outlined, color: Color(0xFF10B981), size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Endereço do Estabelecimento',
+                    style: TextStyle(
+                      color: FincoreColors.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Preenchimento automático por CEP',
+                      textAlign: TextAlign.end,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: FincoreColors.textMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     flex: 4,
@@ -729,21 +749,22 @@ class _SignupPageState extends State<SignupPage> {
                       style: const TextStyle(color: FincoreColors.textPrimary),
                       decoration: InputDecoration(
                         labelText: 'CEP',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
-                        prefixIcon: const Icon(Icons.pin_drop_outlined, color: FincoreColors.textMuted, size: 18),
+                        hintText: '00000-000',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                        prefixIcon: const Icon(Icons.pin_drop_outlined, color: FincoreColors.textMuted, size: 20),
                         suffixIcon: _buscandoCep
-                            ? const SizedBox(width: 16, height: 16, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
+                            ? const SizedBox(width: 18, height: 18, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
                             : IconButton(
-                                icon: Icon(Icons.search_rounded, size: 18, color: FincoreColors.primary),
+                                icon: Icon(Icons.search_rounded, size: 20, color: FincoreColors.primary),
                                 tooltip: 'Buscar CEP',
                                 onPressed: () => _buscarCep(_cepController.text),
                               ),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(color: FincoreColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: FincoreColors.primary),
                         ),
                       ),
@@ -754,21 +775,22 @@ class _SignupPageState extends State<SignupPage> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 14),
                   Expanded(
                     flex: 6,
                     child: TextFormField(
                       controller: _logradouroController,
                       style: const TextStyle(color: FincoreColors.textPrimary),
                       decoration: InputDecoration(
-                        labelText: 'Rua / Avenida',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                        labelText: 'Rua / Logradouro / Avenida',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                        prefixIcon: const Icon(Icons.map_outlined, color: FincoreColors.textMuted, size: 20),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(color: FincoreColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: FincoreColors.primary),
                         ),
                       ),
@@ -776,8 +798,9 @@ class _SignupPageState extends State<SignupPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 14),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     flex: 3,
@@ -786,53 +809,54 @@ class _SignupPageState extends State<SignupPage> {
                       style: const TextStyle(color: FincoreColors.textPrimary),
                       decoration: InputDecoration(
                         labelText: 'Número',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(color: FincoreColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: FincoreColors.primary),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 14),
                   Expanded(
                     flex: 4,
                     child: TextFormField(
                       controller: _complementoController,
                       style: const TextStyle(color: FincoreColors.textPrimary),
                       decoration: InputDecoration(
-                        labelText: 'Compl. (opcional)',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                        labelText: 'Complemento (opcional)',
+                        hintText: 'Sala, Bloco, Loja...',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(color: FincoreColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: FincoreColors.primary),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 14),
                   Expanded(
-                    flex: 4,
+                    flex: 5,
                     child: TextFormField(
                       controller: _bairroController,
                       style: const TextStyle(color: FincoreColors.textPrimary),
                       decoration: InputDecoration(
                         labelText: 'Bairro',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(color: FincoreColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: FincoreColors.primary),
                         ),
                       ),
@@ -840,44 +864,47 @@ class _SignupPageState extends State<SignupPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 14),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    flex: 7,
+                    flex: 8,
                     child: TextFormField(
                       controller: _cidadeController,
                       style: const TextStyle(color: FincoreColors.textPrimary),
                       decoration: InputDecoration(
                         labelText: 'Cidade',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+                        prefixIcon: const Icon(Icons.location_city_outlined, color: FincoreColors.textMuted, size: 20),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(color: FincoreColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: FincoreColors.primary),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 14),
                   Expanded(
-                    flex: 3,
+                    flex: 2,
                     child: TextFormField(
                       controller: _estadoController,
                       textCapitalization: TextCapitalization.characters,
                       style: const TextStyle(color: FincoreColors.textPrimary),
                       decoration: InputDecoration(
                         labelText: 'UF',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                        hintText: 'SP',
+                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(color: FincoreColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(color: FincoreColors.primary),
                         ),
                       ),
@@ -888,60 +915,80 @@ class _SignupPageState extends State<SignupPage> {
             ],
           ),
         ),
-        const SizedBox(height: 12),
 
-        const Text('Segmento de Atuação', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
-        const SizedBox(height: 6),
-        DropdownButtonFormField<String>(
-          isExpanded: true,
-          value: _segmento,
-          dropdownColor: FincoreColors.surface,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
+        const SizedBox(height: 18),
+
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Segmento de Atuação', style: TextStyle(fontSize: 13, color: FincoreColors.textSecondary, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: _segmento,
+                    dropdownColor: FincoreColors.surface,
+                    style: const TextStyle(color: FincoreColors.textPrimary),
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: FincoreColors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: FincoreColors.primary),
+                      ),
+                    ),
+                    items: ['Food Service', 'Restaurante / Bar', 'Pizzaria / Hamburgueria', 'Padaria / Confeitaria', 'Cafeteria', 'Varejo Geral', 'Outro']
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) setState(() => _segmento = val);
+                    },
+                  ),
+                ],
+              ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Plano de Assinatura Desejado', style: TextStyle(fontSize: 13, color: FincoreColors.textSecondary, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: _plano,
+                    dropdownColor: FincoreColors.surface,
+                    style: const TextStyle(color: FincoreColors.textPrimary),
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: FincoreColors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: FincoreColors.primary),
+                      ),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'bronze', child: Text('Essencial (Bronze) — 30 dias grátis')),
+                      DropdownMenuItem(value: 'prata', child: Text('Profissional (Prata) — Recomendado')),
+                      DropdownMenuItem(value: 'ouro', child: Text('Enterprise (Ouro)')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setState(() => _plano = val);
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-          items: ['Food Service', 'Restaurante / Bar', 'Pizzaria / Hamburgueria', 'Padaria / Confeitaria', 'Cafeteria', 'Varejo Geral', 'Outro']
-              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-              .toList(),
-          onChanged: (val) {
-            if (val != null) setState(() => _segmento = val);
-          },
-        ),
-        const SizedBox(height: 12),
-        const Text('Plano de Assinatura Desejado', style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary)),
-        const SizedBox(height: 6),
-        DropdownButtonFormField<String>(
-          isExpanded: true,
-          value: _plano,
-          dropdownColor: FincoreColors.surface,
-          style: const TextStyle(color: FincoreColors.textPrimary),
-          decoration: InputDecoration(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: FincoreColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: FincoreColors.primary),
-            ),
-          ),
-          items: const [
-            DropdownMenuItem(value: 'bronze', child: Text('Essencial (Bronze) — 30 dias grátis')),
-            DropdownMenuItem(value: 'prata', child: Text('Profissional (Prata) — Recomendado')),
-            DropdownMenuItem(value: 'ouro', child: Text('Enterprise (Ouro)')),
           ],
-          onChanged: (val) {
-            if (val != null) setState(() => _plano = val);
-          },
         ),
       ],
     );

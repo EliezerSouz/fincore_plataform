@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import '../common/master_data_models.dart';
+import '../common/domain_exceptions.dart';
 import '../common/domain_primitives.dart';
 import '../context/tenant_context.dart';
 import '../database/fincore_database.dart';
@@ -132,7 +133,23 @@ class ProdutoRepository extends SyncableRepository<Produto> {
     ));
   }
 
-  Future<Produto> save(Produto produto) => saveWithSync(produto);
+  /// Verifica se já existe outro produto (não excluído) com o mesmo nome
+  /// normalizado na mesma categoria do tenant corrente.
+  Future<bool> existeNomeDuplicado(String nome, String? categoriaId, {String? ignorarId}) async {
+    final alvo = normalizarNomeCadastro(nome);
+    final todos = await findAll();
+    return todos.any((p) =>
+        p.id != ignorarId &&
+        p.categoriaId == categoriaId &&
+        normalizarNomeCadastro(p.nome) == alvo);
+  }
+
+  Future<Produto> save(Produto produto) async {
+    if (await existeNomeDuplicado(produto.nome, produto.categoriaId, ignorarId: produto.id)) {
+      throw NomeDuplicadoException(entidade: 'um produto nesta categoria', nome: produto.nome.trim());
+    }
+    return saveWithSync(produto);
+  }
   Future<void> delete(String id) => deleteWithSync(id);
 
   Produto _mapToDomain(ProdutoData data) {

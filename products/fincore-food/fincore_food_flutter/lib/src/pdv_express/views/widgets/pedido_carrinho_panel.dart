@@ -3,6 +3,7 @@ import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
 import '../../controllers/pdv_express_controller.dart';
 import '../../models/pdv_item.dart';
+import 'split_payment_modal.dart';
 
 /// Coluna 3 da Workstation: Pedido / Carrinho, Formas de Pagamento & Finalização
 /// Sempre visível, permitindo conferência contínua, seleção hierárquica por modalidades
@@ -206,6 +207,8 @@ class _PedidoCarrinhoPanelState extends State<PedidoCarrinhoPanel> {
       final mod = _obterModalidadeDaForma(f);
       gruposModalidade.putIfAbsent(mod, () => []).add(f);
     }
+
+    final gruposPendentes = controller.pricingResult.groupSummaries.where((g) => !g.atingiuMinimo).toList();
 
     // Modalidade atualmente em foco
     final currentMod = _modalidadeAtiva ?? (selectedForma != null ? _obterModalidadeDaForma(selectedForma) : 'Dinheiro');
@@ -437,25 +440,131 @@ class _PedidoCarrinhoPanelState extends State<PedidoCarrinhoPanel> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (selectedForma != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: FincoreColors.primary.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          selectedForma.nome,
-                          style: TextStyle(
-                            color: FincoreColors.primary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (controller.isSplitPayment) ...[
+                          InkWell(
+                            onTap: () => SplitPaymentModal.show(context, controller),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: FincoreColors.success.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: FincoreColors.success.withValues(alpha: 0.4)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.call_split_rounded, size: 12, color: FincoreColors.success),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Dividido (${controller.splitPayments.length})',
+                                    style: TextStyle(
+                                      color: FincoreColors.success,
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
+                          Tooltip(
+                            message: 'Desfazer divisão',
+                            child: InkWell(
+                              onTap: () => controller.clearSplitPayments(),
+                              child: const Icon(Icons.close, size: 14, color: FincoreColors.textMuted),
+                            ),
+                          ),
+                        ] else ...[
+                          InkWell(
+                            onTap: () => SplitPaymentModal.show(context, controller),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: FincoreColors.surface,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: FincoreColors.border),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.call_split_rounded, size: 11, color: FincoreColors.primary),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '+ Dividir',
+                                    style: TextStyle(
+                                      color: FincoreColors.primary,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          if (selectedForma != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: FincoreColors.primary.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                selectedForma.nome,
+                                style: TextStyle(
+                                  color: FincoreColors.primary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
+
+                // Se o pagamento for dividido, exibe o resumo das fatias
+                if (controller.isSplitPayment) ...[
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: FincoreColors.background,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: FincoreColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ...controller.splitPayments.map((pag) {
+                          final vStr = (pag.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  '• ${pag.formaPagamentoNome}${pag.bandeira != null ? " (${pag.bandeira})" : ""}',
+                                  style: const TextStyle(fontSize: 11, color: FincoreColors.textSecondary),
+                                ),
+                                Text(
+                                  'R\$ $vStr',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: FincoreColors.success),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ] else ...[
 
                 // NÍVEL 1: Modalidades Principais (Dinheiro, PIX, Crédito, Débito, Prazo, etc.)
                 if (gruposModalidade.isEmpty)
@@ -594,6 +703,7 @@ class _PedidoCarrinhoPanelState extends State<PedidoCarrinhoPanel> {
                   ),
                 ],
               ],
+              ],
             ),
           ),
 
@@ -625,7 +735,39 @@ class _PedidoCarrinhoPanelState extends State<PedidoCarrinhoPanel> {
                     color: const Color(0xFF38BDF8),
                   ),
                 ],
-                const SizedBox(height: 8),
+                if (gruposPendentes.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  ...gruposPendentes.map((g) {
+                    final faltam = (g.minRequiredQty - g.totalQty).toInt();
+                    final atual = g.totalQty % 1 == 0 ? g.totalQty.toInt().toString() : g.totalQty.toString();
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${g.group.name}: Mínimo de ${g.minRequiredQty} un (Atual: $atual un · Faltam $faltam un)',
+                              style: const TextStyle(
+                                color: Color(0xFFEF4444),
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+                const SizedBox(height: 6),
                 const Divider(color: FincoreColors.border, height: 1),
                 const SizedBox(height: 8),
 

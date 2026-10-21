@@ -3,6 +3,7 @@ import 'package:test/test.dart';
 import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_core/common/master_data_models.dart';
+import 'package:fincore_core/common/domain_exceptions.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_core/database/fincore_database.dart';
 import 'package:fincore_core/database/fincore_seeds.dart';
@@ -155,6 +156,89 @@ void main() {
       );
 
       expect(() => categoriaRepo.save(cat), throwsStateError);
+    });
+
+    test('AUD-003: Deve bloquear categoria com nome duplicado (ignorando caixa/espaços)', () async {
+      Categoria nova(String id, String nome) => Categoria(
+            id: id,
+            tenantId: FincoreSeeds.seedTenantId,
+            nome: nome,
+            descricao: '',
+            ordemExibicao: 1,
+            ativo: true,
+            metadata: SyncMetadata(
+              version: 1,
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+              createdBy: 'test',
+              updatedBy: 'test',
+            ),
+          );
+
+      await categoriaRepo.save(nova('cat-dup-1', 'Bebidas Geladas'));
+      expect(() => categoriaRepo.save(nova('cat-dup-2', '  bebidas   GELADAS ')),
+          throwsA(isA<NomeDuplicadoException>()));
+      // Re-salvar a própria categoria (edição) continua permitido
+      await categoriaRepo.save(nova('cat-dup-1', 'Bebidas Geladas'));
+    });
+
+    test('AUD-004: Deve persistir e recuperar subcategoria vinculada à categoria-pai (parentId)', () async {
+      final pai = Categoria(
+        id: 'cat-pai-100',
+        tenantId: FincoreSeeds.seedTenantId,
+        nome: 'Doces Finos',
+        descricao: 'Doces e bombons refinados',
+        ordemExibicao: 10,
+        ativo: true,
+        metadata: SyncMetadata(
+          version: 1,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          createdBy: 'test',
+          updatedBy: 'test',
+        ),
+      );
+      await categoriaRepo.save(pai);
+
+      final filha = Categoria(
+        id: 'cat-filha-101',
+        tenantId: FincoreSeeds.seedTenantId,
+        parentId: pai.id,
+        nome: 'Trufas Gourmet',
+        descricao: 'Trufas de chocolate belga',
+        ordemExibicao: 1,
+        ativo: true,
+        metadata: SyncMetadata(
+          version: 1,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          createdBy: 'test',
+          updatedBy: 'test',
+        ),
+      );
+      await categoriaRepo.save(filha);
+
+      // Verificação direta por findById
+      final recuperada = await categoriaRepo.findById('cat-filha-101');
+      expect(recuperada, isNotNull);
+      expect(recuperada!.parentId, equals('cat-pai-100'));
+      expect(recuperada.nome, equals('Trufas Gourmet'));
+
+      // Verificação por busca hierárquica findByParentId
+      final subcategorias = await categoriaRepo.findByParentId('cat-pai-100');
+      expect(subcategorias.length, equals(1));
+      expect(subcategorias.first.id, equals('cat-filha-101'));
+
+      // Categorias raiz não devem incluir a filha quando parentId for null
+      final raizes = await categoriaRepo.findByParentId(null);
+      expect(raizes.any((c) => c.id == 'cat-filha-101'), isFalse);
+      expect(raizes.any((c) => c.id == 'cat-pai-100'), isTrue);
+    });
+
+    test('AUD-003: Deve bloquear produto com nome duplicado na mesma categoria', () async {
+      final base = (await produtoRepo.findAll()).first;
+      final copia = base.copyWith(id: 'prod-dup-1');
+      expect(() => produtoRepo.save(copia), throwsA(isA<NomeDuplicadoException>()));
     });
 
     test('Deve deletar logicamente (Soft Delete) um produto', () async {

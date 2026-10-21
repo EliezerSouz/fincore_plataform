@@ -25,6 +25,7 @@ import 'package:fincore_food_flutter/src/cap/printing/usecases/print_use_case.da
 import 'package:fincore_food_flutter/src/estoque/controllers/estoque_controller.dart';
 import 'package:fincore_food_flutter/src/estoque/controllers/planejamento_controller.dart';
 import 'package:fincore_food_flutter/src/financeiro/controllers/contas_receber_controller.dart';
+import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
 
 import 'package:fincore_food_flutter/src/shared/services/dpapi_env_service.dart';
 
@@ -257,6 +258,13 @@ class DatabaseInitializer {
     final configRepo = EmpresaConfiguracaoRepository(
       db: db, context: context, outbox: outboxService, syncEngine: syncEngine,
     );
+
+    // Inicialização da infraestrutura forense e idempotência do WhatsApp
+    try {
+      await WhatsAppService.logRepository.inicializarTabela();
+    } catch (e) {
+      debugPrint('[DatabaseInitializer] Aviso: tabela de logs WhatsApp: $e');
+    }
 
     // Repositórios sem sync bidirecional por enquanto (somente leitura remota)
     final usuarioRepo = UsuarioRepository(db: db, context: context);

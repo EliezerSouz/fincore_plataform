@@ -5,6 +5,7 @@ import 'package:fincore_core/common/master_data_models.dart';
 import '../../controllers/pdv_express_controller.dart';
 import 'package:fincore_food_flutter/src/shared/services/impressao_service.dart';
 import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
+import 'split_payment_modal.dart';
 
 class PaymentStep extends StatefulWidget {
   final PdvExpressController controller;
@@ -152,33 +153,122 @@ class _PaymentStepState extends State<PaymentStep> {
                     ),
                   ),
                   const Spacer(),
-                  if (selectedForma != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: FincoreColors.primary.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.check_circle, size: 12, color: FincoreColors.primary),
-                          const SizedBox(width: 5),
-                          Text(
-                            selectedForma.nome,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: FincoreColors.primary,
+                  if (controller.isSplitPayment) ...[
+                    InkWell(
+                      onTap: () => SplitPaymentModal.show(context, controller),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: FincoreColors.success.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: FincoreColors.success.withValues(alpha: 0.4)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.call_split_rounded, size: 14, color: FincoreColors.success),
+                            const SizedBox(width: 5),
+                            Text(
+                              'Dividido (${controller.splitPayments.length} fatias)',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: FincoreColors.success,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 16, color: FincoreColors.textMuted),
+                      onPressed: () => controller.clearSplitPayments(),
+                      tooltip: 'Desfazer divisão',
+                    ),
+                  ] else ...[
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.call_split_rounded, size: 14),
+                      label: const Text('Dividir Pagamento', style: TextStyle(fontSize: 11)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: FincoreColors.background,
+                        foregroundColor: FincoreColors.primary,
+                        side: const BorderSide(color: FincoreColors.border),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      ),
+                      onPressed: () => SplitPaymentModal.show(context, controller),
+                    ),
+                    const SizedBox(width: 8),
+                    if (selectedForma != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: FincoreColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.4)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle, size: 12, color: FincoreColors.primary),
+                            const SizedBox(width: 5),
+                            Text(
+                              selectedForma.nome,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: FincoreColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ],
               ),
               const Divider(color: FincoreColors.border, height: 24),
+
+              if (controller.isSplitPayment) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: FincoreColors.background,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: FincoreColors.success.withValues(alpha: 0.4)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'PAGAMENTOS FRACIONADOS APLICADOS:',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: FincoreColors.success, letterSpacing: 0.8),
+                      ),
+                      const SizedBox(height: 6),
+                      ...controller.splitPayments.map((pag) {
+                        final vStr = (pag.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',');
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '• ${pag.formaPagamentoNome}${pag.bandeira != null ? " (${pag.bandeira})" : ""}',
+                                style: const TextStyle(fontSize: 12, color: FincoreColors.textPrimary, fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                'R\$ $vStr',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: FincoreColors.success),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               // ── Opções de Pagamento Primárias (Categorias) ────────────
               Row(

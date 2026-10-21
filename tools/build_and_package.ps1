@@ -6,9 +6,11 @@
 # ==============================================================================
 
 param (
-    [string]$Bump = "", # 'patch', 'minor', 'major' ou vazio para manter atual
+    [string]$Bump = "patch", # Padrão: 'patch' (incrementa automaticamente a versão a cada release). Use 'minor', 'major' ou 'none'
     [string]$ReleaseNotes = "",
-    [switch]$CreateZip = $false # Por padrão gera apenas as pastas sem compactar .zip
+    [switch]$CreateZip = $false, # Por padrão gera apenas as pastas sem compactar .zip
+    [switch]$Launch = $false,    # Inicia o app automaticamente ao concluir o empacotamento
+    [switch]$NoSyncRoot = $false # Desativa sincronização automática para a pasta raiz fincore_food
 )
 
 $ErrorActionPreference = "Stop"
@@ -334,3 +336,23 @@ if ($CreateZip) {
 }
 Write-Host "=================================================================" -ForegroundColor Green
 Write-Host ""
+
+# 9. Sincronização automática para a pasta de execução rápida 'fincore_food' na raiz
+if (-not $NoSyncRoot) {
+    $rootFincoreFood = Join-Path $rootDir "fincore_food"
+    Write-Host "[*] Sincronizando binários atualizados para a pasta raiz: $rootFincoreFood ..." -ForegroundColor Yellow
+    if (-not (Test-Path $rootFincoreFood)) {
+        New-Item -ItemType Directory -Path $rootFincoreFood -Force | Out-Null
+    }
+    Copy-Item -Path "$fullPackageDir\*" -Destination $rootFincoreFood -Recurse -Force
+    Write-Host "[OK] Pasta raiz 'fincore_food' 100% sincronizada com a versão v$currentVersion." -ForegroundColor Green
+}
+
+# 10. Inicialização opcional do app
+if ($Launch) {
+    $appExe = Join-Path $rootDir "fincore_food\fincore_food_flutter.exe"
+    if (Test-Path $appExe) {
+        Write-Host "[*] Iniciando aplicativo em background: $appExe ..." -ForegroundColor Cyan
+        Start-Process -FilePath $appExe -WorkingDirectory (Join-Path $rootDir "fincore_food")
+    }
+}

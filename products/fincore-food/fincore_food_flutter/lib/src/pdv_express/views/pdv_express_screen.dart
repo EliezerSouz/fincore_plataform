@@ -3,8 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fincore_core/common/kds_models.dart';
-import 'package:fincore_core/common/master_data_models.dart';
 import '../controllers/pdv_express_controller.dart';
 import 'widgets/pix_payment_modal.dart';
 import 'widgets/atendimento_destino_panel.dart';
@@ -12,8 +10,10 @@ import 'widgets/catalogo_produtos_panel.dart';
 import 'widgets/pedido_carrinho_panel.dart';
 import 'widgets/confirmacao_agendamento_modal.dart';
 import 'widgets/customer_selection_modal.dart';
-import 'package:fincore_core/context/tenant_context.dart';
+import 'package:fincore_core/fincore_core.dart';
 import '../../shared/services/whatsapp_service.dart';
+import '../../shared/services/pix_generator.dart';
+import '../../shared/services/impressao_service.dart';
 import '../../shared/presentation/widgets/whatsapp_dialog.dart';
 import '../../financeiro/controllers/financeiro_controller.dart';
 import '../../financeiro/widgets/dialogs_caixa.dart';
@@ -27,6 +27,7 @@ class PdvExpressScreen extends StatefulWidget {
   final OrdemPreparo? ordemParaEditar;
   final String? repetirPedidoId;
   final Cliente? clienteInicial;
+  final VoidCallback? onVoltarOuCancelar;
 
   const PdvExpressScreen({
     super.key,
@@ -34,6 +35,7 @@ class PdvExpressScreen extends StatefulWidget {
     this.ordemParaEditar,
     this.repetirPedidoId,
     this.clienteInicial,
+    this.onVoltarOuCancelar,
   });
 
   @override
@@ -227,15 +229,70 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       _processarFinalizacaoVenda();
       return true;
     }
-    // ESC — Limpar pedido
+    // ESC — Limpar pedido ou Sair da Edição
     else if (key == LogicalKeyboardKey.escape) {
-      if (_controller.cart.isNotEmpty) {
+      if (widget.ordemParaEditar != null) {
+        _flashKeyLabel('ESC');
+        _confirmarSaidaEdicao();
+        return true;
+      } else if (_controller.cart.isNotEmpty) {
         _flashKeyLabel('ESC');
         _confirmarLimpezaPedido();
+        return true;
+      } else if (widget.onVoltarOuCancelar != null) {
+        _flashKeyLabel('ESC');
+        widget.onVoltarOuCancelar!();
+        return true;
+      } else if (Navigator.of(context).canPop()) {
+        _flashKeyLabel('ESC');
+        Navigator.of(context).pop(false);
         return true;
       }
     }
     return false;
+  }
+
+  Future<void> _confirmarSaidaEdicao() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: FincoreColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFF97316), size: 24),
+            SizedBox(width: 10),
+            Text('Sair do Modo de Edição?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        content: const Text(
+          'As alterações deste pedido não salvas serão descartadas.\nDeseja realmente voltar para a Central de Pedidos?',
+          style: TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Continuar Editando', style: TextStyle(color: FincoreColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Sair da Edição', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      if (widget.onVoltarOuCancelar != null) {
+        widget.onVoltarOuCancelar!();
+      } else if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(false);
+      }
+    }
   }
 
   void _focarBuscaProdutos() {
@@ -668,7 +725,33 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       if (!_finCtrl.resumo.caixaAberto) return;
     }
 
-    // 3. Validação: Cliente ou Consumidor Final Obrigatório
+    // 3. Validação: Quantidade Mínima por Categoria / Grupo com Preço Escalonado
+    final erroMinimo = await _controller.validarQuantidadesMinimasGrupos();
+    if (erroMinimo != null) {
+      _triggerShake();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: FincoreColors.danger,
+          content: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  erroMinimo,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+
+    // 4. Validação: Cliente ou Consumidor Final Obrigatório
     final cliente = _controller.cliente;
     final isSemCliente = cliente.isEmpty || cliente.nome == null || cliente.nome!.trim().isEmpty;
     if (isSemCliente) {
@@ -755,32 +838,214 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
 
     final tel = cliente.telefone;
     if (enviarWhats && mounted && tel != null && tel.isNotEmpty && tel != '00000000000') {
+      String? tenantId;
+      try {
+        if (TenantContext().hasContext) tenantId = TenantContext().tenantId;
+      } catch (_) {}
+
+      // ── HIERARQUIA DE MENSAGERIA (Nível 1 & 2) ──
+      final hierarquia = await WhatsAppService.avaliarHierarquiaEvento(
+        eventoId: WhatsAppService.kEventoPedidoCriadoPdv,
+        tenantId: tenantId,
+        empresaUsarWhatsApp: _controller.empresaConfig?.usarWhatsApp,
+      );
+
+      // Se a política do evento estiver DESATIVADA (OFF), bloqueio total:
+      if (hierarquia.eventoDesativado) {
+        debugPrint('[PDV Express] Envio de WhatsApp cancelado: evento pedido_criado_pdv está DESATIVADO (OFF) nas configurações de política.');
+        return;
+      }
+
       final numeroPedidoReal = _controller.lastNumeroPedido != null ? '#${_controller.lastNumeroPedido}' : '';
 
-      final resumoWhats = WhatsAppService.gerarTextoResumoPedido(
-        nomeCliente: cliente.nome ?? 'Cliente',
-        numeroPedidoOuId: numeroPedidoReal.isNotEmpty ? numeroPedidoReal : 'Novo Pedido',
-        tipoAtendimento: entrega.tipo,
-        dataHoraPrevista: dataStr,
-        itens: itensCopy,
-        subtotal: subtotalCalc,
-        taxaEntrega: (entrega.taxaEntregaCentavos / 100),
-        taxaServico: (entrega.taxaServicoCentavos / 100),
-        total: (totalCentavos / 100),
-        formaPagamento: formaPagtoStr,
-        enderecoEntrega: enderecoStr,
-        observacoes: entrega.observacoes.isNotEmpty ? entrega.observacoes : null,
-        nomeEmpresa: empresaNome,
+      final isPix = formaPagtoStr.toLowerCase().contains('pix') ||
+          (_controller.selectedFormaPagamento?.tipo == TipoFormaPagamento.pix);
+
+      // ── Resolução Contextual de PIX (Chave, Favorecido e Copia e Cola) ──
+      PixWhatsAppInfo? pixInfo;
+      if (isPix) {
+        try {
+          final selectedForma = _controller.selectedFormaPagamento;
+          final impConfig = await FincoreImpressaoConfig.carregar();
+
+          String chavePix = (selectedForma?.pixChave != null && selectedForma!.pixChave!.isNotEmpty)
+              ? selectedForma.pixChave!
+              : impConfig.pixChave;
+
+          String? favEmpresa;
+          try {
+            final db = DependencyInjection().get<FincoreDatabase>();
+            final empCfg = await (db.select(db.empresaConfiguracaoTable)..limit(1)).getSingleOrNull();
+            favEmpresa = empCfg?.pixFavorecido;
+          } catch (_) {}
+
+          final tipoPix = (selectedForma?.pixTipoChave != null && selectedForma!.pixTipoChave!.isNotEmpty)
+              ? selectedForma.pixTipoChave!
+              : (impConfig.pixTipo.isNotEmpty ? impConfig.pixTipo : 'PIX');
+
+          final favorecido = impConfig.pixFavorecido.isNotEmpty
+              ? impConfig.pixFavorecido
+              : ((favEmpresa != null && favEmpresa.isNotEmpty)
+                  ? favEmpresa
+                  : ((selectedForma?.pixTipoBanco != null && selectedForma!.pixTipoBanco!.isNotEmpty)
+                      ? selectedForma.pixTipoBanco!
+                      : ((empresaNome != null && empresaNome.isNotEmpty) ? empresaNome : 'Estabelecimento')));
+
+          String copiaCola = '';
+          if (chavePix.isNotEmpty) {
+            copiaCola = PixGenerator.gerarCopiaCola(
+              chave: chavePix,
+              favorecido: favorecido,
+              cidade: 'Sorocaba',
+              valor: (totalCentavos / 100.0),
+              tipoChave: tipoPix,
+            );
+          }
+
+          if (chavePix.isNotEmpty || copiaCola.isNotEmpty) {
+            pixInfo = PixWhatsAppInfo(
+              chaveDisplay: chavePix.isNotEmpty ? chavePix : '(Chave não configurada)',
+              tipoChave: tipoPix,
+              copiaECola: copiaCola,
+              confirmado: false,
+            );
+          }
+        } catch (e) {
+          debugPrint('[PDV Express] Erro ao resolver dados PIX para WhatsApp: $e');
+        }
+      }
+
+      // ── Resolução de Template Dinâmico do PDV ──
+
+      final pdvConfig = await WhatsAppService.getPdvConfig(tenantId: tenantId);
+      final templates = await WhatsAppService.getTemplates(tenantId: tenantId, nomeEmpresa: empresaNome);
+      final mappingEventos = await WhatsAppService.getTemplatesEventosConfigurados(tenantId: tenantId);
+      final templateIdEventoPdv = mappingEventos[WhatsAppService.kEventoPedidoCriadoPdv] ?? pdvConfig.templateId;
+
+      // Localiza o template configurado para o PDV nas Políticas por Evento ou config PDV
+      final templateEscolhido = templates.firstWhere(
+        (t) => t.ativo && t.id == templateIdEventoPdv,
+        orElse: () => templates.firstWhere(
+          (t) => t.ativo && (t.id == 'comprovante' || t.evento == 'pedido_criado' || t.evento == WhatsAppService.kEventoPedidoCriadoPdv),
+          orElse: () => templates.firstWhere(
+            (t) => t.ativo && t.id == 'contato_pedido',
+            orElse: () => templates.first,
+          ),
+        ),
       );
 
-      await WhatsAppDialog.show(
-        context,
-        rawPhone: tel,
+      final taxaEntregaCalc = (entrega.taxaEntregaCentavos / 100.0);
+      final taxaServicoCalc = (entrega.taxaServicoCentavos / 100.0);
+      final totalCalc = (totalCentavos / 100.0);
+      final descontoCentavosCalc = (subtotalCalc * 100 + entrega.taxaEntregaCentavos + entrega.taxaServicoCentavos) - totalCentavos;
+      final descontoCalc = descontoCentavosCalc > 0 ? (descontoCentavosCalc / 100.0) : 0.0;
+
+      final vars = WhatsAppService.gerarVariaveisInterpolacao(
         clienteNome: cliente.nome ?? 'Cliente',
-        initialMessage: resumoWhats,
-        enderecoCliente: enderecoStr,
-        nomeEmpresa: empresaNome,
+        nomeEmpresa: (empresaNome != null && empresaNome.isNotEmpty) ? empresaNome : 'Nossa Loja',
+        numeroPedido: numeroPedidoReal.isNotEmpty ? numeroPedidoReal : null,
+        pedidoId: _controller.lastPedidoId,
+        tenantId: tenantId,
+        itens: itensCopy,
+        subtotal: subtotalCalc,
+        desconto: descontoCalc,
+        taxaEntrega: taxaEntregaCalc,
+        taxaServico: taxaServicoCalc,
+        total: totalCalc,
+        formaPagamento: formaPagtoStr,
+        statusPagamento: isPix ? 'Pendente' : 'Confirmado',
+        pagamentoPendente: isPix,
+        isPix: isPix,
+        tipoPedido: entrega.tipo,
+        endereco: enderecoStr,
+        enderecoEmpresa: WhatsAppService.formatarEnderecoEmpresa(),
+        observacoes: entrega.observacoes.isNotEmpty ? entrega.observacoes : null,
+        previsaoEntrega: dataStr,
+        chavePix: pixInfo?.chaveDisplay,
+        chavePixCopiaCola: pixInfo?.copiaECola,
+        formatoPix: pdvConfig.formatoPixPadrao,
       );
+
+      final msgInterpolada = WhatsAppService.interpolarTemplate(templateEscolhido.conteudo, vars);
+
+      final bool isApiConectada = await EvolutionApiClient.isInstanciaConectada(tenantId: tenantId);
+
+      if (isApiConectada) {
+        // Disparo Automático Silencioso via Evolution API (sem abrir telas/modais)
+        final res = await WhatsAppService.enviarMensagem(
+          rawPhone: tel,
+          mensagem: msgInterpolada,
+          tenantId: tenantId,
+          pedidoId: _controller.lastPedidoId ?? numeroPedidoReal,
+          eventoId: WhatsAppService.kEventoPedidoCriadoPdv,
+          isManualIntent: true,
+        );
+
+        // Se configurado para enviar Copia e Cola em 2ª mensagem e PIX pendente
+        if (pdvConfig.enviarPix2MsgPadrao && isPix && pixInfo != null && pixInfo.copiaECola.isNotEmpty) {
+          await Future.delayed(const Duration(milliseconds: 1200));
+          await WhatsAppService.enviarMensagem(
+            rawPhone: tel,
+            mensagem: pixInfo.copiaECola,
+            tenantId: tenantId,
+            pedidoId: _controller.lastPedidoId ?? numeroPedidoReal,
+            eventoId: 'pix_copia_cola_2msg',
+            isManualIntent: true,
+          );
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: const Color(0xFF16A34A),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      res.sucesso
+                          ? 'Comprovante do Pedido $numeroPedidoReal enviado ao cliente via WhatsApp! 📱'
+                          : 'Tentativa de WhatsApp: ${res.erro ?? "Verifique a conexão"}',
+                      style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      } else {
+        // Contingência Manual: Abre diálogo apenas se a API estiver desconectada
+        await WhatsAppDialog.show(
+          context,
+          rawPhone: tel,
+          clienteNome: cliente.nome ?? 'Cliente',
+          initialMessage: msgInterpolada,
+          initialTemplateId: pdvConfig.templateId,
+          enderecoCliente: enderecoStr,
+          enderecoEmpresa: WhatsAppService.formatarEnderecoEmpresa(),
+          statusPagamento: isPix ? 'Pendente' : 'Confirmado',
+          pagamentoPendente: isPix,
+          isPix: isPix,
+          pixInfo: pixInfo,
+          nomeEmpresa: empresaNome,
+          numeroPedido: numeroPedidoReal.isNotEmpty ? numeroPedidoReal : null,
+          pedidoId: _controller.lastPedidoId,
+          itens: itensCopy,
+          subtotal: subtotalCalc,
+          desconto: descontoCalc,
+          taxaEntrega: taxaEntregaCalc,
+          taxaServico: taxaServicoCalc,
+          total: totalCalc,
+          formaPagamento: formaPagtoStr,
+          tipoPedido: entrega.tipo,
+          observacoes: entrega.observacoes.isNotEmpty ? entrega.observacoes : null,
+          previsaoEntrega: dataStr,
+        );
+      }
     }
   }
 
@@ -806,7 +1071,9 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
           duration: Duration(seconds: 3),
         ),
       );
-      if (context.mounted) {
+      if (widget.onVoltarOuCancelar != null) {
+        widget.onVoltarOuCancelar!();
+      } else if (context.mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop(true);
       }
       return;
@@ -866,16 +1133,15 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                     child: _CaixaOperacionalBar(
                       controller: _finCtrl,
                       ordemParaEditar: widget.ordemParaEditar,
-                      onVoltar: (widget.ordemParaEditar != null ||
-                              (!widget.isEmbedded &&
-                                  (widget.clienteInicial != null ||
-                                      widget.repetirPedidoId != null)))
-                          ? () {
-                              if (Navigator.of(context).canPop()) {
-                                Navigator.of(context).pop(false);
-                              }
-                            }
-                          : null,
+                      onVoltar: widget.onVoltarOuCancelar != null
+                          ? (widget.ordemParaEditar != null
+                              ? _confirmarSaidaEdicao
+                              : widget.onVoltarOuCancelar)
+                          : (widget.ordemParaEditar != null
+                              ? _confirmarSaidaEdicao
+                              : (Navigator.of(context).canPop()
+                                  ? () => Navigator.of(context).pop(false)
+                                  : null)),
                       onHelpShortcuts: _showShortcutHelpDialog,
                     ),
                   ),
@@ -1038,44 +1304,63 @@ class _CaixaOperacionalBar extends StatelessWidget {
 
         // Caso 1: Modo Edição de Pedido Existente
         if (ordemParaEditar != null) {
+          final pedId = ordemParaEditar!.pedidoId.length > 6
+              ? ordemParaEditar!.pedidoId.substring(0, 6).toUpperCase()
+              : ordemParaEditar!.pedidoId.toUpperCase();
           return Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: FincoreColors.surface,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFF97316).withValues(alpha: 0.5)),
+              border: Border.all(color: const Color(0xFFF97316).withValues(alpha: 0.6)),
             ),
             child: Row(
               children: [
                 if (onVoltar != null) ...[
-                  IconButton(
-                    tooltip: 'Voltar',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                    label: const Text(
+                      'Sair da Edição [ESC]',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
                     onPressed: onVoltar,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                 ],
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF97316).withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: const Color(0xFFF97316)),
                   ),
-                  child: const Text(
-                    'MODO DE EDIÇÃO',
-                    style: TextStyle(
-                      color: Color(0xFFF97316),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit_note_rounded, size: 16, color: Color(0xFFF97316)),
+                      SizedBox(width: 4),
+                      Text(
+                        'MODO DE EDIÇÃO ATIVO',
+                        style: TextStyle(
+                          color: Color(0xFFF97316),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  'Editando Pedido #${ordemParaEditar!.pedidoId.length > 6 ? ordemParaEditar!.pedidoId.substring(0, 6).toUpperCase() : ordemParaEditar!.pedidoId.toUpperCase()}',
+                  'Editando Pedido #$pedId',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 13,
@@ -1104,6 +1389,39 @@ class _CaixaOperacionalBar extends StatelessWidget {
             ),
             child: Row(
               children: [
+                if (onVoltar != null) ...[
+                  Tooltip(
+                    message: 'Voltar ao menu / Sair do PDV',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: onVoltar,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: FincoreColors.surfaceElevated,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: FincoreColors.border),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.arrow_back_rounded, size: 16, color: FincoreColors.textPrimary),
+                            SizedBox(width: 6),
+                            Text(
+                              'Voltar / Sair',
+                              style: TextStyle(
+                                color: FincoreColors.textPrimary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -1194,6 +1512,39 @@ class _CaixaOperacionalBar extends StatelessWidget {
           ),
           child: Row(
             children: [
+              if (onVoltar != null) ...[
+                Tooltip(
+                  message: 'Voltar ao menu / Sair do PDV',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: onVoltar,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: FincoreColors.surfaceElevated,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: FincoreColors.border),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.arrow_back_rounded, size: 16, color: FincoreColors.textPrimary),
+                          SizedBox(width: 6),
+                          Text(
+                            'Voltar / Sair',
+                            style: TextStyle(
+                              color: FincoreColors.textPrimary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
               // Badge Caixa Aberto com Indicador Verde
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

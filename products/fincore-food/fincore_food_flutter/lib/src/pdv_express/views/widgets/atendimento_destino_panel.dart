@@ -164,6 +164,8 @@ class _AtendimentoDestinoPanelState extends State<AtendimentoDestinoPanel> {
 
             if (entrega.logradouro.isEmpty && _localSelecionado != null) {
               _preencherComLocal(_localSelecionado!);
+            } else if (entrega.tipo == 'Entrega') {
+              _recalcularTaxaEntrega();
             }
           } else {
             _localSelecionado = null;

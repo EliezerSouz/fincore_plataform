@@ -290,7 +290,8 @@ void main() {
         endereco: rawJson,
       );
       final msgAprovado = WhatsAppService.interpolarTemplate(templateAprovado.conteudo, varsAprovado);
-      expect(msgAprovado, contains('PEDIDO #140 APROVADO!'));
+      expect(msgAprovado, contains('PEDIDO ONLINE #140 APROVADO!'));
+      expect(msgAprovado, contains('Cardápio Digital Online'));
       expect(msgAprovado, contains('▪ 50x *Mini Coxinha*'));
       expect(msgAprovado, contains('📍 *Endereço de Entrega:* Rua Professora Nádia Prancic Bento, 398'));
       expect(msgAprovado, isNot(contains('{"cep"')));

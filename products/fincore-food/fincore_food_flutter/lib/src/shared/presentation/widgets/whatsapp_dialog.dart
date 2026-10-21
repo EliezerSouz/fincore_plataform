@@ -5,7 +5,7 @@ import 'package:brasil_fields/brasil_fields.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import '../../services/whatsapp_service.dart';
 
-/// Informações de PIX para exibição no card separado do WhatsAppDialog.
+/// Informações de PIX para exibição contextual no WhatsAppDialog.
 /// Gerado pelo PixGenerator e passado pelo caller (PDV Express ou Kanban).
 class PixWhatsAppInfo {
   /// Chave legível para exibição (ex: "(11) 99999-8888", "email@...", CPF mascarado)
@@ -17,15 +17,19 @@ class PixWhatsAppInfo {
   /// Payload EMV completo (Copia e Cola) — gerado pelo PixGenerator
   final String copiaECola;
 
+  /// Indica se o pagamento PIX já foi confirmado
+  final bool confirmado;
+
   const PixWhatsAppInfo({
     required this.chaveDisplay,
     required this.tipoChave,
     required this.copiaECola,
+    this.confirmado = false,
   });
 }
 
-/// Modal Oficial e Inteligente de Disparo de Mensagens via WhatsApp
-/// Suporta card de PIX com QR Code inline e chave copiável em seção separada.
+/// Modal Oficial e Inteligente de Disparo de Mensagens via WhatsApp.
+/// Redesign UX/UI: compacto, profissional e centrado no conteúdo da mensagem.
 class WhatsAppDialog extends StatefulWidget {
   final String rawPhone;
   final String clienteNome;
@@ -33,22 +37,65 @@ class WhatsAppDialog extends StatefulWidget {
   final String? enderecoCliente;
   final String? nomeEmpresa;
 
-  /// Informações PIX para exibição no card copiável (opcional).
-  /// Quando fornecido, exibe seção de PIX com QR Code e botão de cópia.
+  /// Informações PIX para exibição contextual (opcional).
   final PixWhatsAppInfo? pixInfo;
 
-  /// ID amigável do pedido (ex: "#000142") — usado nos templates rápidos.
+  /// ID amigável do pedido (ex: "#000142") — exibido no cabeçalho e usado nos templates.
   final String? numeroPedido;
+
+  /// Dados avançados de Food Service para interpolação de todas as tags do sistema
+  final List<Map<String, dynamic>>? itens;
+  final double? subtotal;
+  final double? desconto;
+  final double? taxaEntrega;
+  final double? taxaServico;
+  final double? total;
+  final String? formaPagamento;
+  final String? trocoPara;
+  final String? tipoPedido;
+  final String? observacoes;
+  final String? previsaoEntrega;
+  final String? entregador;
+  final String? mesa;
+  final String? linkCardapio;
+  final String? linkRastreio;
+  final String? pedidoId;
+  final String? enderecoEmpresa;
+  final String? statusPagamento;
+  final bool? pagamentoPendente;
+  final bool? isPix;
+  final String? initialTemplateId;
 
   const WhatsAppDialog({
     super.key,
     required this.rawPhone,
     required this.clienteNome,
     this.initialMessage,
+    this.initialTemplateId,
     this.enderecoCliente,
+    this.enderecoEmpresa,
     this.nomeEmpresa,
     this.pixInfo,
     this.numeroPedido,
+    this.pedidoId,
+    this.itens,
+    this.subtotal,
+    this.desconto,
+    this.taxaEntrega,
+    this.taxaServico,
+    this.total,
+    this.formaPagamento,
+    this.statusPagamento,
+    this.pagamentoPendente,
+    this.isPix,
+    this.trocoPara,
+    this.tipoPedido,
+    this.observacoes,
+    this.previsaoEntrega,
+    this.entregador,
+    this.mesa,
+    this.linkCardapio,
+    this.linkRastreio,
   });
 
   /// Abre o modal de WhatsApp
@@ -57,10 +104,31 @@ class WhatsAppDialog extends StatefulWidget {
     required String rawPhone,
     required String clienteNome,
     String? initialMessage,
+    String? initialTemplateId,
     String? enderecoCliente,
+    String? enderecoEmpresa,
     String? nomeEmpresa,
     PixWhatsAppInfo? pixInfo,
     String? numeroPedido,
+    String? pedidoId,
+    List<Map<String, dynamic>>? itens,
+    double? subtotal,
+    double? desconto,
+    double? taxaEntrega,
+    double? taxaServico,
+    double? total,
+    String? formaPagamento,
+    String? statusPagamento,
+    bool? pagamentoPendente,
+    bool? isPix,
+    String? trocoPara,
+    String? tipoPedido,
+    String? observacoes,
+    String? previsaoEntrega,
+    String? entregador,
+    String? mesa,
+    String? linkCardapio,
+    String? linkRastreio,
   }) {
     return showDialog<bool>(
       context: context,
@@ -69,10 +137,31 @@ class WhatsAppDialog extends StatefulWidget {
         rawPhone: rawPhone,
         clienteNome: clienteNome,
         initialMessage: initialMessage,
+        initialTemplateId: initialTemplateId,
         enderecoCliente: enderecoCliente,
+        enderecoEmpresa: enderecoEmpresa,
         nomeEmpresa: nomeEmpresa,
         pixInfo: pixInfo,
         numeroPedido: numeroPedido,
+        pedidoId: pedidoId,
+        itens: itens,
+        subtotal: subtotal,
+        desconto: desconto,
+        taxaEntrega: taxaEntrega,
+        taxaServico: taxaServico,
+        total: total,
+        formaPagamento: formaPagamento,
+        statusPagamento: statusPagamento,
+        pagamentoPendente: pagamentoPendente,
+        isPix: isPix,
+        trocoPara: trocoPara,
+        tipoPedido: tipoPedido,
+        observacoes: observacoes,
+        previsaoEntrega: previsaoEntrega,
+        entregador: entregador,
+        mesa: mesa,
+        linkCardapio: linkCardapio,
+        linkRastreio: linkRastreio,
       ),
     );
   }
@@ -86,10 +175,22 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
   late TextEditingController _messageController;
   late bool _comNonoDigito;
   bool _enviando = false;
-  bool _pixCardExpanded = true;
+  String? _ultimoEnvioHora;
+  bool _algumEnvioRealizado = false;
 
   String get _clienteNomeLimpo {
     return widget.clienteNome.replaceAll(RegExp(r'\s*\([^)]*\)'), '').trim();
+  }
+
+  String get _subtituloCabecalho {
+    final nome = widget.clienteNome.isNotEmpty ? _clienteNomeLimpo : 'Cliente';
+    if (widget.numeroPedido != null && widget.numeroPedido!.isNotEmpty) {
+      final ped = widget.numeroPedido!.startsWith('#')
+          ? widget.numeroPedido!
+          : '#${widget.numeroPedido}';
+      return '$nome · Pedido $ped';
+    }
+    return nome;
   }
 
   String get _resolvedNomeEmpresa {
@@ -105,6 +206,48 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
       }
     } catch (_) {}
     return 'Nossa Loja';
+  }
+
+  bool _enviarPixSegundaMensagem = false;
+
+  String _interpolarTexto(String texto) {
+    String? tenantId;
+    try {
+      if (TenantContext().hasContext) {
+        tenantId = TenantContext().tenantId;
+      }
+    } catch (_) {}
+
+    final mapa = WhatsAppService.gerarVariaveisInterpolacao(
+      clienteNome: widget.clienteNome,
+      nomeEmpresa: _resolvedNomeEmpresa,
+      tenantId: tenantId,
+      numeroPedido: widget.numeroPedido,
+      pedidoId: widget.pedidoId,
+      itens: widget.itens,
+      subtotal: widget.subtotal,
+      desconto: widget.desconto,
+      taxaEntrega: widget.taxaEntrega,
+      taxaServico: widget.taxaServico,
+      total: widget.total,
+      formaPagamento: widget.formaPagamento,
+      statusPagamento: widget.statusPagamento,
+      pagamentoPendente: widget.pagamentoPendente,
+      isPix: widget.isPix,
+      trocoPara: widget.trocoPara,
+      tipoPedido: widget.tipoPedido,
+      endereco: widget.enderecoCliente,
+      enderecoEmpresa: widget.enderecoEmpresa,
+      observacoes: widget.observacoes,
+      previsaoEntrega: widget.previsaoEntrega,
+      entregador: widget.entregador,
+      mesa: widget.mesa,
+      linkCardapio: widget.linkCardapio,
+      linkRastreio: widget.linkRastreio,
+      chavePix: widget.pixInfo?.chaveDisplay,
+      chavePixCopiaCola: widget.pixInfo?.copiaECola,
+    );
+    return WhatsAppService.interpolarTemplate(texto, mapa);
   }
 
   List<WhatsAppTemplate> _customTemplates = [];
@@ -123,23 +266,20 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
     );
 
     _phoneController = TextEditingController(text: initialPhoneFormatted);
+    _selectedTemplateOption = widget.initialTemplateId;
 
-    final empresa = _resolvedNomeEmpresa;
-    final nome = _clienteNomeLimpo;
-
-    // Usa initialMessage se fornecido (comprovante PDV), senão saudação padrão calorosa
-    final defaultMessage = widget.initialMessage ??
-        // \u{1F44B}=👋 \u{1F60A}=😊 \u{2728}=✨ \u{1F680}=🚀
-        '\u{1F44B} *Ol\u00E1, $nome!* Tudo bem? \u{1F60A}\n\n'
-        'Aqui \u00E9 da equipe da *$empresa*! \u{2728}\n'
+    // Usa initialMessage interpolado se fornecido, senão saudação padrão calorosa
+    final rawMessage = widget.initialMessage ??
+        '\u{1F44B} *Ol\u00E1, {primeiro_nome}!* Tudo bem? \u{1F60A}\n\n'
+        'Aqui \u00E9 da equipe da *{loja}*! \u{2728}\n'
         'Passando para saber se voc\u00EA gostaria de fazer um novo pedido ou se precisa de alguma ajuda hoje?\n\n'
         'Estamos \u00E0 sua total disposi\u00E7\u00E3o! \u{1F680}';
 
-    _messageController = TextEditingController(text: defaultMessage);
-    _carregarTemplatesConfigurados();
+    _messageController = TextEditingController(text: _interpolarTexto(rawMessage));
+    _inicializarDados();
   }
 
-  Future<void> _carregarTemplatesConfigurados() async {
+  Future<void> _inicializarDados() async {
     String? tenantId;
     try {
       if (TenantContext().hasContext) {
@@ -147,13 +287,64 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
       }
     } catch (_) {}
 
+    await WhatsAppService.atualizarCacheUrlCardapio(tenantId: tenantId);
+
+    // Carrega preferência de PIX 2ª mensagem definida nas configurações do PDV
+    try {
+      final pdvCfg = await WhatsAppService.getPdvConfig(tenantId: tenantId);
+      if (mounted) {
+        setState(() {
+          _enviarPixSegundaMensagem = pdvCfg.enviarPix2MsgPadrao;
+        });
+      }
+    } catch (_) {}
+
+    // Se a mensagem original tiver tags dinâmicas de link ou pedido, re-interpola com a URL base carregada
+    if (widget.initialMessage != null &&
+        (widget.initialMessage!.contains('{link_cardapio}') ||
+            widget.initialMessage!.contains('{link_rastreio}'))) {
+      if (mounted) {
+        _messageController.text = _interpolarTexto(widget.initialMessage!);
+      }
+    }
+
+    await _carregarTemplatesConfigurados(tenantId);
+  }
+
+  Future<void> _carregarTemplatesConfigurados([String? tenantId]) async {
+    final tId = tenantId ?? (TenantContext().hasContext ? TenantContext().tenantId : null);
+
     final list = await WhatsAppService.getTemplates(
-      tenantId: tenantId,
+      tenantId: tId,
       nomeEmpresa: _resolvedNomeEmpresa,
     );
 
     if (mounted) {
-      setState(() => _customTemplates = list.where((t) => t.ativo).toList());
+      final ativos = list.where((t) => t.ativo).toList();
+      setState(() {
+        _customTemplates = ativos;
+
+        // Se foi solicitado um template inicial específico (ex: 'cobranca_pix', 'saiu_entrega', 'comprovante')
+        if (widget.initialTemplateId != null) {
+          final match = ativos.firstWhere(
+            (t) => t.id == widget.initialTemplateId,
+            orElse: () => list.firstWhere(
+              (t) => t.id == widget.initialTemplateId,
+              orElse: () => ativos.isNotEmpty ? ativos.first : WhatsAppService.getTemplatesPadrao().first,
+            ),
+          );
+          _selectedTemplateOption = match.id;
+          // Se o caller não passou um texto já formatado manualmente, ou se passou para usar o template, carrega o conteúdo salvo
+          if (widget.initialMessage == null || widget.initialMessage!.isEmpty) {
+            _messageController.text = _interpolarTexto(match.conteudo);
+          }
+        } else if (_selectedTemplateOption != null) {
+          final existe = ativos.any((t) => t.id == _selectedTemplateOption);
+          if (!existe && ativos.isNotEmpty) {
+            _selectedTemplateOption = ativos.first.id;
+          }
+        }
+      });
     }
   }
 
@@ -187,17 +378,39 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
     await Clipboard.setData(ClipboardData(text: texto));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           backgroundColor: FincoreColors.surfaceElevated,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
           content: Row(
-            children: const [
+            children: [
               Icon(Icons.check_circle_rounded, color: FincoreColors.success, size: 18),
               SizedBox(width: 8),
-              Text('Mensagem copiada!',
+              Text('Mensagem copiada para a área de transferência!',
                   style: TextStyle(color: Colors.white, fontSize: 13)),
             ],
           ),
-          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _copiarChavePix() async {
+    if (widget.pixInfo == null) return;
+    await Clipboard.setData(ClipboardData(text: widget.pixInfo!.chaveDisplay));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Color(0xFF32BCAD),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+          content: Row(
+            children: [
+              Icon(Icons.pix, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Text('Chave PIX copiada!', style: TextStyle(color: Colors.white, fontSize: 13)),
+            ],
+          ),
         ),
       );
     }
@@ -208,17 +421,18 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
     await Clipboard.setData(ClipboardData(text: widget.pixInfo!.copiaECola));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFF16A34A),
+        const SnackBar(
+          backgroundColor: Color(0xFF16A34A),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
           content: Row(
-            children: const [
+            children: [
               Icon(Icons.pix, color: Colors.white, size: 18),
               SizedBox(width: 8),
-              Text('Chave PIX (Copia e Cola) copiada!',
+              Text('Código PIX Copia e Cola copiado!',
                   style: TextStyle(color: Colors.white, fontSize: 13)),
             ],
           ),
-          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -232,6 +446,7 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: FincoreColors.danger,
+          behavior: SnackBarBehavior.floating,
           content: Text('Por favor, informe um número de telefone com DDD válido.'),
         ),
       );
@@ -249,13 +464,35 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
 
       if (mounted) {
         if (ok) {
-          Navigator.of(context).pop(true);
+          final now = DateTime.now();
+          final horaStr =
+              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+          setState(() {
+            _ultimoEnvioHora = horaStr;
+            _algumEnvioRealizado = true;
+          });
+
+          // Se configurado para enviar Copia e Cola em 2ª mensagem, copia para o Clipboard
+          final pix = widget.pixInfo;
+          if (_enviarPixSegundaMensagem && pix != null && pix.copiaECola.isNotEmpty) {
+            await Clipboard.setData(ClipboardData(text: pix.copiaECola));
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  backgroundColor: Color(0xFF16A34A),
+                  behavior: SnackBarBehavior.floating,
+                  content: Text('WhatsApp aberto! O código PIX Copia e Cola já foi copiado para sua área de transferência para colar em seguida. 📋'),
+                ),
+              );
+            }
+          }
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: FincoreColors.danger,
+              behavior: SnackBarBehavior.floating,
               content: Text(
-                  'Não foi possível abrir o WhatsApp. Verifique se o navegador ou app está disponível.'),
+                  'Não foi possível abrir o WhatsApp. Verifique se o navegador ou aplicativo está disponível.'),
             ),
           );
         }
@@ -265,6 +502,7 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: FincoreColors.danger,
+            behavior: SnackBarBehavior.floating,
             content: Text('Erro ao acionar WhatsApp: $e'),
           ),
         );
@@ -274,198 +512,771 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
     }
   }
 
-  // ── PIX Card com QR Code ─────────────────────────────────────────────────
+  Future<void> _enviarViaEvolutionApi() async {
+    final rawPhone = _phoneController.text.trim();
+    final digitos = WhatsAppService.sanitizarTelefone(rawPhone);
 
-  Widget _buildPixCard() {
-    final pix = widget.pixInfo!;
-    const pixGreen = Color(0xFF32BCAD); // Cor oficial do PIX (Bacen)
+    if (digitos.length < 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: FincoreColors.danger,
+          behavior: SnackBarBehavior.floating,
+          content: Text('Por favor, informe um número de telefone com DDD válido.'),
+        ),
+      );
+      return;
+    }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: pixGreen.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: pixGreen.withValues(alpha: 0.35), width: 1.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header expansível do card PIX
-          InkWell(
-            onTap: () => setState(() => _pixCardExpanded = !_pixCardExpanded),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                children: [
-                  const Icon(Icons.pix, color: Color(0xFF32BCAD), size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'CHAVE PIX',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF32BCAD),
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                        Text(
-                          '${pix.tipoChave}: ${pix.chaveDisplay}',
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            color: FincoreColors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(
-                    _pixCardExpanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    color: FincoreColors.textMuted,
-                    size: 20,
-                  ),
-                ],
-              ),
-            ),
-          ),
+    setState(() => _enviando = true);
 
-          // Conteúdo expansível
-          if (_pixCardExpanded) ...[
-            const Divider(height: 1, color: Color(0xFF32BCAD), indent: 14, endIndent: 14),
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // QR Code visual (usando CustomPaint para compatibilidade sem qr_flutter)
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.1),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: SizedBox(
-                      width: 100,
-                      height: 100,
-                      child: CustomPaint(
-                        painter: _PixQrCodePainter(),
+    try {
+      String? tenantId;
+      try {
+        if (TenantContext().hasContext) {
+          tenantId = TenantContext().tenantId;
+        }
+      } catch (_) {}
+
+      final res = await WhatsAppService.enviarMensagem(
+        rawPhone: rawPhone,
+        mensagem: _messageController.text,
+        tenantId: tenantId,
+        pedidoId: widget.numeroPedido,
+        eventoId: 'direto_dialog',
+        isManualIntent: true,
+      );
+
+      if (mounted) {
+        if (res.sucesso) {
+          final now = DateTime.now();
+          final horaStr =
+              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+          setState(() {
+            _ultimoEnvioHora = horaStr;
+            _algumEnvioRealizado = true;
+          });
+
+          // Disparo da 2ª mensagem com PIX Copia e Cola se selecionado
+          final pix = widget.pixInfo;
+          if (_enviarPixSegundaMensagem && pix != null && pix.copiaECola.isNotEmpty) {
+            await Future.delayed(const Duration(milliseconds: 1200));
+            await WhatsAppService.enviarMensagem(
+              rawPhone: rawPhone,
+              mensagem: pix.copiaECola,
+              tenantId: tenantId,
+              pedidoId: widget.numeroPedido,
+              eventoId: 'pix_copia_cola_2msg',
+              isManualIntent: true,
+            );
+          }
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: const Color(0xFF16A34A),
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 4),
+                content: Row(
+                  children: [
+                    const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        (_enviarPixSegundaMensagem && pix != null && pix.copiaECola.isNotEmpty)
+                            ? 'Mensagem e código PIX Copia e Cola enviados às $horaStr para ${res.telefoneMascarado}! 🚀'
+                            : 'Mensagem enviada com sucesso às $horaStr para ${res.telefoneMascarado}! 🚀',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
+                  ],
+                ),
+              ),
+            );
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: FincoreColors.danger,
+              behavior: SnackBarBehavior.floating,
+              content: Text(
+                  'Não foi possível enviar via Evolution API: ${res.erro ?? res.status.name}'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: FincoreColors.danger,
+            behavior: SnackBarBehavior.floating,
+            content: Text('Erro ao disparar Evolution API: $e'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
+
+
+  String _injetarAposPagamento(String textoAtual, String blocoPix) {
+    if (textoAtual.contains(blocoPix.trim())) {
+      return textoAtual;
+    }
+
+    // 1. Tenta localizar a linha onde a forma de pagamento é descrita
+    // Ex: "💳 *Pagamento: Pix Mercado Pago*", "Forma de Pagamento: Pix"
+    final regexPagamento = RegExp(
+      r'((?:💳\s*\*?(?:Forma de\s+)?Pagamento\*?:?[^\n]*|(?:Forma de\s+)?Pagamento\*?:?[^\n]*))',
+      caseSensitive: false,
+    );
+
+    final matchPagto = regexPagamento.firstMatch(textoAtual);
+    if (matchPagto != null) {
+      final fimPagto = matchPagto.end;
+      final antes = textoAtual.substring(0, fimPagto).trimRight();
+      final depois = textoAtual.substring(fimPagto).trimLeft();
+      return '$antes\n\n$blocoPix\n\n$depois'.trim();
+    }
+
+    // 2. Fallback: antes de link de rastreio, dúvidas ou encerramento
+    final regexFinal = RegExp(
+      r'(\n\s*(?:(?:📱|🔗)?\s*\*?Acompanhe|Qualquer dúvida|Dúvidas|Se tiver dúvidas|Se precisar|Agradecemos|Muito obrigado|Obrigado pela preferência|\*Equipe|Atenciosamente))',
+      caseSensitive: false,
+    );
+
+    final matchFinal = regexFinal.firstMatch(textoAtual);
+    if (matchFinal != null && matchFinal.start > 0) {
+      final antes = textoAtual.substring(0, matchFinal.start).trimRight();
+      final depois = textoAtual.substring(matchFinal.start).trimLeft();
+      return '$antes\n\n$blocoPix\n\n$depois'.trim();
+    }
+
+    return '$textoAtual\n\n$blocoPix'.trim();
+  }
+
+  void _inserirChavePixNoTexto() {
+    final pix = widget.pixInfo;
+    if (pix == null || pix.chaveDisplay.isEmpty) return;
+    final blocoChave = '🔑 *Chave PIX (${pix.tipoChave}):* ${pix.chaveDisplay}';
+    _messageController.text = _injetarAposPagamento(_messageController.text, blocoChave);
+  }
+
+  void _inserirCopiaEColaNoTexto() {
+    final pix = widget.pixInfo;
+    if (pix == null || pix.copiaECola.isEmpty) return;
+    final blocoCopiaCola = '📋 *PIX Copia e Cola:*\n${pix.copiaECola}';
+    _messageController.text = _injetarAposPagamento(_messageController.text, blocoCopiaCola);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const whatsappGreen = Color(0xFF25D366);
+    final screenHeight = MediaQuery.of(context).size.height;
+    final dialogMaxHeight = (screenHeight * 0.90).clamp(520.0, 750.0);
+
+    return Dialog(
+      backgroundColor: FincoreColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: FincoreColors.border),
+      ),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+      child: Container(
+        width: 640,
+        constraints: BoxConstraints(maxHeight: dialogMaxHeight),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── 1. Top Header ──────────────────────────────────────────
+            _buildHeader(whatsappGreen),
+
+            // ── 2. Body com Scroll Suave ──────────────────────────────
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── DESTINATÁRIO ─────────────────────────────────
+                    _buildDestinatarioSection(whatsappGreen),
+                    const SizedBox(height: 16),
+
+                    const Divider(height: 1, color: FincoreColors.border),
+                    const SizedBox(height: 16),
+
+                    // ── MENSAGEM (Elemento Principal) ─────────────────
+                    _buildMensagemSection(),
+
+                    // ── PIX (Contextual — apenas quando aplicável) ─────
+                    _buildPixSection(),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── 3. Rodapé Fixo ─────────────────────────────────────────
+            _buildFooter(whatsappGreen),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── 1. Header ─────────────────────────────────────────────────────────────
+
+  Widget _buildHeader(Color whatsappGreen) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
+      decoration: BoxDecoration(
+        color: FincoreColors.surfaceElevated,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        border: const Border(bottom: BorderSide(color: FincoreColors.border)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: whatsappGreen.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+              border: Border.all(color: whatsappGreen.withValues(alpha: 0.4)),
+            ),
+            child: Icon(Icons.chat_rounded, color: whatsappGreen, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Conversa no WhatsApp',
+                  style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.bold,
+                    color: FincoreColors.textPrimary,
                   ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _subtituloCabecalho,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: FincoreColors.textSecondary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 20, color: FincoreColors.textMuted),
+            onPressed: () => Navigator.of(context).pop(_algumEnvioRealizado),
+            tooltip: 'Fechar',
+          ),
+        ],
+      ),
+    );
+  }
 
-                  const SizedBox(width: 14),
+  // ── 2. Destinatário ───────────────────────────────────────────────────────
 
-                  // Coluna direita: chave + botão copiar
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildDestinatarioSection(Color whatsappGreen) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'DESTINATÁRIO',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: FincoreColors.textSecondary,
+                letterSpacing: 0.6,
+              ),
+            ),
+            const Spacer(),
+            // Toggle compacto do 9º dígito
+            InkWell(
+              onTap: () => _onToggleNonoDigito(!_comNonoDigito),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _comNonoDigito
+                      ? whatsappGreen.withValues(alpha: 0.12)
+                      : FincoreColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: _comNonoDigito
+                        ? whatsappGreen.withValues(alpha: 0.5)
+                        : FincoreColors.border,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _comNonoDigito ? Icons.phone_android_rounded : Icons.phone_rounded,
+                      size: 13,
+                      color: _comNonoDigito ? whatsappGreen : FincoreColors.textMuted,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _comNonoDigito ? 'Celular (com 9)' : 'Fixo / Antigo (sem 9)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _comNonoDigito ? whatsappGreen : FincoreColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // Campo de Telefone Compacto com Indicador de Validade
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _phoneController,
+          builder: (context, value, _) {
+            final digitos = WhatsAppService.sanitizarTelefone(value.text);
+            final isValido = digitos.length >= 10 && digitos.length <= 11;
+
+            return Container(
+              decoration: BoxDecoration(
+                color: FincoreColors.surfaceElevated,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isValido
+                      ? whatsappGreen.withValues(alpha: 0.4)
+                      : (digitos.isNotEmpty
+                          ? FincoreColors.warning.withValues(alpha: 0.5)
+                          : FincoreColors.border),
+                ),
+              ),
+              child: TextFormField(
+                controller: _phoneController,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: FincoreColors.textPrimary,
+                  letterSpacing: 0.4,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  TelefoneInputFormatter(),
+                ],
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  prefixIcon: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Chip do tipo de chave
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF32BCAD).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: const Color(0xFF32BCAD).withValues(alpha: 0.4)),
-                          ),
-                          child: Text(
-                            pix.tipoChave.toUpperCase(),
-                            style: const TextStyle(
-                              color: Color(0xFF32BCAD),
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-
-                        // Chave exibida
+                        Icon(Icons.chat_bubble_outline_rounded, size: 16, color: Color(0xFF25D366)),
+                        SizedBox(width: 6),
                         Text(
-                          pix.chaveDisplay,
-                          style: const TextStyle(
-                            fontSize: 14,
+                          'WhatsApp',
+                          style: TextStyle(
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: FincoreColors.textPrimary,
+                            color: FincoreColors.textSecondary,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Payload completo gerado (Copia e Cola)',
+                        SizedBox(width: 8),
+                        Text('|', style: TextStyle(color: FincoreColors.border)),
+                      ],
+                    ),
+                  ),
+                  suffixIcon: Tooltip(
+                    message: isValido
+                        ? 'Número com DDD válido para envio'
+                        : 'Informe DDD + número (mínimo 10 dígitos)',
+                    child: Icon(
+                      isValido ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                      size: 18,
+                      color: isValido
+                          ? const Color(0xFF22C55E)
+                          : (digitos.isNotEmpty ? FincoreColors.warning : FincoreColors.textMuted),
+                    ),
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  // ── 3. Mensagem ───────────────────────────────────────────────────────────
+
+  Widget _buildMensagemSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'MENSAGEM',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: FincoreColors.textSecondary,
+            letterSpacing: 0.6,
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // ⚡ Modelo de mensagem
+        Row(
+          children: const [
+            Icon(Icons.bolt_rounded, size: 15, color: Color(0xFFF59E0B)),
+            SizedBox(width: 4),
+            Text(
+              'Modelo de mensagem',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: FincoreColors.textSecondary,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+
+        Container(
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: () {
+                final templates = (_customTemplates.isNotEmpty
+                        ? _customTemplates
+                        : WhatsAppService.getTemplatesPadrao(nomeEmpresa: _resolvedNomeEmpresa))
+                    .where((t) => t.ativo)
+                    .toList();
+                if (_selectedTemplateOption != null && templates.any((t) => t.id == _selectedTemplateOption)) {
+                  return _selectedTemplateOption;
+                }
+                return null;
+              }(),
+              hint: const Text(
+                'Selecione um modelo de mensagem...',
+                style: TextStyle(fontSize: 12.5, color: FincoreColors.textMuted),
+              ),
+              isExpanded: true,
+              dropdownColor: FincoreColors.surfaceElevated,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: FincoreColors.textMuted, size: 20),
+              style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
+              onChanged: (novoId) {
+                if (novoId == null) return;
+                setState(() => _selectedTemplateOption = novoId);
+
+                final templatesLista = (_customTemplates.isNotEmpty
+                    ? _customTemplates
+                    : WhatsAppService.getTemplatesPadrao(nomeEmpresa: _resolvedNomeEmpresa));
+                final match = templatesLista.firstWhere(
+                  (t) => t.id == novoId,
+                  orElse: () => templatesLista.first,
+                );
+
+                final textoInterpolado = _interpolarTexto(match.conteudo);
+                _setTemplate(textoInterpolado);
+              },
+              items: (_customTemplates.isNotEmpty
+                      ? _customTemplates
+                      : WhatsAppService.getTemplatesPadrao(nomeEmpresa: _resolvedNomeEmpresa))
+                  .where((t) => t.ativo)
+                  .map((t) {
+                final isSelected = t.id == _selectedTemplateOption;
+                return DropdownMenuItem<String>(
+                  value: t.id,
+                  child: Row(
+                    children: [
+                      Text(t.emoji, style: const TextStyle(fontSize: 14)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          t.titulo,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? const Color(0xFF25D366) : FincoreColors.textPrimary,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // Área de Conteúdo da Mensagem Editável com Contador
+        Container(
+          decoration: BoxDecoration(
+            color: FincoreColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: FincoreColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _messageController,
+                maxLines: 6,
+                minLines: 4,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: FincoreColors.textPrimary,
+                  height: 1.45,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'Digite o conteúdo da mensagem...',
+                  hintStyle: TextStyle(color: FincoreColors.textMuted, fontSize: 13),
+                  contentPadding: EdgeInsets.all(12),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: Color(0xFF1E293B))),
+                ),
+                child: Row(
+                  children: [
+                    const Spacer(),
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _messageController,
+                      builder: (context, value, _) {
+                        return Text(
+                          '${value.text.length} caracteres',
                           style: const TextStyle(
                             fontSize: 11,
                             color: FincoreColors.textMuted,
                           ),
-                        ),
-                        const SizedBox(height: 10),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
-                        // Botão copiar
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _copiarPixCopiaECola,
-                            icon: const Icon(Icons.copy_rounded, size: 14, color: Colors.white),
-                            label: const Text(
-                              'Copiar Copia e Cola',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF32BCAD),
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              elevation: 0,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
+  // ── 4. PIX (Contextual) ───────────────────────────────────────────────────
 
-                        // Dica
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B).withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(6),
+  Widget _buildPixSection() {
+    final pix = widget.pixInfo;
+    if (pix == null) return const SizedBox.shrink();
+
+    const pixTeal = Color(0xFF32BCAD);
+
+    // Quando o pagamento já estiver confirmado
+    if (pix.confirmado) {
+      return Container(
+        margin: const EdgeInsets.only(top: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF16A34A).withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF16A34A).withValues(alpha: 0.3)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.pix, color: Color(0xFF16A34A), size: 18),
+            SizedBox(width: 8),
+            Text(
+              'PIX',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF16A34A),
+              ),
+            ),
+            SizedBox(width: 12),
+            Text(
+              '✓ Pagamento confirmado',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF22C55E),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Quando o pagamento estiver pendente
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: pixTeal.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: pixTeal.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.pix, color: pixTeal, size: 16),
+              const SizedBox(width: 6),
+              const Text(
+                'PIX',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.bold,
+                  color: pixTeal,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'Pagamento pendente',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFF59E0B),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Chave: ',
+                    style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
+                  ),
+                  SelectableText(
+                    pix.chaveDisplay,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: FincoreColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _inserirChavePixNoTexto,
+                    icon: const Icon(Icons.add_circle_outline, size: 12, color: Colors.amber),
+                    label: const Text('+ Chave no Texto', style: TextStyle(color: Colors.amber, fontSize: 11)),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.amber.withValues(alpha: 0.5)),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                  if (pix.copiaECola.isNotEmpty)
+                    OutlinedButton.icon(
+                      onPressed: _inserirCopiaEColaNoTexto,
+                      icon: const Icon(Icons.add_circle_outline, size: 12, color: Colors.cyanAccent),
+                      label: const Text('+ Copia e Cola no Texto', style: TextStyle(color: Colors.cyanAccent, fontSize: 11)),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.cyanAccent.withValues(alpha: 0.5)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          if (pix.copiaECola.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: FincoreColors.surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: FincoreColors.border),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: Checkbox(
+                      value: _enviarPixSegundaMensagem,
+                      activeColor: pixTeal,
+                      onChanged: (val) {
+                        setState(() => _enviarPixSegundaMensagem = val ?? false);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => setState(() => _enviarPixSegundaMensagem = !_enviarPixSegundaMensagem),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Enviar PIX Copia e Cola em 2ª mensagem',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: FincoreColors.textPrimary,
+                            ),
                           ),
-                          child: const Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(Icons.info_outline_rounded, size: 12, color: Color(0xFF38BDF8)),
-                              SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  'Copie a chave e envie como 2ª mensagem no WhatsApp, ou o cliente pode escanear o QR Code diretamente.',
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    color: Color(0xFF94A3B8),
-                                    height: 1.3,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          Text(
+                            'Opcional: envia o código copia e cola avulso para o cliente copiar com 1 toque.',
+                            style: TextStyle(fontSize: 10, color: FincoreColors.textMuted),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -477,563 +1288,183 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    const whatsappGreen = Color(0xFF25D366);
-    final temPix = widget.pixInfo != null;
-    final numPedido = widget.numeroPedido ?? '---';
+  // ── 5. Rodapé ─────────────────────────────────────────────────────────────
 
-    return Dialog(
-      backgroundColor: FincoreColors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: FincoreColors.border),
+  Widget _buildFooter(Color whatsappGreen) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: FincoreColors.surfaceElevated,
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+        border: const Border(top: BorderSide(color: FincoreColors.border)),
       ),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: Container(
-        width: 620,
-        constraints: BoxConstraints(maxHeight: temPix ? 820 : 720),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── Top Header ──────────────────────────────────────────
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Feedback de Envio Bem-Sucedido (Não bloqueia novos envios manuais)
+          if (_ultimoEnvioHora != null) ...[
             Container(
-              padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(
-                color: FincoreColors.surfaceElevated,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                border: const Border(bottom: BorderSide(color: FincoreColors.border)),
+                color: const Color(0xFF16A34A).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFF16A34A).withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: whatsappGreen.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: whatsappGreen.withValues(alpha: 0.4)),
-                    ),
-                    child: const Icon(Icons.chat_rounded, color: whatsappGreen, size: 22),
-                  ),
-                  const SizedBox(width: 12),
+                  const Icon(Icons.check_circle_rounded, size: 14, color: Color(0xFF22C55E)),
+                  const SizedBox(width: 6),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Conversa no WhatsApp',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: FincoreColors.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          widget.clienteNome.isNotEmpty ? widget.clienteNome : 'Cliente',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: FincoreColors.textSecondary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (temPix)
-                    Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF32BCAD).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFF32BCAD).withValues(alpha: 0.4)),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.pix, size: 12, color: Color(0xFF32BCAD)),
-                          SizedBox(width: 4),
-                          Text(
-                            'PIX',
-                            style: TextStyle(
-                              color: Color(0xFF32BCAD),
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 20, color: FincoreColors.textMuted),
-                    onPressed: () => Navigator.of(context).pop(false),
-                    tooltip: 'Fechar',
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Body ────────────────────────────────────────────────
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── Card PIX (se houver) ──────────────────────
-                    if (temPix) ...[
-                      _buildPixCard(),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // Seletor de Formato do Número (Com 9 vs Sem 9)
-                    const Text(
-                      'TIPO DO NÚMERO / 9º DÍGITO:',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: FincoreColors.textSecondary,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => _onToggleNonoDigito(true),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                              decoration: BoxDecoration(
-                                color: _comNonoDigito
-                                    ? whatsappGreen.withValues(alpha: 0.12)
-                                    : FincoreColors.surfaceElevated,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: _comNonoDigito ? whatsappGreen : FincoreColors.border,
-                                  width: _comNonoDigito ? 1.5 : 1,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.phone_android_rounded,
-                                    size: 18,
-                                    color: _comNonoDigito ? whatsappGreen : FincoreColors.textMuted,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Celular (com 9)',
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: _comNonoDigito ? FontWeight.bold : FontWeight.w500,
-                                      color: _comNonoDigito ? Colors.white : FincoreColors.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => _onToggleNonoDigito(false),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                              decoration: BoxDecoration(
-                                color: !_comNonoDigito
-                                    ? whatsappGreen.withValues(alpha: 0.12)
-                                    : FincoreColors.surfaceElevated,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: !_comNonoDigito ? whatsappGreen : FincoreColors.border,
-                                  width: !_comNonoDigito ? 1.5 : 1,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.phone_rounded,
-                                    size: 18,
-                                    color: !_comNonoDigito ? whatsappGreen : FincoreColors.textMuted,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Fixo / Antigo (sem 9)',
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: !_comNonoDigito ? FontWeight.bold : FontWeight.w500,
-                                      color: !_comNonoDigito ? Colors.white : FincoreColors.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // Campo de Telefone Editável
-                    TextFormField(
-                      controller: _phoneController,
+                    child: Text(
+                      '✓ Mensagem enviada às $_ultimoEnvioHora. Você pode reenviar ou enviar uma nova mensagem a qualquer momento.',
                       style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: FincoreColors.textPrimary,
-                        letterSpacing: 0.5,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        TelefoneInputFormatter(),
-                      ],
-                      decoration: InputDecoration(
-                        labelText: 'Número do WhatsApp',
-                        labelStyle: const TextStyle(color: FincoreColors.textSecondary, fontSize: 13),
-                        prefixIcon: const Icon(Icons.dialpad_rounded, size: 18, color: FincoreColors.textMuted),
-                        filled: true,
-                        fillColor: FincoreColors.surfaceElevated,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: FincoreColors.border),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: FincoreColors.border),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: whatsappGreen, width: 1.5),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    // Banner Informativo
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B).withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF334155)),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFF38BDF8)),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Dica: Se o WhatsApp informar que o número não existe, altere para "Sem 9" (números fixos comerciais ou contas antigas não possuem o nono dígito).',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                color: Color(0xFF94A3B8),
-                                height: 1.3,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // ── Seletor Compacto de Mensagens Rápidas (Combobox) ──
-                    const Text(
-                      'MENSAGEM RÁPIDA / MODELO:',
-                      style: TextStyle(
                         fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: FincoreColors.textSecondary,
-                        letterSpacing: 0.5,
+                        color: Color(0xFF22C55E),
+                        fontWeight: FontWeight.w500,
                       ),
-                    ),
-                    const SizedBox(height: 6),
-
-                    Container(
-                      decoration: BoxDecoration(
-                        color: FincoreColors.surfaceElevated,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: FincoreColors.border),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _selectedTemplateOption,
-                          hint: Row(
-                            children: const [
-                              Icon(Icons.bolt_rounded, size: 18, color: Color(0xFFF59E0B)),
-                              SizedBox(width: 8),
-                              Text(
-                                'Selecione um modelo de mensagem rápida...',
-                                style: TextStyle(fontSize: 13, color: FincoreColors.textMuted),
-                              ),
-                            ],
-                          ),
-                          isExpanded: true,
-                          dropdownColor: FincoreColors.surfaceElevated,
-                          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: FincoreColors.textMuted),
-                          style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
-                          onChanged: (novoId) {
-                            if (novoId == null) return;
-                            setState(() => _selectedTemplateOption = novoId);
-
-                            if (novoId == 'comprovante' && widget.initialMessage != null) {
-                              _setTemplate(widget.initialMessage!);
-                              return;
-                            }
-
-                            final templatesLista = (_customTemplates.isNotEmpty
-                                ? _customTemplates
-                                : WhatsAppService.getTemplatesPadrao(nomeEmpresa: _resolvedNomeEmpresa));
-                            final match = templatesLista.firstWhere(
-                              (t) => t.id == novoId,
-                              orElse: () => templatesLista.first,
-                            );
-
-                            final dadosInterpolar = {
-                              '{cliente}': _clienteNomeLimpo,
-                              '{loja}': _resolvedNomeEmpresa,
-                              '{pedido}': numPedido,
-                              '{total}': '0,00',
-                              '{forma_pagamento}': 'PIX / Dinheiro / Cartão',
-                              '{endereco}': widget.enderecoCliente ?? 'Conforme cadastro',
-                              '{link_cardapio}': 'https://cardapio.fincore.app',
-                              '{chave_pix}': widget.pixInfo?.chaveDisplay ?? '',
-                            };
-                            final textoInterpolado = WhatsAppService.interpolarTemplate(
-                              match.conteudo,
-                              dadosInterpolar,
-                            );
-                            _setTemplate(textoInterpolado);
-                          },
-                          items: [
-                            if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty)
-                              const DropdownMenuItem<String>(
-                                value: 'comprovante',
-                                child: Row(
-                                  children: [
-                                    Text('🧾', style: TextStyle(fontSize: 14)),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Comprovante do Pedido (Completo)',
-                                      style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF25D366)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ...(_customTemplates.isNotEmpty
-                                    ? _customTemplates
-                                    : WhatsAppService.getTemplatesPadrao(nomeEmpresa: _resolvedNomeEmpresa))
-                                .where((t) => t.ativo)
-                                .map((t) {
-                              return DropdownMenuItem<String>(
-                                value: t.id,
-                                child: Row(
-                                  children: [
-                                    Text(t.emoji, style: const TextStyle(fontSize: 14)),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        t.titulo,
-                                        style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Campo da Mensagem
-                    const Text(
-                      'CONTE\u00DADO DA MENSAGEM:',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: FincoreColors.textSecondary,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-
-                    TextFormField(
-                      controller: _messageController,
-                      maxLines: 7,
-                      minLines: 4,
-                      style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary, height: 1.4),
-                      decoration: InputDecoration(
-                        hintText: 'Digite a mensagem para enviar...',
-                        hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 13),
-                        filled: true,
-                        fillColor: FincoreColors.surfaceElevated,
-                        contentPadding: const EdgeInsets.all(14),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: FincoreColors.border),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: FincoreColors.border),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: whatsappGreen, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // ── Footer ──────────────────────────────────────────────
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: FincoreColors.surfaceElevated,
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
-                border: const Border(top: BorderSide(color: FincoreColors.border)),
-              ),
-              child: Row(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _copiarTexto,
-                    icon: const Icon(Icons.copy_rounded, size: 16, color: FincoreColors.textSecondary),
-                    label: const Text('Copiar Texto',
-                        style: TextStyle(color: FincoreColors.textSecondary, fontSize: 12.5)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: FincoreColors.border),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                  if (temPix) ...[
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: _copiarPixCopiaECola,
-                      icon: const Icon(Icons.pix, size: 16, color: Color(0xFF32BCAD)),
-                      label: const Text('Copiar PIX',
-                          style: TextStyle(color: Color(0xFF32BCAD), fontSize: 12.5)),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF32BCAD)),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ],
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: const Text('Cancelar',
-                        style: TextStyle(color: FincoreColors.textMuted, fontSize: 13)),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: _enviando ? null : _enviar,
-                    icon: _enviando
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.send_rounded, size: 16, color: Colors.white),
-                    label: Text(
-                      _enviando ? 'Abrindo...' : 'Abrir WhatsApp',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        fontSize: 13,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: whatsappGreen,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      elevation: 2,
                     ),
                   ),
                 ],
               ),
             ),
           ],
-        ),
+
+          Row(
+            children: [
+              // [Cancelar] ou [Fechar]
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(_algumEnvioRealizado),
+                style: TextButton.styleFrom(
+                  foregroundColor: FincoreColors.textSecondary,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  _algumEnvioRealizado ? 'Fechar' : 'Cancelar',
+                  style: const TextStyle(fontSize: 12.5),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // [Copiar]
+              OutlinedButton.icon(
+                onPressed: _copiarTexto,
+                icon: const Icon(Icons.copy_rounded, size: 14, color: FincoreColors.textSecondary),
+                label: const Text(
+                  'Copiar',
+                  style: TextStyle(color: FincoreColors.textSecondary, fontSize: 12),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: FincoreColors.border),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // Menu secundário ⋮
+              PopupMenuButton<String>(
+                tooltip: 'Mais opções',
+                icon: const Icon(Icons.more_vert_rounded,
+                    color: FincoreColors.textSecondary, size: 18),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                color: FincoreColors.surfaceElevated,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: const BorderSide(color: FincoreColors.border),
+                ),
+                onSelected: (val) {
+                  if (val == 'copiar_texto') _copiarTexto();
+                  if (val == 'copiar_pix') _copiarChavePix();
+                  if (val == 'copiar_copia_cola') _copiarPixCopiaECola();
+                  if (val == 'abrir_web') _enviar();
+                },
+                itemBuilder: (ctx) => [
+                  const PopupMenuItem(
+                    value: 'copiar_texto',
+                    child: Row(
+                      children: [
+                        Icon(Icons.copy_rounded, size: 15, color: FincoreColors.textSecondary),
+                        SizedBox(width: 8),
+                        Text('Copiar texto da mensagem', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  if (widget.pixInfo != null) ...[
+                    const PopupMenuItem(
+                      value: 'copiar_pix',
+                      child: Row(
+                        children: [
+                          Icon(Icons.pix, size: 15, color: Color(0xFF32BCAD)),
+                          SizedBox(width: 8),
+                          Text('Copiar chave PIX', style: TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'copiar_copia_cola',
+                      child: Row(
+                        children: [
+                          Icon(Icons.qr_code_rounded, size: 15, color: Color(0xFF32BCAD)),
+                          SizedBox(width: 8),
+                          Text('Copiar Pix Copia e Cola', style: TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const PopupMenuItem(
+                    value: 'abrir_web',
+                    child: Row(
+                      children: [
+                        Icon(Icons.open_in_browser_rounded,
+                            size: 15, color: FincoreColors.textSecondary),
+                        SizedBox(width: 8),
+                        Text('Abrir no WhatsApp Web/App', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const Spacer(),
+
+              // [🚀 Enviar pelo WhatsApp]
+              ElevatedButton.icon(
+                onPressed: _enviando ? null : _enviarViaEvolutionApi,
+                icon: _enviando
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('🚀', style: TextStyle(fontSize: 13)),
+                label: Text(
+                  _enviando ? 'Enviando...' : 'Enviar pelo WhatsApp',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    fontSize: 12.5,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: whatsappGreen,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 1,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
-}
-
-// ── QR Code Visual (CustomPainter) ──────────────────────────────────────────
-//
-// Renderiza um QR Code estilizado visualmente (não é um QR escan\u00e1vel real).
-// Para o QR real, o operador deve abrir o PixPaymentModal do PDV Express.
-// Aqui serve apenas para representação visual da chave no card WhatsApp.
-//
-class _PixQrCodePainter extends CustomPainter {
-  const _PixQrCodePainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.fill;
-
-    // Cantos principais do QR Code (finder patterns)
-    canvas.drawRect(const Rect.fromLTWH(0, 0, 42, 42), paint);
-    canvas.drawRect(Rect.fromLTWH(size.width - 42, 0, 42, 42), paint);
-    canvas.drawRect(Rect.fromLTWH(0, size.height - 42, 42, 42), paint);
-
-    // Interior branco dos cantos
-    paint.color = Colors.white;
-    canvas.drawRect(const Rect.fromLTWH(7, 7, 28, 28), paint);
-    canvas.drawRect(Rect.fromLTWH(size.width - 35, 7, 28, 28), paint);
-    canvas.drawRect(Rect.fromLTWH(7, size.height - 35, 28, 28), paint);
-
-    // Centro dos cantos (teal para identidade PIX)
-    paint.color = const Color(0xFF32BCAD);
-    canvas.drawRect(const Rect.fromLTWH(14, 14, 14, 14), paint);
-    canvas.drawRect(Rect.fromLTWH(size.width - 28, 14, 14, 14), paint);
-    canvas.drawRect(Rect.fromLTWH(14, size.height - 28, 14, 14), paint);
-
-    // Pixels de dados simulados
-    paint.color = Colors.black;
-    canvas.drawRect(Rect.fromLTWH(52, 4, 10, 10), paint);
-    canvas.drawRect(Rect.fromLTWH(66, 4, 14, 10), paint);
-    canvas.drawRect(Rect.fromLTWH(52, 18, 10, 6), paint);
-    canvas.drawRect(Rect.fromLTWH(70, 18, 10, 14), paint);
-    canvas.drawRect(Rect.fromLTWH(4, 52, 14, 10), paint);
-    canvas.drawRect(Rect.fromLTWH(22, 52, 6, 18), paint);
-    canvas.drawRect(Rect.fromLTWH(4, 66, 10, 10), paint);
-    canvas.drawRect(Rect.fromLTWH(50, 50, 18, 8), paint);
-    canvas.drawRect(Rect.fromLTWH(72, 52, 12, 12), paint);
-    canvas.drawRect(Rect.fromLTWH(50, 64, 8, 14), paint);
-    canvas.drawRect(Rect.fromLTWH(64, 68, 14, 8), paint);
-    canvas.drawRect(Rect.fromLTWH(82, 64, 8, 18), paint);
-    canvas.drawRect(Rect.fromLTWH(56, 82, 18, 8), paint);
-    canvas.drawRect(Rect.fromLTWH(78, 82, 12, 14), paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

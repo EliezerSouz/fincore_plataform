@@ -860,6 +860,7 @@ class PdvExpressController extends ChangeNotifier {
 
     // ── PASSO 1: Mapear cada produto para sua tabela de precificação (Produto -> Tabela ou Categoria -> Tabela) ────────
     final Map<String, List<PdvItem>> itensPorTabela = {};
+    final Map<String, String> nomesPorTabela = {};
 
     for (final item in _cart) {
       try {
@@ -888,6 +889,13 @@ class PdvExpressController extends ChangeNotifier {
             );
             final tabelaId = activeCatAssoc.tabelaPrecificacaoId;
             itensPorTabela.putIfAbsent(tabelaId, () => []).add(item);
+
+            try {
+              final cat = await categoriaRepo.findById(categoryId);
+              if (cat != null && cat.nome.isNotEmpty) {
+                nomesPorTabela[tabelaId] = cat.nome;
+              }
+            } catch (_) {}
           } else {
             throw Exception('sem categoria');
           }
@@ -940,6 +948,7 @@ class PdvExpressController extends ChangeNotifier {
 
         final faixas = await itemRepo.findByTabelaId(tabelaId);
         faixas.sort((a, b) => a.quantidadeMinima.compareTo(b.quantidadeMinima));
+        final minRequiredQty = faixas.isNotEmpty ? faixas.first.quantidadeMinima : 0;
 
         ItemTabelaPrecificacao? faixaAplicada;
         ItemTabelaPrecificacao? proximaFaixa;
@@ -961,35 +970,43 @@ class PdvExpressController extends ChangeNotifier {
             ? (unitPrices[itensDoGrupo.first.productId] ?? itensDoGrupo.first.priceInCents)
             : 0;
 
-        if (proximaFaixa != null) {
-          final qtyNeeded = (proximaFaixa.quantidadeMinima - totalQtyDoGrupo).clamp(0, double.infinity).toDouble();
-          final priceDifference = precoReferencia - proximaFaixa.valorUnitarioCentavos;
-          final potentialSavings = (priceDifference * totalQtyDoGrupo).round();
+        final grupoNome = nomesPorTabela[tabelaId] ?? tabela.nome;
 
-          groupSummaries.add(GroupPricingSummary(
-            group: PricingGroup(id: tabelaId, name: tabela.nome),
-            totalQty: totalQtyDoGrupo,
-            appliedUnitPriceInCents: precoReferencia,
-            appliedRange: faixaAplicada != null
-                ? PricingRange(
-                    id: faixaAplicada.id,
-                    groupId: tabelaId,
-                    minQty: faixaAplicada.quantidadeMinima,
-                    maxQty: faixaAplicada.quantidadeMaxima,
-                    unitPriceInCents: faixaAplicada.valorUnitarioCentavos,
-                  )
-                : null,
-            nextRange: PricingRange(
-              id: proximaFaixa.id,
-              groupId: tabelaId,
-              minQty: proximaFaixa.quantidadeMinima,
-              maxQty: proximaFaixa.quantidadeMaxima,
-              unitPriceInCents: proximaFaixa.valorUnitarioCentavos,
-            ),
-            qtyNeededForNextRange: qtyNeeded,
-            potentialSavingsInCents: potentialSavings,
-          ));
+        double? qtyNeeded;
+        int? potentialSavings;
+
+        if (proximaFaixa != null) {
+          qtyNeeded = (proximaFaixa.quantidadeMinima - totalQtyDoGrupo).clamp(0, double.infinity).toDouble();
+          final priceDifference = precoReferencia - proximaFaixa.valorUnitarioCentavos;
+          potentialSavings = (priceDifference * totalQtyDoGrupo).round();
         }
+
+        groupSummaries.add(GroupPricingSummary(
+          group: PricingGroup(id: tabelaId, name: grupoNome),
+          totalQty: totalQtyDoGrupo,
+          appliedUnitPriceInCents: precoReferencia,
+          appliedRange: faixaAplicada != null
+              ? PricingRange(
+                  id: faixaAplicada.id,
+                  groupId: tabelaId,
+                  minQty: faixaAplicada.quantidadeMinima,
+                  maxQty: faixaAplicada.quantidadeMaxima,
+                  unitPriceInCents: faixaAplicada.valorUnitarioCentavos,
+                )
+              : null,
+          nextRange: proximaFaixa != null
+              ? PricingRange(
+                  id: proximaFaixa.id,
+                  groupId: tabelaId,
+                  minQty: proximaFaixa.quantidadeMinima,
+                  maxQty: proximaFaixa.quantidadeMaxima,
+                  unitPriceInCents: proximaFaixa.valorUnitarioCentavos,
+                )
+              : null,
+          qtyNeededForNextRange: qtyNeeded,
+          potentialSavingsInCents: potentialSavings,
+          minRequiredQty: minRequiredQty,
+        ));
       } catch (e) {
         debugPrint('[PricingEngine] Erro ao calcular grupo $tabelaId: $e');
         for (final item in itensDoGrupo) {
@@ -1000,6 +1017,31 @@ class PdvExpressController extends ChangeNotifier {
 
     _pricingResult = PricingResult(unitPrices: unitPrices, groupSummaries: groupSummaries);
     notifyListeners();
+  }
+
+  /// Valida se todas as categorias/grupos com precificação por quantidade
+  /// atingiram a quantidade mínima exigida para finalização do pedido.
+  /// Retorna a mensagem descritiva de erro ou `null` caso válido.
+  Future<String?> validarQuantidadesMinimasGrupos() async {
+    await _recalculatePrices();
+
+    final pendencias = <String>[];
+    for (final summary in _pricingResult.groupSummaries) {
+      if (summary.minRequiredQty > 1 && summary.totalQty < summary.minRequiredQty) {
+        final totalAtual = summary.totalQty % 1 == 0
+            ? summary.totalQty.toInt().toString()
+            : summary.totalQty.toString();
+        final faltam = (summary.minRequiredQty - summary.totalQty).toInt();
+        pendencias.add(
+          'A categoria "${summary.group.name}" exige no mínimo ${summary.minRequiredQty} un no pedido (atual: $totalAtual un. Faltam $faltam un).',
+        );
+      }
+    }
+
+    if (pendencias.isNotEmpty) {
+      return pendencias.join('\n');
+    }
+    return null;
   }
 
   bool podeAvancar() {

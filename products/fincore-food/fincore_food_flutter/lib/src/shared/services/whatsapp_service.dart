@@ -533,42 +533,46 @@ class WhatsAppService {
     return [
       WhatsAppTemplate(
         id: 'comprovante',
-        titulo: 'Comprovante do Pedido (Completo)',
+        titulo: 'Comprovante do Pedido (PDV / Balcão)',
         emoji: '🧾',
-        descricao: 'Comprovante discriminado com itens, valores, dados de pagamento e entrega emitido no Frente de Caixa.',
+        descricao: 'Comprovante discriminado com itens, valores, dados de pagamento e entrega emitido no Frente de Caixa da loja.',
         categoria: 'pedido',
         isPadrao: true,
         evento: 'pedido_criado',
         ordem: 0,
-        conteudo: '🧾 *COMPROVANTE DE PEDIDO #{pedido}*\n'
-            '🏢 *{loja}*\n\n'
-            '👋 *Olá, {cliente}!* Agradecemos a sua preferência! Segue o resumo do seu pedido:\n\n'
-            '🛒 *Itens do Pedido:*\n'
+        conteudo: '🧾 *COMPROVANTE DE VENDA #{pedido}*\n'
+            '🏢 *{loja}*\n'
+            '📍 *Canal:* Atendimento Balcão / Frente de Caixa\n\n'
+            '👋 *Olá, {cliente}!* Agradecemos a sua preferência em nossa loja física! Segue o seu comprovante detalhado:\n\n'
+            '🛒 *Itens Registrados:*\n'
             '{itens}\n\n'
             '💰 *Subtotal:* R\$ {subtotal}\n'
             '{se taxa_entrega > 0}🛵 *Taxa de Entrega:* R\$ {taxa_entrega}\n{/se}'
             '{se taxa_servico > 0}🛎️ *Taxa de Serviço:* R\$ {taxa_servico}\n{/se}'
             '{se desconto > 0}🏷️ *Desconto:* R\$ {desconto}\n{/se}'
             '💵 *TOTAL:* R\$ {total}\n\n'
-            '💳 *Forma de Pagamento:* {forma_pagamento}\n\n'
+            '💳 *Forma de Pagamento:* {forma_pagamento}\n'
+            '📊 *Status:* {status_pagamento}\n\n'
             '{bloco_pix}\n\n'
             '{bloco_endereco}\n\n'
             '📱 *Acompanhe seu pedido em tempo real pelo link:*\n'
             '{link_rastreio}\n\n'
-            'Se tiver dúvidas ou precisar de ajuda, basta nos responder por aqui! ✨',
+            'Obrigado pela preferência e volte sempre! ✨',
       ),
       WhatsAppTemplate(
         id: 'pedido_aprovado',
-        titulo: 'Pedido Online Aprovado',
-        emoji: '✅',
-        descricao: 'Notifica o cliente que seu pedido feito pelo Cardápio Web foi aceito e encaminhado para a cozinha.',
+        titulo: 'Pedido Online Aprovado (Cardápio Web)',
+        emoji: '🌐',
+        descricao: 'Notifica o cliente que seu pedido feito pelo Cardápio Digital Web foi aceito e encaminhado para a cozinha.',
         categoria: 'pedido',
         isPadrao: true,
         evento: 'pedido_aprovado',
         ordem: 1,
-        conteudo: '✅ *PEDIDO #{pedido} APROVADO!* 🎉\n'
-            '🏢 *{loja}*\n\n'
-            '👋 *Olá, {cliente}!* Seu pedido foi aceito com sucesso e já está sendo preparado com todo carinho! 😋🔥\n\n'
+        conteudo: '🌐 *PEDIDO ONLINE #{pedido} APROVADO!* 🎉\n'
+            '🏢 *{loja}*\n'
+            '📱 *Canal:* Cardápio Digital Online\n\n'
+            '👋 *Olá, {cliente}!* Recebemos o seu pedido realizado pelo nosso Cardápio Online!\n'
+            'Ele foi *aprovado com sucesso* e já está sendo preparado com todo carinho pela nossa equipe! 😋🔥\n\n'
             '🛒 *Itens do Pedido:*\n'
             '{itens}\n\n'
             '💰 *Subtotal:* R\$ {subtotal}\n'
@@ -579,7 +583,7 @@ class WhatsAppService {
             '💳 *Forma de Pagamento:* {forma_pagamento}\n\n'
             '{bloco_pix}\n\n'
             '{bloco_endereco}\n\n'
-            '📱 *Acompanhe seu pedido em tempo real pelo link:*\n'
+            '📱 *Acompanhe o preparo e a entrega em tempo real:*\n'
             '{link_rastreio}\n\n'
             'Qualquer dúvida ou alteração, basta nos responder por aqui! ✨',
       ),
@@ -1478,6 +1482,12 @@ class WhatsAppService {
       '{chave_pix_copia_cola}': (chavePixCopiaCola != null && chavePixCopiaCola.trim().isNotEmpty)
           ? chavePixCopiaCola.trim()
           : (chavePix != null ? chavePix.trim() : ''),
+      '{origem}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
+          ? 'Cardápio Digital Online'
+          : 'Atendimento Balcão / Frente de Caixa',
+      '{canal}': (tipoPedido != null && (tipoPedido.toLowerCase().contains('web') || tipoPedido.toLowerCase().contains('online')))
+          ? 'Cardápio Web'
+          : 'PDV Balcão',
     };
   }
 
@@ -1570,6 +1580,65 @@ class WhatsAppService {
       debugPrint('[WhatsAppService] Erro ao salvar políticas de eventos: $e');
       return false;
     }
+  }
+
+  /// Avalia a HIERARQUIA COMPLETA DE MENSAGERIA para determinar se um evento pode ser disparado.
+  /// 
+  /// Hierarquia estrita:
+  /// 1. [Global / Empresa]: Mensageria habilitada nas configurações da empresa (usarWhatsApp)?
+  /// 2. [Política por Evento]:
+  ///    - [desativado / OFF]: BLOQUEIO TOTAL. Nenhum disparo automático ou sugestão padrão.
+  ///    - [manual]: Exige intenção/confirmação explícita do operador.
+  ///    - [automatico]: Autorizado para disparo automático em segundo plano.
+  /// 3. [Conectividade]: Instância da Evolution API conectada e operacional.
+  static Future<({bool podeDispararAutomatico, bool eventoDesativado, WhatsAppEventPolicy politica, bool isApiConectada})> avaliarHierarquiaEvento({
+    required String eventoId,
+    String? tenantId,
+    bool? empresaUsarWhatsApp,
+  }) async {
+    // 1. Validação Global da Empresa
+    bool empresaAtiva = empresaUsarWhatsApp ?? true;
+    try {
+      final repo = DependencyInjection().tryGet<EmpresaConfiguracaoRepository>();
+      if (repo != null) {
+        final configs = await repo.findAll();
+        if (configs.isNotEmpty) {
+          empresaAtiva = configs.first.usarWhatsApp;
+        }
+      }
+    } catch (_) {}
+
+    if (!empresaAtiva) {
+      return (
+        podeDispararAutomatico: false,
+        eventoDesativado: true,
+        politica: WhatsAppEventPolicy.desativado,
+        isApiConectada: false,
+      );
+    }
+
+    // 2. Política do Evento
+    final politicas = await getPoliticasEventos(tenantId: tenantId);
+    final politica = politicas[eventoId] ?? WhatsAppEventPolicy.desativado;
+
+    if (politica == WhatsAppEventPolicy.desativado) {
+      return (
+        podeDispararAutomatico: false,
+        eventoDesativado: true,
+        politica: WhatsAppEventPolicy.desativado,
+        isApiConectada: false,
+      );
+    }
+
+    // 3. Conexão com a Evolution API
+    final isApiConectada = await EvolutionApiClient.isInstanciaConectada(tenantId: tenantId);
+
+    return (
+      podeDispararAutomatico: isApiConectada && politica == WhatsAppEventPolicy.automatico,
+      eventoDesativado: false,
+      politica: politica,
+      isApiConectada: isApiConectada,
+    );
   }
 
   static void _adicionarDecisao(WhatsAppSimulatedDecision dec) {
@@ -1944,18 +2013,27 @@ class WhatsAppService {
     bool isTechnicalRetry = false,
   }) async {
     try {
-      // 1. Checa política do evento e conexão ativa da Evolution API
-      final politicas = await getPoliticasEventos(tenantId: tenantId);
-      final politica = politicas[eventoId] ?? WhatsAppEventPolicy.desativado;
-      final isApiConectada = await EvolutionApiClient.isInstanciaConectada(tenantId: tenantId);
+      // 1. Checa a HIERARQUIA COMPLETA DE MENSAGERIA para o evento
+      final hierarquia = await avaliarHierarquiaEvento(
+        eventoId: eventoId,
+        tenantId: tenantId,
+      );
 
-      // Regra Operacional:
-      // Quando a Evolution API já estiver conectada (ou a política for automática),
-      // o FINCORE dispara silenciosamente em background sem abrir telas ou avisos ao operador.
-      final bool deveDisparar = (isApiConectada && politica != WhatsAppEventPolicy.desativado) ||
-          politica == WhatsAppEventPolicy.automatico;
+      // Se o evento estiver DESATIVADO (OFF), bloqueio total e absoluto!
+      if (hierarquia.eventoDesativado || hierarquia.politica == WhatsAppEventPolicy.desativado) {
+        debugPrint('[WhatsAppService] Evento "$eventoId" está DESATIVADO (OFF) nas configurações de política. Disparo automático cancelado.');
+        return;
+      }
 
-      if (!deveDisparar) {
+      // Se a política for MANUAL, automação em background não pode disparar silenciosa
+      if (hierarquia.politica == WhatsAppEventPolicy.manual) {
+        debugPrint('[WhatsAppService] Evento "$eventoId" configurado como MANUAL. Disparo automático em background ignorado.');
+        return;
+      }
+
+      // Se a política for AUTOMÁTICA, exige conexão ativa com a Evolution API
+      if (!hierarquia.podeDispararAutomatico || !hierarquia.isApiConectada) {
+        debugPrint('[WhatsAppService] Evento "$eventoId" automático, porém Evolution API desconectada. Disparo cancelado.');
         return;
       }
 

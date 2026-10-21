@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fincore_design_system/fincore_design_system.dart';
 import '../../controllers/pdv_express_controller.dart';
+import '../../../shared/services/whatsapp_service.dart';
 
 enum ConfirmAction {
   finalizar,
@@ -45,13 +46,50 @@ class ConfirmacaoAgendamentoModal extends StatefulWidget {
 
 class _ConfirmacaoAgendamentoModalState extends State<ConfirmacaoAgendamentoModal> {
   late bool _enviarWhatsApp;
+  bool _politicaDesativada = false;
+  WhatsAppEventPolicy _politicaEvento = WhatsAppEventPolicy.desativado;
 
   @override
   void initState() {
     super.initState();
     final tel = widget.controller.cliente.telefone;
     final temTelefone = tel != null && tel.isNotEmpty && tel != '00000000000';
-    _enviarWhatsApp = temTelefone;
+    _enviarWhatsApp = false; // Inicia false por padrão até carregar hierarquia
+    _carregarPreferenciaEnvio(temTelefone);
+  }
+
+  Future<void> _carregarPreferenciaEnvio(bool temTelefone) async {
+    try {
+      final String? tenantId = widget.controller.tenantContext.hasContext
+          ? widget.controller.tenantContext.tenantId
+          : null;
+
+      final hierarquia = await WhatsAppService.avaliarHierarquiaEvento(
+        eventoId: WhatsAppService.kEventoPedidoCriadoPdv,
+        tenantId: tenantId,
+        empresaUsarWhatsApp: widget.controller.empresaConfig?.usarWhatsApp,
+      );
+
+      final cfg = await WhatsAppService.getPdvConfig(tenantId: tenantId);
+
+      if (mounted) {
+        setState(() {
+          _politicaEvento = hierarquia.politica;
+          _politicaDesativada = hierarquia.eventoDesativado;
+
+          // HIERARQUIA ESTRITA:
+          // Se o evento estiver desativado nas políticas ou sem telefone, NUNCA marca por padrão!
+          if (_politicaDesativada || !temTelefone) {
+            _enviarWhatsApp = false;
+          } else if (hierarquia.politica == WhatsAppEventPolicy.automatico) {
+            _enviarWhatsApp = cfg.enviarWhatsAppPadrao;
+          } else {
+            // Manual: inicia false, aguardando clique explícito do operador
+            _enviarWhatsApp = false;
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   String _getDiaDaSemanaFormatado(DateTime dt) {
@@ -580,14 +618,23 @@ class _ConfirmacaoAgendamentoModalState extends State<ConfirmacaoAgendamentoModa
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Enviar Comprovante via WhatsApp',
+                          _politicaDesativada
+                              ? 'Comprovante via WhatsApp (OFF nas políticas)'
+                              : (_politicaEvento == WhatsAppEventPolicy.manual
+                                  ? 'Enviar Comprovante via WhatsApp [Manual]'
+                                  : 'Enviar Comprovante via WhatsApp [Automático]'),
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
                             color: _enviarWhatsApp ? Colors.white : FincoreColors.textSecondary,
                           ),
                         ),
-                        if (cliente.telefone != null && cliente.telefone!.isNotEmpty && cliente.telefone != '00000000000')
+                        if (_politicaDesativada)
+                          const Text(
+                            'Evento desativado nas configurações de mensageria',
+                            style: TextStyle(fontSize: 11, color: Color(0xFFF59E0B)),
+                          )
+                        else if (cliente.telefone != null && cliente.telefone!.isNotEmpty && cliente.telefone != '00000000000')
                           Text(
                             'Para: ${cliente.nome ?? "Cliente"} (${cliente.telefone})',
                             style: const TextStyle(fontSize: 11, color: FincoreColors.textMuted),
@@ -602,7 +649,10 @@ class _ConfirmacaoAgendamentoModalState extends State<ConfirmacaoAgendamentoModa
                   ),
                   Switch(
                     value: _enviarWhatsApp,
-                    onChanged: (cliente.telefone == null || cliente.telefone!.isEmpty || cliente.telefone == '00000000000')
+                    onChanged: (cliente.telefone == null ||
+                            cliente.telefone!.isEmpty ||
+                            cliente.telefone == '00000000000' ||
+                            _politicaDesativada)
                         ? null
                         : (val) => setState(() => _enviarWhatsApp = val),
                     activeColor: const Color(0xFF25D366),

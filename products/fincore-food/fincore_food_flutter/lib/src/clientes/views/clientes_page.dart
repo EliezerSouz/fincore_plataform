@@ -4068,6 +4068,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
         valor: t.valorTotalCentavos / 100,
         nomeEmpresa: empresaNome,
       ),
+      initialTemplateId: 'cobranca_pix',
       pixInfo: pixInfo,
       numeroPedido: t.friendlyNumeroPedido,
       nomeEmpresa: empresaNome,

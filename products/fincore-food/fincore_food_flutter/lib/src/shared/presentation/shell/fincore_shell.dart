@@ -28,7 +28,7 @@ import 'package:fincore_food_flutter/src/estoque/views/estoque_page.dart';
 import 'package:fincore_food_flutter/src/estoque/views/producao_page.dart';
 import 'package:fincore_food_flutter/src/cozinha/views/kds_screen.dart';
 import 'package:fincore_food_flutter/src/shared/services/permissao_service.dart';
-
+import 'package:fincore_core/common/kds_models.dart';
 
 import 'package:fincore_food_flutter/src/shared/services/global_pedidos_alert_service.dart';
 import 'package:fincore_food_flutter/src/shared/widgets/pedidos_atencao_overlay.dart';
@@ -73,6 +73,16 @@ class FincoreShell extends StatefulWidget {
     }
   }
 
+  /// Inicia o fluxo de edição de um pedido existente na Frente de Caixa dentro do shell,
+  /// mantendo as barras de navegação laterais visíveis.
+  static void editarPedido(BuildContext context, OrdemPreparo ordem) {
+    var state = context.findAncestorStateOfType<_FincoreShellState>();
+    state ??= _currentState;
+    if (state != null && state.mounted) {
+      state.iniciarEdicaoPedido(ordem);
+    }
+  }
+
   @override
   State<FincoreShell> createState() => _FincoreShellState();
 }
@@ -80,6 +90,7 @@ class FincoreShell extends StatefulWidget {
 class _FincoreShellState extends State<FincoreShell>
     with TickerProviderStateMixin {
   String _selectedTabId = 'dashboard';
+  OrdemPreparo? _ordemParaEditar;
   bool _sidebarExpanded = true;
   final Map<String, bool> _expandedGroups = {
     'VENDAS': true,
@@ -881,11 +892,30 @@ class _FincoreShellState extends State<FincoreShell>
     });
   }
 
+  void iniciarEdicaoPedido(OrdemPreparo ordem) {
+    setState(() {
+      _ordemParaEditar = ordem;
+      _selectedTabId = _pdvPadrao.isNotEmpty ? _pdvPadrao : 'pdv_express';
+    });
+  }
+
+  void cancelarOuFinalizarEdicaoPedido() {
+    setState(() {
+      _ordemParaEditar = null;
+      _selectedTabId = 'pedidos';
+    });
+  }
+
   void _selectTab(String id) {
     if (id == 'pdv') {
       setState(() => _selectedTabId = _pdvPadrao);
     } else {
-      setState(() => _selectedTabId = id);
+      setState(() {
+        if (id != _pdvPadrao && id != 'pdv_express' && id != 'pdv_balcao') {
+          _ordemParaEditar = null;
+        }
+        _selectedTabId = id;
+      });
     }
   }
 
@@ -1533,9 +1563,18 @@ class _FincoreShellState extends State<FincoreShell>
       case 'dashboard':
         return const DashboardPage();
       case 'pdv_express':
-        return const PdvExpressScreen();
+        return PdvExpressScreen(
+          key: ValueKey('pdv_express_${_ordemParaEditar?.id ?? 'novo'}'),
+          isEmbedded: true,
+          ordemParaEditar: _ordemParaEditar,
+          onVoltarOuCancelar: _ordemParaEditar != null ? cancelarOuFinalizarEdicaoPedido : null,
+        );
       case 'pdv_balcao':
-        return const PdvPage();
+        return PdvPage(
+          key: ValueKey('pdv_balcao_${_ordemParaEditar?.id ?? 'novo'}'),
+          ordemParaEditar: _ordemParaEditar,
+          onVoltarOuCancelar: _ordemParaEditar != null ? cancelarOuFinalizarEdicaoPedido : null,
+        );
       case 'pedidos':
         return const PedidosPage();
       case 'kds':

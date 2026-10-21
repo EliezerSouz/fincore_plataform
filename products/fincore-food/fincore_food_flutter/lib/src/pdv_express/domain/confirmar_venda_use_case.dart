@@ -14,12 +14,14 @@ class ConfirmarVendaResult {
   final int numeroPedido;
   final String ordemPreparoId;
   final String? lancamentoFinanceiroId;
+  final List<String> lancamentoFinanceiroIds;
 
   const ConfirmarVendaResult({
     required this.pedidoId,
     required this.numeroPedido,
     required this.ordemPreparoId,
     this.lancamentoFinanceiroId,
+    this.lancamentoFinanceiroIds = const [],
   });
 }
 
@@ -28,6 +30,7 @@ class ConfirmarVendaInput {
   final PedidoDraft pedido;
   final List<ItemPedidoDraft> itens;
   final String paymentMethod;
+  final List<PagamentoItemDraft>? pagamentos;
   final String? clienteNome;
   final String? clienteTelefone;
   final String? enderecoJson;
@@ -46,6 +49,7 @@ class ConfirmarVendaInput {
     required this.pedido,
     required this.itens,
     required this.paymentMethod,
+    this.pagamentos,
     this.clienteNome,
     this.clienteTelefone,
     this.enderecoJson,
@@ -93,11 +97,41 @@ class ConfirmarVendaUseCase {
     final histTitle = input.isEdit ? 'Pedido editado' : 'Pedido criado';
     String histDesc = input.isEdit ? 'Itens/Valores atualizados no PDV' : 'Pedido enviado para a cozinha';
 
+    final List<PagamentoItemDraft> pagamentosEfetivos;
+    if (input.pagamentos != null && input.pagamentos!.isNotEmpty) {
+      pagamentosEfetivos = input.pagamentos!;
+    } else if (input.pedido.pagamentos.isNotEmpty) {
+      pagamentosEfetivos = input.pedido.pagamentos;
+    } else {
+      pagamentosEfetivos = [
+        PagamentoItemDraft(
+          formaPagamentoId: input.pedido.formaPagamentoId,
+          formaPagamentoNome: input.paymentMethod,
+          valorCentavos: input.pedido.valorTotalCentavos,
+          trocoCentavos: input.pedido.trocoParaCentavos ?? 0,
+        ),
+      ];
+    }
+
+    final somaPagamentos = pagamentosEfetivos.fold<int>(0, (acc, p) => acc + p.valorCentavos);
+    if (somaPagamentos < input.pedido.valorTotalCentavos) {
+      final diferencaFaltante = (input.pedido.valorTotalCentavos - somaPagamentos) / 100;
+      throw StateError(
+        'Soma dos pagamentos (R\$ ${(somaPagamentos / 100).toStringAsFixed(2)}) '
+        'é inferior ao total do pedido (R\$ ${(input.pedido.valorTotalCentavos / 100).toStringAsFixed(2)}). '
+        'Faltam R\$ ${diferencaFaltante.toStringAsFixed(2)}.',
+      );
+    }
+
+    final resumoPagamentos = pagamentosEfetivos.length > 1
+        ? pagamentosEfetivos.map((p) => '${p.formaPagamentoNome} (R\$ ${(p.valorCentavos / 100).toStringAsFixed(2)})').join(' + ')
+        : (pagamentosEfetivos.isNotEmpty ? pagamentosEfetivos.first.formaPagamentoNome : input.paymentMethod);
+
     await LogService.instance.logOperational(
       process: processName,
       step: 'PREPARACAO',
       action: 'INICIO',
-      message: 'Pedido ID: $pedidoId | Cliente: ${input.clienteNome ?? "Consumidor"} | Itens: ${input.itens.length} | Total: R\$ ${(input.pedido.valorTotalCentavos / 100).toStringAsFixed(2)} | Pagamento: ${input.paymentMethod}',
+      message: 'Pedido ID: $pedidoId | Cliente: ${input.clienteNome ?? "Consumidor"} | Itens: ${input.itens.length} | Total: R\$ ${(input.pedido.valorTotalCentavos / 100).toStringAsFixed(2)} | Pagamentos: $resumoPagamentos',
       traceId: traceId,
       entityType: 'pedido',
       entityId: pedidoId,
@@ -113,7 +147,7 @@ class ConfirmarVendaUseCase {
     }).toList());
 
     late int proxNumero;
-    String? lancamentoId;
+    final List<String> lancamentoFinanceiroIds = [];
 
     await _db.transaction(() async {
       // ── 1. numeroPedido transacional via MAX() ──────────────────────────
@@ -193,6 +227,9 @@ class ConfirmarVendaUseCase {
         await (_db.delete(_db.itensPedidoTable)
               ..where((t) => t.pedidoId.equals(pedidoId)))
             .go();
+        await (_db.delete(_db.pagamentosPedidoTable)
+              ..where((t) => t.pedidoId.equals(pedidoId)))
+            .go();
       }
 
       String? cleanClienteId = input.pedido.clienteId;
@@ -223,8 +260,8 @@ class ConfirmarVendaUseCase {
           valorTotalCentavos: input.pedido.valorTotalCentavos,
           trocoParaCentavos: Value(input.pedido.trocoParaCentavos),
           observacoes: Value(input.pedido.observacoes),
-          formaPagamentoId: Value(input.pedido.formaPagamentoId),
-          formaPagamentoNome: Value(input.paymentMethod),
+          formaPagamentoId: Value(pagamentosEfetivos.length == 1 ? pagamentosEfetivos.first.formaPagamentoId : input.pedido.formaPagamentoId),
+          formaPagamentoNome: Value(resumoPagamentos),
           numeroPedido: Value(proxNumero),
           enderecoJson: Value(input.enderecoJson),
           operadorId: Value(activeUser),
@@ -253,6 +290,30 @@ class ConfirmarVendaUseCase {
             quantidade: item.quantidade,
             valorUnitarioCentavos: item.valorUnitarioCentavos,
             valorTotalCentavos: item.valorTotalCentavos,
+            syncVersion: const Value(1),
+            syncStatus: SyncStatus.pending,
+            createdAt: now,
+            updatedAt: now,
+            createdBy: activeUser,
+            updatedBy: activeUser,
+          ),
+        );
+      }
+
+      // ── 3.1. Pagamentos do pedido (Split Payment AUD-006) ─────────────
+      for (final pag in pagamentosEfetivos) {
+        await _db.into(_db.pagamentosPedidoTable).insertOnConflictUpdate(
+          PagamentosPedidoTableCompanion.insert(
+            id: pag.id,
+            tenantId: activeTenant,
+            pedidoId: pedidoId,
+            formaPagamentoId: Value(pag.formaPagamentoId),
+            formaPagamentoNome: pag.formaPagamentoNome,
+            valorCentavos: pag.valorCentavos,
+            trocoCentavos: Value(pag.trocoCentavos),
+            bandeira: Value(pag.bandeira),
+            nsuTransacao: Value(pag.nsu),
+            observacao: Value(pag.observacao),
             syncVersion: const Value(1),
             syncStatus: SyncStatus.pending,
             createdAt: now,
@@ -299,7 +360,7 @@ class ConfirmarVendaUseCase {
           'cliente: ${input.clienteNome ?? 'Consumidor'}\n'
           'telefone: ${input.clienteTelefone ?? ''}\n'
           'tipo: ${input.pedido.tipoLogistica}\n'
-          'pagamento: ${input.paymentMethod}\n'
+          'pagamento: $resumoPagamentos\n'
           'total: ${input.pedido.valorTotalCentavos}'
           '$enderecoLine'
           '$bairroLine'
@@ -478,18 +539,24 @@ class ConfirmarVendaUseCase {
         }
       }
 
-      // ── 7. Lançamento financeiro (se houver sessão de caixa ativa e não for uso interno) ──────
-      lancamentoId = await _criarLancamentoFinanceiro(
-        activeTenant: activeTenant,
-        activeUser: activeUser,
-        pedidoId: pedidoId,
-        proxNumero: proxNumero,
-        valorTotalCentavos: input.pedido.valorTotalCentavos,
-        formaPagamentoId: input.pedido.formaPagamentoId,
-        paymentMethod: input.paymentMethod,
-        dataHora: input.pedido.dataHoraCriacao.toLocal(),
-        isUsoInterno: input.isUsoInterno,
-      );
+      // ── 7. Lançamentos financeiros individuais para cada fatia de pagamento ──
+      for (final pag in pagamentosEfetivos) {
+        final lId = await _criarLancamentoFinanceiro(
+          activeTenant: activeTenant,
+          activeUser: activeUser,
+          pedidoId: pedidoId,
+          proxNumero: proxNumero,
+          valorTotalCentavos: pag.valorCentavos,
+          formaPagamentoId: pag.formaPagamentoId,
+          paymentMethod: pag.formaPagamentoNome,
+          dataHora: input.pedido.dataHoraCriacao.toLocal(),
+          isUsoInterno: input.isUsoInterno,
+          bandeira: pag.bandeira,
+        );
+        if (lId != null) {
+          lancamentoFinanceiroIds.add(lId);
+        }
+      }
 
       // ── 8. Outbox — pedido ──────────────────────────────────────────────
       await _insertOutbox(
@@ -508,8 +575,8 @@ class ConfirmarVendaUseCase {
           'valorTaxaEntregaCentavos': input.pedido.valorTaxaEntregaCentavos,
           'valorTaxaServicoCentavos': input.pedido.valorTaxaServicoCentavos,
           'valorTotalCentavos': input.pedido.valorTotalCentavos,
-          'formaPagamentoId': input.pedido.formaPagamentoId,
-          'formaPagamentoNome': input.paymentMethod,
+          'formaPagamentoId': pagamentosEfetivos.length == 1 ? pagamentosEfetivos.first.formaPagamentoId : input.pedido.formaPagamentoId,
+          'formaPagamentoNome': resumoPagamentos,
           'trocoParaCentavos': input.pedido.trocoParaCentavos,
           'observacoes': input.pedido.observacoes,
           'isUsoInterno': input.isUsoInterno,
@@ -545,6 +612,33 @@ class ConfirmarVendaUseCase {
             'quantidade': item.quantidade,
             'valorUnitarioCentavos': item.valorUnitarioCentavos,
             'valorTotalCentavos': item.valorTotalCentavos,
+            'syncVersion': 1,
+            'createdAt': now.toIso8601String(),
+            'updatedAt': now.toIso8601String(),
+            'createdBy': activeUser,
+            'updatedBy': activeUser,
+          },
+        );
+      }
+
+      // ── 9.1. Outbox — pagamentos ────────────────────────────────────────
+      for (final pag in pagamentosEfetivos) {
+        await _insertOutbox(
+          activeTenant: activeTenant,
+          entity: 'pagamento_pedido',
+          entityId: pag.id,
+          action: 'create',
+          payload: {
+            'id': pag.id,
+            'tenantId': activeTenant,
+            'pedidoId': pedidoId,
+            'formaPagamentoId': pag.formaPagamentoId,
+            'formaPagamentoNome': pag.formaPagamentoNome,
+            'valorCentavos': pag.valorCentavos,
+            'trocoCentavos': pag.trocoCentavos,
+            'bandeira': pag.bandeira,
+            'nsuTransacao': pag.nsu,
+            'observacao': pag.observacao,
             'syncVersion': 1,
             'createdAt': now.toIso8601String(),
             'updatedAt': now.toIso8601String(),
@@ -614,8 +708,8 @@ class ConfirmarVendaUseCase {
         },
       );
 
-      // ── 11. Outbox — lançamento financeiro (se criado) ──────────────────
-      if (lancamentoId != null) {
+      // ── 11. Outbox — lançamentos financeiros (se criados) ───────────────
+      if (lancamentoFinanceiroIds.isNotEmpty) {
         final sessaoAtiva = await (_db.select(_db.sessoesCaixaTable)
               ..where((t) =>
                   t.tenantId.equals(activeTenant) &
@@ -625,30 +719,34 @@ class ConfirmarVendaUseCase {
             .getSingleOrNull();
 
         if (sessaoAtiva != null) {
-          await _insertOutbox(
-            activeTenant: activeTenant,
-            entity: 'lancamento_financeiro',
-            entityId: lancamentoId!,
-            action: 'CREATE',
-            payload: {
-              'id': lancamentoId,
-              'tenantId': activeTenant,
-              'sessaoCaixaId': sessaoAtiva.id,
-              'pedidoId': pedidoId,
-              'tipo': 'receita',
-              'formaPagamentoId': input.pedido.formaPagamentoId,
-              'formaPagamentoNome': input.paymentMethod,
-              'valorCentavos': input.pedido.valorTotalCentavos,
-              'descricao': 'Venda PDV #${proxNumero.toString().padLeft(4, '0')}',
-              'operadorId': activeUser,
-              'dataHora': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
-              'syncVersion': 1,
-              'createdAt': now.toIso8601String(),
-              'updatedAt': now.toIso8601String(),
-              'createdBy': activeUser,
-              'updatedBy': activeUser,
-            },
-          );
+          for (int i = 0; i < lancamentoFinanceiroIds.length; i++) {
+            final lId = lancamentoFinanceiroIds[i];
+            final pag = pagamentosEfetivos.length > i ? pagamentosEfetivos[i] : null;
+            await _insertOutbox(
+              activeTenant: activeTenant,
+              entity: 'lancamento_financeiro',
+              entityId: lId,
+              action: 'CREATE',
+              payload: {
+                'id': lId,
+                'tenantId': activeTenant,
+                'sessaoCaixaId': sessaoAtiva.id,
+                'pedidoId': pedidoId,
+                'tipo': 'receita',
+                'formaPagamentoId': pag?.formaPagamentoId ?? input.pedido.formaPagamentoId,
+                'formaPagamentoNome': pag?.formaPagamentoNome ?? input.paymentMethod,
+                'valorCentavos': pag?.valorCentavos ?? input.pedido.valorTotalCentavos,
+                'descricao': 'Venda PDV #${proxNumero.toString().padLeft(4, '0')} (${pag?.formaPagamentoNome ?? input.paymentMethod})',
+                'operadorId': activeUser,
+                'dataHora': input.pedido.dataHoraCriacao.toUtc().toIso8601String(),
+                'syncVersion': 1,
+                'createdAt': now.toIso8601String(),
+                'updatedAt': now.toIso8601String(),
+                'createdBy': activeUser,
+                'updatedBy': activeUser,
+              },
+            );
+          }
         }
       }
     });
@@ -670,7 +768,8 @@ class ConfirmarVendaUseCase {
       pedidoId: pedidoId,
       numeroPedido: proxNumero,
       ordemPreparoId: ordemPreparoId,
-      lancamentoFinanceiroId: lancamentoId,
+      lancamentoFinanceiroId: lancamentoFinanceiroIds.isNotEmpty ? lancamentoFinanceiroIds.first : null,
+      lancamentoFinanceiroIds: lancamentoFinanceiroIds,
     );
   }
 
@@ -695,6 +794,7 @@ class ConfirmarVendaUseCase {
     required String paymentMethod,
     required DateTime dataHora,
     required bool isUsoInterno,
+    String? bandeira,
   }) async {
     // Se for uso interno, consumo próprio ou cortesia, não gera movimentação financeira
     if (isUsoInterno) return null;
@@ -741,8 +841,10 @@ class ConfirmarVendaUseCase {
           return null;
         }
 
-        bandeiraPadrao = formaRow.bandeiraPadrao;
+        bandeiraPadrao = bandeira ?? formaRow.bandeiraPadrao;
       }
+    } else {
+      bandeiraPadrao = bandeira;
     }
 
     // Se o método de pagamento textual indicar a prazo, cartão ou PIX

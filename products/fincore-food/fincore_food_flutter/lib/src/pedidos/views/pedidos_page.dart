@@ -13,7 +13,6 @@ import 'package:fincore_food_flutter/src/pedidos/views/widgets/pedido_card.dart'
 import 'package:fincore_food_flutter/src/pedidos/views/widgets/kanban_column.dart';
 import 'package:fincore_food_flutter/src/pedidos/views/widgets/pedido_detail_drawer.dart';
 import 'package:fincore_food_flutter/src/cap/printing/print_capability.dart';
-import 'package:fincore_food_flutter/src/pedidos/views/pdv_page.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/shell/fincore_shell.dart';
 import 'package:fincore_food_flutter/src/shared/services/sound_service.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/whatsapp_dialog.dart';
@@ -207,17 +206,9 @@ class _PedidosPageState extends State<PedidosPage> {
                     _exibirOpcoesImpressao(ordem, parsed);
                   },
                   onEditar: PermissaoService.podeEditarPedido(_userRole)
-                      ? () async {
+                      ? () {
                           Navigator.of(ctx).pop();
-                          final result = await Navigator.push<bool>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => PdvPage(ordemParaEditar: ordem),
-                            ),
-                          );
-                          if (result == true) {
-                            await _controller.carregarOrdens();
-                          }
+                          FincoreShell.editarPedido(context, ordem);
                         }
                       : null,
                   onCancelar:
@@ -584,6 +575,45 @@ class _PedidosPageState extends State<PedidosPage> {
 
     if (motivo != null && motivo.isNotEmpty) {
       await _controller.moverStatus(o, StatusOrdemPreparo.cancelado, motivo: motivo);
+      final notificado = await _isWhatsAppDisparadoAutomatico(o, WhatsAppService.kEventoPedidoCancelado);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFFDC2626),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+            content: Row(
+              children: [
+                const Icon(Icons.cancel_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    notificado
+                        ? '❌ Pedido cancelado e cliente notificado via WhatsApp.'
+                        : '❌ Pedido cancelado com sucesso.',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<bool> _isWhatsAppDisparadoAutomatico(OrdemPreparo o, String eventoId) async {
+    try {
+      final hierarquia = await WhatsAppService.avaliarHierarquiaEvento(
+        eventoId: eventoId,
+        tenantId: o.tenantId,
+      );
+      if (hierarquia.eventoDesativado || !hierarquia.podeDispararAutomatico || !hierarquia.isApiConectada) {
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -1128,11 +1158,26 @@ class _PedidosPageState extends State<PedidosPage> {
     // Se for um pedido Web que ainda aguarda aprovação, aprova e mantém na fila como pendente
     if (o.status == StatusOrdemPreparo.pendente && _controller.isPedidoAguardandoAprovacao(o)) {
       await _controller.aprovarPedidoWeb(o);
+      final notificado = await _isWhatsAppDisparadoAutomatico(o, WhatsAppService.kEventoPedidoAprovadoWeb);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: FincoreColors.success,
-            content: const Text('✅ Pedido Web aprovado e liberado para a fila de produção!'),
+            behavior: SnackBarBehavior.floating,
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    notificado
+                        ? '✅ Pedido Web aceito e cliente notificado via WhatsApp!'
+                        : '✅ Pedido Web aceito com sucesso!',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -1145,9 +1190,61 @@ class _PedidosPageState extends State<PedidosPage> {
 
     await _controller.moverStatus(o, prox);
 
-    // Se avançou para saiuParaEntrega, abre prompt para notificar cliente no WhatsApp
+    // Se avançou para saiuParaEntrega, notifica o cliente conforme hierarquia
     if (prox == StatusOrdemPreparo.saiuParaEntrega && mounted) {
-      _abrirWhatsAppParaOrdem(o, saiuParaEntrega: true);
+      final hierarquia = await WhatsAppService.avaliarHierarquiaEvento(
+        eventoId: WhatsAppService.kEventoPedidoSaiuEntrega,
+        tenantId: o.tenantId,
+      );
+
+      if (hierarquia.eventoDesativado) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Color(0xFF16A34A),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 3),
+              content: Row(
+                children: [
+                  Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '🛵 Pedido marcado como saiu para entrega!',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      } else if (hierarquia.podeDispararAutomatico && hierarquia.isApiConectada) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Color(0xFF16A34A),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 3),
+              content: Row(
+                children: [
+                  Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '🛵 Pedido saiu para entrega e cliente notificado via WhatsApp!',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      } else {
+        // Contingência manual somente se a política for manual ou API desconectada
+        _abrirWhatsAppParaOrdem(o, saiuParaEntrega: true);
+      }
     }
   }
 
@@ -1374,15 +1471,65 @@ class _PedidosPageState extends State<PedidosPage> {
             )
           : resumoWhats;
 
+      final calcDescontoCentavos = (pedidoRow != null)
+          ? ((pedidoRow.valorSubtotalCentavos + pedidoRow.valorTaxaEntregaCentavos + pedidoRow.valorTaxaServicoCentavos) - pedidoRow.valorTotalCentavos)
+          : 0;
+      final descontoCalculado = calcDescontoCentavos > 0 ? (calcDescontoCentavos / 100.0) : 0.0;
+      final trocoStr = (pedidoRow?.trocoParaCentavos != null && pedidoRow!.trocoParaCentavos! > 0)
+          ? 'R\$ ${(pedidoRow.trocoParaCentavos! / 100.0).toStringAsFixed(2).replaceAll('.', ',')}'
+          : null;
+
+      // Verifica se houve recebimento financeiro registrado
+      bool isPago = false;
+      try {
+        final lanc = await (db.select(db.lancamentosFinanceirosTable)
+              ..where((l) =>
+                  l.pedidoId.equals(o.pedidoId) &
+                  l.tipo.equals('receita') &
+                  l.deletedAt.isNull())
+              ..limit(1))
+            .getSingleOrNull();
+        isPago = lanc != null;
+      } catch (_) {}
+      final statusPgto = isPago ? 'Confirmado' : 'Pendente';
+
+      final String templateIdSugerido;
+      if (saiuParaEntrega || o.status == StatusOrdemPreparo.saiuParaEntrega) {
+        templateIdSugerido = 'saiu_entrega';
+      } else if (o.status == StatusOrdemPreparo.pronto) {
+        templateIdSugerido = 'pedido_pronto';
+      } else if (o.status == StatusOrdemPreparo.pendente) {
+        templateIdSugerido = 'comprovante';
+      } else {
+        templateIdSugerido = 'contato_pedido';
+      }
+
       await WhatsAppDialog.show(
         context,
         rawPhone: tel,
         clienteNome: nome,
         initialMessage: initialMsg,
+        initialTemplateId: templateIdSugerido,
         enderecoCliente: enderecoStr,
+        enderecoEmpresa: WhatsAppService.formatarEnderecoEmpresa(),
+        statusPagamento: statusPgto,
+        pagamentoPendente: !isPago,
+        isPix: isPix,
         pixInfo: pixInfo,
         numeroPedido: numPedido,
+        pedidoId: pedidoRow?.id,
         nomeEmpresa: empresaNome,
+        itens: itensWhats,
+        subtotal: subtotal,
+        desconto: descontoCalculado,
+        taxaEntrega: taxaEntrega,
+        taxaServico: taxaServico,
+        total: total,
+        formaPagamento: formaPagtoStr,
+        trocoPara: trocoStr,
+        tipoPedido: tipoAtendimento,
+        observacoes: obs,
+        previsaoEntrega: dataStr,
       );
     } catch (e) {
       if (mounted) {

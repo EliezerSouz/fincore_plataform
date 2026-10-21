@@ -955,6 +955,11 @@ class _ProdutosCatalogoViewState extends State<ProdutosCatalogoView> with Single
       );
     } catch (e) {
       debugPrint('Erro ao salvar produto: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: FincoreColors.warning),
+        );
+      }
     } finally {
       setState(() => _isSaving = false);
     }

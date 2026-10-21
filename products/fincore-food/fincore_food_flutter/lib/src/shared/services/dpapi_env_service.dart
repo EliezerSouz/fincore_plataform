@@ -1,9 +1,10 @@
 // ignore_for_file: camel_case_types
 
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:fincore_core/fincore_core.dart';
 
@@ -88,26 +89,52 @@ class DpapiEnvService {
       return _loadPlain();
     }
 
-    final exeDir = _executableDirectory();
-    final encryptedFile = File('$exeDir/$_encryptedFileName');
-    final plainFile = File('$exeDir/$_plainFileName');
+    // Procura nos diretórios possíveis (executável e pasta de trabalho)
+    final candidateDirs = <String>{
+      _executableDirectory(),
+      Directory.current.path,
+    };
 
-    // ── Caminho 1: arquivo criptografado já existe ────────────────────────
-    if (await encryptedFile.exists()) {
-      return await _decryptAndLoad(encryptedFile);
+    for (final dir in candidateDirs) {
+      final plainFile = File('$dir/$_plainFileName');
+      final encryptedFile = File('$dir/$_encryptedFileName');
+
+      // Se houver um .env em texto puro mais novo ou se .env.dpapi não existir,
+      // recodifica com DPAPI para garantir que alterações no .env sejam imediatamente assimiladas
+      if (await plainFile.exists()) {
+        bool shouldEncrypt = true;
+        if (await encryptedFile.exists()) {
+          try {
+            final plainModified = await plainFile.lastModified();
+            final encModified = await encryptedFile.lastModified();
+            shouldEncrypt = plainModified.isAfter(encModified);
+          } catch (_) {
+            shouldEncrypt = true;
+          }
+        }
+
+        if (shouldEncrypt) {
+          final ok = await _encryptAndLoad(plainFile, encryptedFile);
+          if (ok) return true;
+        }
+      }
+
+      // Se o arquivo criptografado existe, decriptografa e carrega
+      if (await encryptedFile.exists()) {
+        final ok = await _decryptAndLoad(encryptedFile);
+        if (ok) return true;
+      }
     }
 
-    // ── Caminho 2: arquivo em texto puro — criptografar e proteger ────────
-    if (await plainFile.exists()) {
-      return await _encryptAndLoad(plainFile, encryptedFile);
+    // Fallback final: tenta o carregamento padrão do flutter_dotenv
+    final fallbackOk = await _loadPlain();
+    if (!fallbackOk) {
+      LogService.instance.warning(
+        LogModule.app,
+        '$_logTag | Nenhum arquivo .env ou .env.dpapi válido encontrado.',
+      );
     }
-
-    LogService.instance.warning(
-      LogModule.app,
-      '$_logTag | Nenhum arquivo .env ou .env.dpapi encontrado. '
-      'Coloque o arquivo .env na pasta do executável.',
-    );
-    return false;
+    return fallbackOk;
   }
 
   // ─── Criptografar o .env em texto puro e salvar como .env.dpapi ─────────
@@ -130,15 +157,18 @@ class DpapiEnvService {
       }
 
       await encryptedFile.writeAsBytes(encrypted);
-      await plainFile.delete();
+
+      if (kReleaseMode) {
+        await plainFile.delete();
+      }
 
       LogService.instance.info(
         LogModule.app,
-        '$_logTag | .env criptografado com DPAPI e arquivo original apagado. '
-        'A partir de agora apenas .env.dpapi é usado nesta máquina.',
+        '$_logTag | .env criptografado com DPAPI. '
+        'A partir de agora .env.dpapi protege as credenciais.',
       );
 
-      return _parseAndLoad(String.fromCharCodes(content));
+      return _parseAndLoad(utf8.decode(content, allowMalformed: true));
     } catch (e) {
       LogService.instance.warning(
         LogModule.app,
@@ -169,7 +199,7 @@ class DpapiEnvService {
         '$_logTag | Variáveis de ambiente carregadas via DPAPI com sucesso.',
       );
 
-      return _parseAndLoad(String.fromCharCodes(decrypted));
+      return _parseAndLoad(utf8.decode(decrypted, allowMalformed: true));
     } catch (e) {
       LogService.instance.warning(
         LogModule.app,

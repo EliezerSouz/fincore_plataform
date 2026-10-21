@@ -1,0 +1,4 @@
+# Ignorar segredos e arquivos de runtime locais
+.env
+*.log
+instances/

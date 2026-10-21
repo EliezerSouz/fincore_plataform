@@ -63,33 +63,6 @@ class _LoginPageState extends State<LoginPage>
     super.dispose();
   }
 
-  Future<void> _loginComGoogle() async {
-    setState(() => _isLoading = true);
-    try {
-      final redirectUrl = kIsWeb ? null : 'io.supabase.fincore://login-callback/';
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: redirectUrl,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error_outline, color: Colors.white, size: 18),
-                const SizedBox(width: 10),
-                Expanded(child: Text('Erro ao autenticar com Google: $e')),
-              ],
-            ),
-            backgroundColor: FincoreColors.danger,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
@@ -584,50 +557,7 @@ class _LoginPageState extends State<LoginPage>
                                         ),
                                 ),
                               ),
-                              const SizedBox(height: 16),
 
-                              // Botão Continuar com Google (OAuth)
-                              SizedBox(
-                                width: double.infinity,
-                                height: 48,
-                                child: OutlinedButton(
-                                  onPressed: _isLoading ? null : _loginComGoogle,
-                                  style: OutlinedButton.styleFrom(
-                                    side: const BorderSide(color: FincoreColors.border, width: 1.2),
-                                    backgroundColor: FincoreColors.background.withValues(alpha: 0.5),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(4),
-                                        decoration: const BoxDecoration(
-                                          color: Colors.white,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Icon(
-                                          Icons.g_mobiledata_rounded,
-                                          color: Color(0xFF4285F4),
-                                          size: 20,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      const Text(
-                                        'Continuar com o Google',
-                                        style: TextStyle(
-                                          color: FincoreColors.textPrimary,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 20),
 
                               // Divider
                               Row(

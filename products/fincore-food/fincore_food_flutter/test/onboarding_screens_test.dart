@@ -67,7 +67,7 @@ void main() {
       // Clicar em Avançar sem preencher para disparar validação
       await tester.tap(find.text('AVANÇAR'));
       await tester.pump();
-      expect(find.text('Informe seu nome'), findsOneWidget);
+      expect(find.text('Informe seu nome completo'), findsOneWidget);
       expect(find.text('Informe seu e-mail'), findsOneWidget);
 
       // Preencher credenciais corretas
@@ -82,7 +82,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Etapa 2 de 2: Dados do Estabelecimento'), findsOneWidget);
-      expect(find.byType(TextFormField), findsNWidgets(4)); // Razão Social, Nome Fantasia, CNPJ/CPF, Telefone
+      expect(find.byType(TextFormField), findsNWidgets(11)); // Razão Social, Nome Fantasia, CNPJ/CPF, Telefone + 7 campos de endereço
       expect(find.text('CADASTRAR'), findsOneWidget);
 
       // Clicar em Cadastrar sem preencher dados da empresa
@@ -106,8 +106,8 @@ void main() {
       ));
 
       // Passo 1: Configuração do Espaço
-      expect(find.text('Passo 1 de 2'), findsOneWidget);
-      expect(find.text('Sobre a Empresa'), findsOneWidget);
+      expect(find.textContaining('Passo 1 de 2'), findsOneWidget);
+      expect(find.text('Identificação da Empresa'), findsOneWidget);
       expect(find.byType(TextFormField), findsNWidgets(2)); // Razão Social & Nome Fantasia
 
       // Preencher nome da empresa (Razão Social)
@@ -118,20 +118,10 @@ void main() {
       await tester.tap(find.text('AVANÇAR'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Passo 2 de 2'), findsOneWidget);
-      expect(find.text('Informações Fiscais e Contato'), findsOneWidget);
-      expect(find.byType(TextFormField), findsNWidgets(3)); // CNPJ/CPF, Telefone, E-mail Comercial
-
-      // Preencher CNPJ/CPF
-      await tester.enterText(find.byType(TextFormField).first, '12.345.678/0001-90');
-      // Preencher Telefone
-      await tester.enterText(find.byType(TextFormField).at(1), '11999999999');
-      // Preencher E-mail
-      await tester.enterText(find.byType(TextFormField).last, 'comercial@fincore.com');
-      await tester.pumpAndSettle();
-
-      // Finalizar Onboarding
-      expect(find.text('FINALIZAR'), findsOneWidget);
+      expect(find.textContaining('Passo 2 de 2'), findsOneWidget);
+      expect(find.text('Fiscal e Contato'), findsOneWidget);
+      expect(find.byType(TextFormField), findsNWidgets(10)); // CNPJ/CPF, Telefone, E-mail e Endereço
+      expect(find.text('CONCLUIR CADASTRO'), findsOneWidget);
     });
 
     testWidgets('PendingApprovalPage check SLA and layout', (WidgetTester tester) async {

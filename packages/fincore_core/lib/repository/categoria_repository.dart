@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import '../common/master_data_models.dart';
+import '../common/domain_exceptions.dart';
 import '../common/domain_primitives.dart';
 import '../context/tenant_context.dart';
 import '../database/fincore_database.dart';
@@ -68,6 +69,22 @@ class CategoriaRepository extends SyncableRepository<Categoria> {
     return rows.map(_mapToDomain).toList();
   }
 
+  /// Retorna as subcategorias vinculadas ao [parentId] informado,
+  /// ou as categorias-raiz se [parentId] for nulo.
+  Future<List<Categoria>> findByParentId(String? parentId) async {
+    final rows = await (db.select(db.categoriasTable)
+          ..where(
+            (t) =>
+                t.tenantId.equals(activeTenantId) &
+                t.deletedAt.isNull() &
+                (parentId == null
+                    ? t.parentId.isNull()
+                    : t.parentId.equals(parentId)),
+          ))
+        .get();
+    return rows.map(_mapToDomain).toList();
+  }
+
   @override
   Future<void> saveLocal(Categoria categoria) async {
     if (categoria.tenantId != activeTenantId) {
@@ -109,7 +126,20 @@ class CategoriaRepository extends SyncableRepository<Categoria> {
     ));
   }
 
-  Future<Categoria> save(Categoria categoria) => saveWithSync(categoria);
+  /// Verifica se já existe outra categoria ativa (não excluída) com o mesmo
+  /// nome normalizado no tenant corrente.
+  Future<bool> existeNomeDuplicado(String nome, {String? ignorarId}) async {
+    final alvo = normalizarNomeCadastro(nome);
+    final todas = await findAll();
+    return todas.any((c) => c.id != ignorarId && normalizarNomeCadastro(c.nome) == alvo);
+  }
+
+  Future<Categoria> save(Categoria categoria) async {
+    if (await existeNomeDuplicado(categoria.nome, ignorarId: categoria.id)) {
+      throw NomeDuplicadoException(entidade: 'uma categoria', nome: categoria.nome.trim());
+    }
+    return saveWithSync(categoria);
+  }
   Future<void> delete(String id) => deleteWithSync(id);
 
   Categoria _mapToDomain(CategoriaData data) {

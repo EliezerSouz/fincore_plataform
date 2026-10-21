@@ -25,6 +25,7 @@ import 'tables/audit_logs_table.dart';
 import 'tables/categorias_tabelas_precificacao_table.dart';
 // P0-01: Tabelas de Pedidos e Itens (ciclo de vida de vendas)
 import 'tables/pedidos_table.dart';
+import 'tables/pagamentos_pedido_table.dart';
 // ESTOQUE: Controle de estoque de produtos acabados
 import 'tables/estoque_tables.dart';
 // FINANCEIRO: Sessões de caixa e lançamentos
@@ -83,6 +84,7 @@ class OutboxSync extends Table {
   // P0-01: Pedidos e Itens — ciclo de vida de vendas
   PedidosTable,
   ItensPedidoTable,
+  PagamentosPedidoTable,
   // ESTOQUE: Controle de estoque de produtos acabados
   EstoqueProdutosTable,
   MovimentacoesEstoqueTable,
@@ -96,7 +98,7 @@ class FincoreDatabase extends _$FincoreDatabase {
   FincoreDatabase(super.e);
 
   @override
-  int get schemaVersion => 29;
+  int get schemaVersion => 30;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -363,6 +365,11 @@ class FincoreDatabase extends _$FincoreDatabase {
             LogService.instance.info(LogModule.migration, 'Executando Migration 029: Adicionando valor_taxa_servico_centavos a pedidos_table...');
             try { await customStatement('ALTER TABLE pedidos_table ADD COLUMN valor_taxa_servico_centavos INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
             LogService.instance.info(LogModule.migration, 'Migration 029: ✔ OK');
+          }
+          if (from < 30) {
+            LogService.instance.info(LogModule.migration, 'Executando Migration 030: Criando tabela pagamentos_pedido_table (Split Payment AUD-006)...');
+            try { await m.createTable(pagamentosPedidoTable); } catch (_) {}
+            LogService.instance.info(LogModule.migration, 'Migration 030: ✔ OK');
           }
           LogService.instance.info(LogModule.migration, 'Atualização de schema concluída com sucesso (v$to)');
         },

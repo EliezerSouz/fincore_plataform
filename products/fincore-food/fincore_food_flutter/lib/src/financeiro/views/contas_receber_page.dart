@@ -1272,6 +1272,7 @@ class _ContasReceberPageState extends State<ContasReceberPage> {
       rawPhone: item.clienteTelefone!,
       clienteNome: item.clienteNome,
       initialMessage: initialMsg,
+      initialTemplateId: 'cobranca_pix',
       pixInfo: pixInfo,
       numeroPedido: item.friendlyNumeroPedido,
       nomeEmpresa: empresaNome,

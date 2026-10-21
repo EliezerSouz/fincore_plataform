@@ -6,6 +6,7 @@ import 'package:fincore_core/repository/categoria_repository.dart';
 import 'package:fincore_core/repository/produto_repository.dart';
 import 'package:fincore_core/common/master_data_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
+import 'package:fincore_core/common/domain_exceptions.dart';
 import 'package:fincore_core/context/tenant_context.dart';
 import 'package:fincore_pricing/repository/tabela_precificacao_repository.dart';
 import 'package:fincore_pricing/repository/categoria_tabela_precificacao_repository.dart';
@@ -65,6 +66,7 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
   final _precoPadraoCtrl = TextEditingController(text: '1.50');
 
   bool _ativo = true;
+  String? _parentId;
   String _icone = 'fastfood';
   String _corHex = '#FF6B00';
 
@@ -192,6 +194,7 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
         _descricaoCtrl.text = categoria.descricao;
         _ordemCtrl.text = categoria.ordemExibicao.toString();
         _ativo = categoria.ativo;
+        _parentId = categoria.parentId;
         _icone = categoria.icone ?? 'fastfood';
         _corHex = categoria.cor ?? '#FF6B00';
 
@@ -237,6 +240,7 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
         _descricaoCtrl.clear();
         _ordemCtrl.text = '0';
         _ativo = true;
+        _parentId = null;
         _icone = 'fastfood';
         _corHex = '#FF6B00';
         _selectedPoliticaId = null;
@@ -286,6 +290,7 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
       final categoria = Categoria(
         id: id,
         tenantId: tenantCtx.tenantId,
+        parentId: _parentId,
         nome: nome,
         descricao: _descricaoCtrl.text.trim(),
         ordemExibicao: int.tryParse(_ordemCtrl.text) ?? 0,
@@ -367,6 +372,12 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
           backgroundColor: FincoreColors.success,
         ),
       );
+    } on NomeDuplicadoException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.mensagem), backgroundColor: FincoreColors.warning),
+        );
+      }
     } catch (e, stack) {
       debugPrint('Erro ao salvar categoria: $e\n$stack');
       if (mounted) {
@@ -437,20 +448,48 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
                 ),
                 child: Icon(iconData, color: colorVal, size: 18),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: cat.ativo ? FincoreColors.success.withValues(alpha: 0.15) : FincoreColors.textMuted.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  cat.ativo ? '● ATIVA' : '● INATIVA',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.bold,
-                    color: cat.ativo ? FincoreColors.success : FincoreColors.textMuted,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (cat.parentId != null) ...[
+                    Builder(builder: (_) {
+                      final pai = _categorias.where((c) => c.id == cat.parentId).firstOrNull;
+                      if (pai == null) return const SizedBox.shrink();
+                      return Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: FincoreColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.3)),
+                        ),
+                        child: Text(
+                          '↳ ${pai.nome}',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: FincoreColors.primary,
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: cat.ativo ? FincoreColors.success.withValues(alpha: 0.15) : FincoreColors.textMuted.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      cat.ativo ? '● ATIVA' : '● INATIVA',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.bold,
+                        color: cat.ativo ? FincoreColors.success : FincoreColors.textMuted,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ],
           ),
@@ -829,6 +868,11 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
             // Detalhes Gerais
             _buildInspectorSectionTitle('Dados Gerais & Visual'),
             _buildInspectorDetailRow('Nome', _selectedCategoria?.nome ?? '--'),
+            if (_selectedCategoria?.parentId != null)
+              _buildInspectorDetailRow(
+                'Subcategoria de',
+                _categorias.where((c) => c.id == _selectedCategoria!.parentId).firstOrNull?.nome ?? 'Categoria Removida',
+              ),
             _buildInspectorDetailRow('Descrição', _selectedCategoria?.descricao == null || _selectedCategoria!.descricao.isEmpty ? 'Sem descrição.' : _selectedCategoria!.descricao),
             _buildInspectorDetailRow('Ordem de Exibição', _selectedCategoria?.ordemExibicao.toString() ?? '0'),
             _buildInspectorDetailRow('Produtos Vinculados', '$prodCount produtos ativos'),
@@ -933,6 +977,41 @@ class _CategoriasPageState extends State<CategoriasPage> with SingleTickerProvid
                           FincoreValidators.required,
                           FincoreValidators.minLength(2),
                         ]),
+                      ),
+                      const SizedBox(height: 12),
+                      const FincoreFieldLabel(label: 'CATEGORIA SUPERIOR / PAI (OPCIONAL)'),
+                      DropdownButtonFormField<String?>(
+                        value: _parentId,
+                        dropdownColor: FincoreColors.surface,
+                        style: const TextStyle(color: FincoreColors.textPrimary, fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: 'Nenhuma (Categoria Principal / Raiz)',
+                          hintStyle: const TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: FincoreColors.border),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: FincoreColors.primary),
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Nenhuma (Categoria Principal / Raiz)', style: TextStyle(color: FincoreColors.textMuted)),
+                          ),
+                          ..._categorias
+                              .where((c) => _selectedCategoria == null || c.id != _selectedCategoria!.id)
+                              .map((c) => DropdownMenuItem<String?>(
+                                    value: c.id,
+                                    child: Text(c.nome, style: const TextStyle(color: FincoreColors.textPrimary)),
+                                  )),
+                        ],
+                        onChanged: (novoParentId) {
+                          setState(() => _parentId = novoParentId);
+                        },
                       ),
                       const SizedBox(height: 12),
                       const FincoreFieldLabel(label: 'DESCRIÇÃO DA CATEGORIA'),

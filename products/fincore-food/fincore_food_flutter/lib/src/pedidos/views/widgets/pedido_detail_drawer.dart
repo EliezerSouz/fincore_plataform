@@ -363,7 +363,7 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   }
 
   /// Abre o WhatsAppDialog com dados do pedido, incluindo card PIX se aplicavel
-  Future<void> _abrirWhatsApp() async {
+  Future<void> _abrirWhatsApp({bool cobrar = false}) async {
     try {
       final db = DependencyInjection().get<FincoreDatabase>();
 
@@ -551,15 +551,53 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
         nomeEmpresa: empresaNome,
       );
 
+      final calcDescontoCentavos = (pedidoRow != null)
+          ? ((pedidoRow.valorSubtotalCentavos + pedidoRow.valorTaxaEntregaCentavos + pedidoRow.valorTaxaServicoCentavos) - pedidoRow.valorTotalCentavos)
+          : 0;
+      final descontoCalculado = calcDescontoCentavos > 0 ? (calcDescontoCentavos / 100.0) : 0.0;
+      final trocoStr = (pedidoRow?.trocoParaCentavos != null && pedidoRow!.trocoParaCentavos! > 0)
+          ? 'R\$ ${(pedidoRow.trocoParaCentavos! / 100.0).toStringAsFixed(2).replaceAll('.', ',')}'
+          : null;
+
+      final String templateIdSugerido;
+      if (cobrar) {
+        templateIdSugerido = 'cobranca_pix';
+      } else if (widget.ordem.status == StatusOrdemPreparo.saiuParaEntrega) {
+        templateIdSugerido = 'saiu_entrega';
+      } else if (widget.ordem.status == StatusOrdemPreparo.pronto) {
+        templateIdSugerido = 'pedido_pronto';
+      } else if (widget.ordem.status == StatusOrdemPreparo.pendente) {
+        templateIdSugerido = 'comprovante';
+      } else {
+        templateIdSugerido = 'contato_pedido';
+      }
+
       await WhatsAppDialog.show(
         context,
         rawPhone: tel,
         clienteNome: nome,
         initialMessage: resumoWhats,
+        initialTemplateId: templateIdSugerido,
         enderecoCliente: enderecoStr,
+        enderecoEmpresa: WhatsAppService.formatarEnderecoEmpresa(),
+        statusPagamento: _isPago ? 'Confirmado' : 'Pendente',
+        pagamentoPendente: !_isPago,
+        isPix: _formaPagamentoIsPix,
         pixInfo: pixInfo,
         numeroPedido: numPedido,
+        pedidoId: pedidoRow?.id ?? widget.ordem.pedidoId,
         nomeEmpresa: empresaNome,
+        itens: itensWhats,
+        subtotal: subtotal,
+        desconto: descontoCalculado,
+        taxaEntrega: taxaEntrega,
+        taxaServico: taxaServico,
+        total: total,
+        formaPagamento: formaPagtoStr,
+        trocoPara: trocoStr,
+        tipoPedido: tipoAtendimento,
+        observacoes: obs,
+        previsaoEntrega: dataStr,
       );
     } catch (e) {
       if (mounted) {
@@ -1469,7 +1507,7 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: _abrirWhatsApp,
+                onPressed: () => _abrirWhatsApp(cobrar: true),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF25D366),
                   side: const BorderSide(color: Color(0xFF25D366)),

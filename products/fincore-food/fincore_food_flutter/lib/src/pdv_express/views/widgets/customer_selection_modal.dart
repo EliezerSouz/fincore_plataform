@@ -4,7 +4,6 @@ import 'package:fincore_design_system/fincore_design_system.dart';
 import 'package:fincore_core/common/master_data_models.dart';
 import 'package:fincore_core/common/domain_primitives.dart';
 import 'package:fincore_food_flutter/src/clientes/views/widgets/cliente_form_dialog.dart';
-import 'package:fincore_food_flutter/src/shared/services/delivery_fee_service.dart';
 import '../../controllers/pdv_express_controller.dart';
 
 /// Modal ergonômico de alta performance para Busca e Seleção de Clientes no PDV.
@@ -39,6 +38,7 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
   late String _tipoAtendimento;
   List<Cliente> _filteredClientes = [];
   int _selectedIndex = 0;
+  bool _isSelecting = false;
 
   @override
   void initState() {
@@ -140,7 +140,7 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
     } else if (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter) {
       if (_filteredClientes.isNotEmpty && _selectedIndex >= 0 && _selectedIndex < _filteredClientes.length) {
         _selecionarClienteEFechar(_filteredClientes[_selectedIndex]);
-      } else {
+      } else if (_searchCtrl.text.trim().isNotEmpty) {
         _salvarClienteDigitadoEFechar();
       }
       return KeyEventResult.handled;
@@ -172,6 +172,9 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
   }
 
   Future<void> _selecionarClienteEFechar(Cliente c) async {
+    if (_isSelecting) return;
+    _isSelecting = true;
+
     _searchCtrl.text = c.nomeExibicao;
     _phoneCtrl.text = c.telefoneFormatado.isNotEmpty ? c.telefoneFormatado : c.telefone;
 
@@ -184,47 +187,30 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
       ),
     );
 
-    // Carregar endereços e taxas de entrega automaticamente com regras unificadas
-    final locals = await widget.controller.localRepo.findByClienteId(c.id);
-    if (locals.isNotEmpty) {
-      final address = locals.first;
-      int valorCentavos = 0;
-      int? distMetros;
-      if (_tipoAtendimento == 'Entrega') {
-        try {
-          final taxas = await widget.controller.taxaRepo.findAll();
-          final empresa = widget.controller.tenantContext.empresa;
-          final distKm = await DeliveryFeeService.estimarDistanciaKm(
-            empresa: empresa,
-            clienteCep: address.cep,
-            clienteLogradouro: address.logradouro,
-            clienteNumero: address.numero,
-            clienteBairro: address.bairro,
-          );
-          if (distKm != null) {
-            distMetros = (distKm * 1000).round();
-          }
-          final res = DeliveryFeeService.calcular(
-            taxas: taxas,
-            distanciaKm: distKm,
+    // Carregar endereços locais do cliente no banco SQLite (instantâneo, sem requisições HTTP)
+    try {
+      final locals = await widget.controller.localRepo.findByClienteId(c.id);
+      if (locals.isNotEmpty) {
+        final address = locals.first;
+        widget.controller.updateEntrega(
+          widget.controller.entrega.copyWith(
+            tipo: _tipoAtendimento,
+            logradouro: address.logradouro,
+            numero: address.numero,
             bairro: address.bairro,
+            referencia: address.referencia,
             cep: address.cep,
-          );
-          valorCentavos = res.taxaCentavos;
-        } catch (_) {}
+          ),
+        );
+      } else {
+        widget.controller.updateEntrega(
+          widget.controller.entrega.copyWith(
+            tipo: _tipoAtendimento,
+          ),
+        );
       }
-
-      widget.controller.updateEntrega(
-        widget.controller.entrega.copyWith(
-          logradouro: address.logradouro,
-          numero: address.numero,
-          bairro: address.bairro,
-          referencia: address.referencia,
-          cep: address.cep,
-          distanciaMetros: distMetros,
-          taxaEntregaCentavos: _tipoAtendimento == 'Entrega' ? valorCentavos : 0,
-        ),
-      );
+    } catch (e) {
+      debugPrint('[CustomerSelectionModal] Erro ao carregar locais locais: $e');
     }
 
     if (mounted) {
@@ -233,12 +219,18 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
   }
 
   void _salvarClienteDigitadoEFechar() {
+    if (_isSelecting) return;
+
     final nome = _searchCtrl.text.trim();
-    if (nome.isEmpty || nome.toLowerCase() == 'consumidor final') {
+    if (nome.isEmpty) {
+      return; // Não reseta para consumidor final se o usuário apenas pressionou enter sem texto
+    }
+    if (nome.toLowerCase() == 'consumidor final') {
       _definirConsumidorFinalEFechar();
       return;
     }
 
+    _isSelecting = true;
     final taxaCentavos = _converterTextoParaCentavos(_taxaCtrl.text);
 
     widget.controller.updateCliente(
@@ -479,7 +471,7 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
                                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
-                                  onPressed: _salvarClienteDigitadoEFechar,
+                                  onPressed: _isSelecting ? null : _salvarClienteDigitadoEFechar,
                                 ),
                             ],
                           ),
@@ -493,7 +485,12 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
                             final isSelected = index == _selectedIndex;
 
                             return InkWell(
-                              onTap: () => _selecionarClienteEFechar(c),
+                              onTap: _isSelecting
+                                  ? null
+                                  : () {
+                                      setState(() => _selectedIndex = index);
+                                      _selecionarClienteEFechar(c);
+                                    },
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                 decoration: BoxDecoration(
@@ -640,13 +637,15 @@ class _CustomerSelectionModalState extends State<CustomerSelectionModal> {
                         ),
                         const SizedBox(width: 8),
                         ElevatedButton(
-                          onPressed: () {
-                            if (_filteredClientes.isNotEmpty && _selectedIndex >= 0 && _selectedIndex < _filteredClientes.length) {
-                              _selecionarClienteEFechar(_filteredClientes[_selectedIndex]);
-                            } else {
-                              _salvarClienteDigitadoEFechar();
-                            }
-                          },
+                          onPressed: _isSelecting
+                              ? null
+                              : () {
+                                  if (_filteredClientes.isNotEmpty && _selectedIndex >= 0 && _selectedIndex < _filteredClientes.length) {
+                                    _selecionarClienteEFechar(_filteredClientes[_selectedIndex]);
+                                  } else if (_searchCtrl.text.trim().isNotEmpty) {
+                                    _salvarClienteDigitadoEFechar();
+                                  }
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: FincoreColors.primary,
                             foregroundColor: Colors.white,

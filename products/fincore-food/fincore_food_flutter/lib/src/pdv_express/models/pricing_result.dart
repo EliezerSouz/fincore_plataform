@@ -29,6 +29,7 @@ class GroupPricingSummary {
   final PricingRange? nextRange;
   final double? qtyNeededForNextRange;
   final int? potentialSavingsInCents;
+  final int minRequiredQty;
 
   const GroupPricingSummary({
     required this.group,
@@ -38,7 +39,11 @@ class GroupPricingSummary {
     this.nextRange,
     this.qtyNeededForNextRange,
     this.potentialSavingsInCents,
+    this.minRequiredQty = 0,
   });
+
+  bool get atingiuMinimo => minRequiredQty <= 1 || totalQty >= minRequiredQty;
+  double get missingQty => (minRequiredQty - totalQty).clamp(0, double.infinity);
 }
 
 class PricingResult {
