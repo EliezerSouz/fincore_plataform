@@ -10,7 +10,7 @@ class AppConstants {
   AppConstants._();
 
   /// Versão atual do aplicativo (bumpar a cada release)
-  static const String version = 'v1.7.13';
+  static const String version = 'v1.8.0';
 
   /// Nome oficial do produto
   static const String appName = 'FINCORE Food';
