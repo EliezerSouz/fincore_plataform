@@ -8,6 +8,10 @@
   ],
   "routes": [
     {
+      "src": "/avaliacao",
+      "dest": "/avaliacao.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "/$1"
     }
