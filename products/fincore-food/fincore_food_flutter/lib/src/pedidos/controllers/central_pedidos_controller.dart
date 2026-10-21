@@ -15,6 +15,7 @@ import '../../estoque/controllers/estoque_controller.dart';
 import '../../shared/data/sync/supabase_sync_service.dart';
 import '../../shared/services/sound_service.dart';
 import '../../cap/printing/print_capability.dart';
+import '../../shared/services/whatsapp_service.dart';
 
 class DeadlineInfo {
   final DateTime horarioEntrega;
@@ -1037,10 +1038,15 @@ class CentralPedidosController extends ChangeNotifier {
         StatusOrdemPreparo.cancelado       => 'cancelado',
       };
 
+      final obsCancelamento = (novoStatus == StatusOrdemPreparo.cancelado && motivo != null && motivo.trim().isNotEmpty)
+          ? Value(motivo.trim())
+          : const Value<String?>.absent();
+
       await (db.update(db.pedidosTable)
             ..where((t) => t.id.equals(ordem.pedidoId)))
           .write(PedidosTableCompanion(
         status: Value(statusStr),
+        observacoes: obsCancelamento,
         updatedAt: Value(now),
         syncStatus: const Value(SyncStatus.pending),
       ));
@@ -1124,6 +1130,11 @@ class CentralPedidosController extends ChangeNotifier {
             'id': ordem.pedidoId,
             'tenantId': ordem.tenantId,
             'status': statusStr,
+            if (novoStatus == StatusOrdemPreparo.cancelado && motivo != null && motivo.trim().isNotEmpty) ...{
+              'observacoes': motivo.trim(),
+              'motivoCancelamento': motivo.trim(),
+              'motivo_cancelamento': motivo.trim(),
+            },
             'syncVersion': pedidoSyncVersion,
             'updatedAt': now.toIso8601String(),
           },
@@ -1355,6 +1366,27 @@ class CentralPedidosController extends ChangeNotifier {
       }
     }
 
+    // Disparo Simulado da Mensageria (Fase C: Modo Simulação / Mock - sem envio real)
+    final eventoSimulado = switch (novoStatus) {
+      StatusOrdemPreparo.pronto          => WhatsAppService.kEventoPedidoPronto,
+      StatusOrdemPreparo.saiuParaEntrega => WhatsAppService.kEventoPedidoSaiuEntrega,
+      StatusOrdemPreparo.cancelado       => WhatsAppService.kEventoPedidoCancelado,
+      _                                  => null,
+    };
+
+    if (eventoSimulado != null) {
+      _dispararSimulacaoWhatsApp(
+        ordem: updated,
+        eventoId: eventoSimulado,
+        motivo: motivo,
+      );
+    } else if (isAprovacao && isPedidoAguardandoAprovacao(ordem)) {
+      _dispararSimulacaoWhatsApp(
+        ordem: updated,
+        eventoId: WhatsAppService.kEventoPedidoAprovadoWeb,
+      );
+    }
+
     _applyFilters();
     notifyListeners();
   }
@@ -1454,7 +1486,107 @@ class CentralPedidosController extends ChangeNotifier {
       }
     }
 
+    // 5. Disparo Simulado da Mensageria (Fase C: Modo Simulação / Mock)
+    _dispararSimulacaoWhatsApp(
+      ordem: ordem,
+      eventoId: WhatsAppService.kEventoPedidoAprovadoWeb,
+    );
+
     notifyListeners();
+  }
+
+  /// Processa mensageria do WhatsApp para a Central de Pedidos (Fase D2: Integrado e Seguro)
+  void _dispararSimulacaoWhatsApp({
+    required OrdemPreparo ordem,
+    required String eventoId,
+    String? motivo,
+  }) {
+    scheduleMicrotask(() async {
+      try {
+        final db = DependencyInjection().get<FincoreDatabase>();
+        final pedidoRow = _pedidosMap[ordem.pedidoId] ??
+            await (db.select(db.pedidosTable)..where((t) => t.id.equals(ordem.pedidoId))).getSingleOrNull();
+
+        if (pedidoRow == null) return;
+
+        final configRepo = DependencyInjection().get<EmpresaConfiguracaoRepository>();
+        final configs = await configRepo.findAll();
+        final empresaUsarWa = configs.isNotEmpty ? configs.first.usarWhatsApp : true;
+        if (!empresaUsarWa) return;
+
+        bool clienteAceita = false;
+        String? telefone = pedidoRow.clienteTelefoneAvulso;
+        String nome = pedidoRow.clienteNomeAvulso ?? 'Cliente';
+
+        if (pedidoRow.clienteId != null && pedidoRow.clienteId!.isNotEmpty) {
+          final clienteRow = await (db.select(db.clientesTable)..where((t) => t.id.equals(pedidoRow.clienteId!))).getSingleOrNull();
+          if (clienteRow != null) {
+            clienteAceita = clienteRow.aceitaWhatsapp;
+            if (clienteRow.telefone.trim().isNotEmpty) {
+              telefone = clienteRow.telefone;
+            }
+            nome = clienteRow.nome;
+          }
+        }
+
+        final numeroExibicao = pedidoRow.numeroPedido?.toString() ??
+            (pedidoRow.id.length >= 8 ? pedidoRow.id.substring(0, 8) : pedidoRow.id);
+
+        // Verifica status oficial de pagamento no financeiro (sem fontes paralelas)
+        final lancamento = await (db.select(db.lancamentosFinanceirosTable)
+              ..where((l) =>
+                  l.pedidoId.equals(ordem.pedidoId) &
+                  l.tipo.equals('receita') &
+                  l.deletedAt.isNull())
+              ..limit(1))
+            .getSingleOrNull();
+        final statusPagamento = lancamento != null ? 'PAGO' : 'PENDENTE';
+
+        final itensWhats = ordem.itens.map((it) {
+          return {
+            'nome': it.nomeProduto,
+            'qtd': it.quantidade,
+            'obs': null,
+          };
+        }).toList();
+
+        final calcDescontoCentavos = (pedidoRow.valorSubtotalCentavos +
+                pedidoRow.valorTaxaEntregaCentavos +
+                pedidoRow.valorTaxaServicoCentavos) -
+            pedidoRow.valorTotalCentavos;
+
+        final obsFinal = (eventoId == WhatsAppService.kEventoPedidoCancelado && motivo != null && motivo.trim().isNotEmpty)
+            ? motivo.trim()
+            : pedidoRow.observacoes;
+
+        await WhatsAppService.processarEventoPedidoAutomatico(
+          tenantId: ordem.tenantId,
+          pedidoId: ordem.pedidoId,
+          numeroPedido: numeroExibicao,
+          eventoId: eventoId,
+          tipoLogistica: pedidoRow.tipoLogistica,
+          formaPagamento: pedidoRow.formaPagamentoNome ?? 'Outro',
+          statusPagamento: statusPagamento,
+          rawPhone: telefone,
+          clienteNome: nome,
+          clienteAceitaWhatsapp: clienteAceita,
+          valorTotalCentavos: pedidoRow.valorTotalCentavos,
+          valorSubtotalCentavos: pedidoRow.valorSubtotalCentavos,
+          valorDescontoCentavos: calcDescontoCentavos > 0 ? calcDescontoCentavos : 0,
+          valorTaxaEntregaCentavos: pedidoRow.valorTaxaEntregaCentavos,
+          valorTaxaServicoCentavos: pedidoRow.valorTaxaServicoCentavos,
+          trocoParaCentavos: pedidoRow.trocoParaCentavos,
+          itens: itensWhats,
+          observacoes: obsFinal,
+          enderecoCliente: pedidoRow.enderecoJson,
+          eventInstanceId: 'ordem_${ordem.id}_v${ordem.metadata.version}_${ordem.status.name}',
+          versaoPedido: ordem.metadata.version,
+          dataAlteracao: ordem.metadata.updatedAt,
+        );
+      } catch (e) {
+        debugPrint('[CentralPedidos] Mensageria WhatsApp isolada por segurança (fluxo principal 100% preservado): $e');
+      }
+    });
   }
 
   Future<OrdemPreparo?> recarregarOrdem(String ordemId) async {

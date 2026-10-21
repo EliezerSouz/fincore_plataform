@@ -5215,7 +5215,13 @@ function openOrderDetailModal(order) {
     finalizado:          { label: '✅ Entregue',               icon: '✅' },
     cancelado:           { label: '❌ Cancelado',              icon: '❌' },
   };
+  const isCancelado = st === 'cancelado';
   const statusInfo = STATUS_MODAL_LABELS[st] || { label: order.status || 'Pendente', icon: '⚡' };
+
+  const headerSub = document.getElementById('detail-modal-header-subtitle');
+  if (headerSub) {
+    headerSub.textContent = isCancelado ? 'Aviso sobre o Pedido' : 'Acompanhamento do Pedido';
+  }
 
   document.getElementById('detail-order-number').textContent = `#${order.numeroPedido || order.id.slice(0, 6)}`;
   document.getElementById('detail-order-date').textContent = getDeliveryDateTime(order);
@@ -5227,6 +5233,36 @@ function openOrderDetailModal(order) {
   if (badgeEl) {
     badgeEl.textContent = statusInfo.label;
     badgeEl.className = `order-status-pill status-${st}`;
+  }
+
+  // Banner e Motivo do Cancelamento
+  const cancelledBanner = document.getElementById('detail-cancelled-banner');
+  const cancelledReasonBox = document.getElementById('detail-cancelled-reason');
+  const cancelledReasonText = document.getElementById('detail-cancelled-reason-text');
+
+  if (cancelledBanner) {
+    if (isCancelado) {
+      cancelledBanner.style.display = 'block';
+      const motivo = (order.motivo_cancelamento || order.motivoCancelamento || order.observacoes || '').trim();
+      if (motivo && motivo.toLowerCase() !== 'sem observações' && motivo.toLowerCase() !== 'sem observacoes') {
+        if (cancelledReasonBox) cancelledReasonBox.style.display = 'block';
+        if (cancelledReasonText) cancelledReasonText.textContent = motivo;
+      } else {
+        if (cancelledReasonBox) cancelledReasonBox.style.display = 'none';
+      }
+    } else {
+      cancelledBanner.style.display = 'none';
+    }
+  }
+
+  // Controle de visibilidade de linhas para pedidos cancelados
+  const dateRow = document.getElementById('detail-order-date-row');
+  if (dateRow) {
+    dateRow.style.display = isCancelado ? 'none' : 'flex';
+  }
+  const paymentRow = document.getElementById('detail-order-payment-row');
+  if (paymentRow) {
+    paymentRow.style.display = isCancelado ? 'none' : 'flex';
   }
 
   // Endereço
@@ -5253,58 +5289,62 @@ function openOrderDetailModal(order) {
     `).join('');
   }
 
-  // Timeline
+  // Timeline (ocultada se o pedido estiver cancelado)
   const timelineEl = document.getElementById('detail-status-timeline');
   if (timelineEl) {
-    const steps = [
-      { key: 'pendente',     label: 'Aguardando Aprovação' },
-      { key: 'confirmado',   label: 'Aprovado / Na Fila' },
-      { key: 'em_preparo',   label: 'Em Preparo' },
-      { key: 'pronto',       label: 'Pronto' },
-      { key: 'entregue',     label: 'Entregue' }
-    ];
+    if (isCancelado) {
+      timelineEl.style.display = 'none';
+    } else {
+      timelineEl.style.display = 'flex';
+      const steps = [
+        { key: 'pendente',     label: 'Aguardando Aprovação' },
+        { key: 'confirmado',   label: 'Aprovado / Na Fila' },
+        { key: 'em_preparo',   label: 'Em Preparo' },
+        { key: 'pronto',       label: 'Pronto' },
+        { key: 'entregue',     label: 'Entregue' }
+      ];
 
-    const getIdx = (stVal) => {
-      const s = String(stVal || '').toLowerCase().trim();
-      if (s === 'pendente' || s === 'aguardando_aprovacao' || s === 'rascunho') return 0;
-      if (s === 'recebido' || s === 'confirmado' || s === 'aprovado') return 1;
-      if (s === 'em_preparo' || s === 'empreparo' || s === 'preparando') return 2;
-      if (s === 'pronto' || s === 'aguardando_retirada') return 3;
-      if (s === 'saiu_para_entrega' || s === 'saiuparaentrega' || s === 'saiu_entrega' || s === 'em_entrega' || s === 'em_transito' || s === 'entregue' || s === 'concluido' || s === 'finalizado') return 4;
-      return 0;
-    };
+      const getIdx = (stVal) => {
+        const s = String(stVal || '').toLowerCase().trim();
+        if (s === 'pendente' || s === 'aguardando_aprovacao' || s === 'rascunho') return 0;
+        if (s === 'recebido' || s === 'confirmado' || s === 'aprovado') return 1;
+        if (s === 'em_preparo' || s === 'empreparo' || s === 'preparando') return 2;
+        if (s === 'pronto' || s === 'aguardando_retirada') return 3;
+        if (s === 'saiu_para_entrega' || s === 'saiuparaentrega' || s === 'saiu_entrega' || s === 'em_entrega' || s === 'em_transito' || s === 'entregue' || s === 'concluido' || s === 'finalizado') return 4;
+        return 0;
+      };
 
-    const currentIndex = getIdx(order.status || 'pendente');
+      const currentIndex = getIdx(order.status || 'pendente');
 
-    timelineEl.innerHTML = steps.map((step, idx) => {
-      let stateClass = '';
-      if (idx < currentIndex) stateClass = 'done';
-      else if (idx === currentIndex) stateClass = 'current';
+      timelineEl.innerHTML = steps.map((step, idx) => {
+        let stateClass = '';
+        if (idx < currentIndex) stateClass = 'done';
+        else if (idx === currentIndex) stateClass = 'current';
 
-      return `
-        <div class="timeline-step ${stateClass}">
-          <div class="timeline-dot">${idx < currentIndex ? '✓' : idx + 1}</div>
-          <span class="timeline-label">${step.label}</span>
-        </div>
-      `;
-    }).join('');
+        return `
+          <div class="timeline-step ${stateClass}">
+            <div class="timeline-dot">${idx < currentIndex ? '✓' : idx + 1}</div>
+            <span class="timeline-label">${step.label}</span>
+          </div>
+        `;
+      }).join('');
+    }
   }
 
-  // Bloco Pix no Detalhe do Pedido (se forma for Pix)
+  // Bloco Pix no Detalhe do Pedido (Apenas se pendente e NÃO cancelado)
   const pixContainer = document.getElementById('detail-pix-container');
   if (pixContainer) {
     const isPix = String(order.formaPagamentoNome || '').toLowerCase().includes('pix');
     const chave = state.empresa?.chave_pix || '';
     const favorecido = state.empresa?.pix_favorecido || state.empresa?.nomeFantasia || 'FinCore Food';
-    const banco = state.empresa?.pix_banco || 'Instituição Bancária';
-    const tipo = state.empresa?.pix_tipo || 'Chave';
+    const isPendente = !['concluido', 'entregue', 'finalizado', 'cancelado'].includes(st);
 
-    if (isPix && chave) {
+    if (!isCancelado && isPix && chave && isPendente) {
       pixContainer.style.display = 'block';
-      document.getElementById('detail-pix-favorecido').textContent = favorecido;
-      document.getElementById('detail-pix-banco').textContent = banco;
-      document.getElementById('detail-pix-tipo').textContent = tipo;
-      document.getElementById('detail-pix-chave').textContent = chave;
+      const pixTipoEl = document.getElementById('detail-pix-tipo');
+      if (pixTipoEl) pixTipoEl.textContent = state.empresa?.pix_tipo || 'Pix';
+      const pixChaveEl = document.getElementById('detail-pix-chave');
+      if (pixChaveEl) pixChaveEl.textContent = chave;
 
       const payload = gerarPayloadPixEMV(chave, favorecido, state.empresa?.cidade || 'Pouso Alegre', order.valorTotalCentavos, order.numeroPedido || order.id.slice(0, 6));
 
@@ -5314,22 +5354,36 @@ function openOrderDetailModal(order) {
           copiarParaClipboard(payload, 'Pix Copia e Cola copiado! Cole no app do seu banco.');
         };
       }
-
-      const btnChave = document.getElementById('btn-detail-copiar-pix-chave');
-      if (btnChave) {
-        btnChave.onclick = () => {
-          copiarParaClipboard(chave, 'Chave Pix copiada com sucesso!');
-        };
-      }
     } else {
       pixContainer.style.display = 'none';
     }
   }
 
-  document.getElementById('detail-reorder-btn').onclick = () => {
-    modal.classList.remove('open');
-    reorderOrder(order.id);
-  };
+  // Banner Inteligente de Divulgação: ocultado se o pedido foi cancelado
+  const canal = String(order.canalOrigem || order.canal_origem || '').toLowerCase().trim();
+  const isOrigemPdv = canal !== 'cardapio_web';
+  const promoBanner = document.getElementById('detail-promo-cardapio-banner');
+  const reorderBtn = document.getElementById('detail-reorder-btn');
+
+  if (promoBanner) {
+    promoBanner.style.display = (!isCancelado && isOrigemPdv) ? 'block' : 'none';
+    const btnExplorar = document.getElementById('btn-explorar-cardapio-online');
+    if (btnExplorar) {
+      btnExplorar.onclick = () => {
+        modal.classList.remove('open');
+        showScreen('screen-cardapio');
+        toast('🍽️ Bem-vindo ao Cardápio Online! Faça seu pedido direto por aqui.', 'success', 3500);
+      };
+    }
+  }
+
+  if (reorderBtn) {
+    reorderBtn.style.display = !isOrigemPdv ? 'inline-flex' : 'none';
+    reorderBtn.onclick = () => {
+      modal.classList.remove('open');
+      reorderOrder(order.id);
+    };
+  }
 
   // Botões de link de rastreio e WhatsApp no Detalhe do Pedido
   const trackUrl = `${window.location.origin}${window.location.pathname}?p=${order.id}`;
@@ -6884,13 +6938,53 @@ async function initApp() {
     // 7.1 Rastreamento Público por Link / Token (?p=UUID ou ?pedido=UUID ou ?rastreio=UUID)
     const urlParams = new URLSearchParams(window.location.search);
     const trackId = urlParams.get('p') || urlParams.get('pedido') || urlParams.get('rastreio');
+    const tenantParam = urlParams.get('tenant_id') || urlParams.get('tenant') || urlParams.get('t') || state.tenantId;
     if (trackId) {
       try {
-        const { data: orderData } = await sb
-          .from('pedido')
-          .select('*, item_pedido(*)')
-          .eq('id', trackId)
-          .maybeSingle();
+        let orderData = null;
+        const numOnly = parseInt(String(trackId).replace(/\D/g, ''), 10);
+
+        // A. Se for UUID (contém hífen)
+        if (String(trackId).includes('-')) {
+          const res = await sb.from('pedido').select('*, item_pedido(*)').eq('id', trackId).maybeSingle();
+          orderData = res.data;
+        }
+
+        // B. Se for número de pedido
+        if (!orderData && !isNaN(numOnly) && numOnly > 0) {
+          // B1. Tenta filtrar pelo tenant da URL/sessão
+          if (tenantParam) {
+            const resTenant = await sb
+              .from('pedido')
+              .select('*, item_pedido(*)')
+              .eq('tenantId', tenantParam)
+              .eq('numeroPedido', numOnly)
+              .order('createdAt', { ascending: false })
+              .limit(1);
+            if (resTenant.data && resTenant.data.length > 0) {
+              orderData = resTenant.data[0];
+            }
+          }
+
+          // B2. Fallback: busca por número ordenando pelo mais recente
+          if (!orderData) {
+            const resAny = await sb
+              .from('pedido')
+              .select('*, item_pedido(*)')
+              .eq('numeroPedido', numOnly)
+              .order('createdAt', { ascending: false })
+              .limit(1);
+            if (resAny.data && resAny.data.length > 0) {
+              orderData = resAny.data[0];
+            }
+          }
+        }
+
+        // C. Fallback final por id literal
+        if (!orderData) {
+          const res = await sb.from('pedido').select('*, item_pedido(*)').eq('id', trackId).maybeSingle();
+          orderData = res.data;
+        }
 
         if (orderData) {
           state.activeOrder = orderData;
@@ -6903,6 +6997,7 @@ async function initApp() {
           if (orderData.tenantId && orderData.tenantId !== state.tenantId) {
             state.tenantId = orderData.tenantId;
             localStorage.setItem('fincore_cardapio_tenant', state.tenantId);
+            await loadEmpresa();
           }
 
           renderOrdersList();

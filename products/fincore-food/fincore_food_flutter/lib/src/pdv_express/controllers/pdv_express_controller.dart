@@ -24,6 +24,7 @@ import 'package:fincore_core/common/core_models.dart';
 import 'package:fincore_pricing/pricing_engine.dart';
 import '../models/pricing_result.dart';
 import '../../cap/printing/print_capability.dart';
+import '../../shared/services/whatsapp_service.dart';
 
 import 'package:fincore_pricing/repository/tabela_precificacao_repository.dart';
 import 'package:fincore_pricing/repository/item_tabela_precificacao_repository.dart';
@@ -260,6 +261,35 @@ class PdvExpressController extends ChangeNotifier {
 
   String _paymentMethod = 'Dinheiro';
   String get paymentMethod => _selectedFormaPagamento?.nome ?? _paymentMethod;
+
+  // Split Payment (AUD-006): fatias de pagamento compostas
+  final List<PagamentoItemDraft> _splitPayments = [];
+  List<PagamentoItemDraft> get splitPayments => List.unmodifiable(_splitPayments);
+  bool get isSplitPayment => _splitPayments.isNotEmpty;
+
+  void addSplitPayment(PagamentoItemDraft payment) {
+    _splitPayments.add(payment);
+    notifyListeners();
+  }
+
+  void setSplitPayments(List<PagamentoItemDraft> list) {
+    _splitPayments.clear();
+    _splitPayments.addAll(list);
+    notifyListeners();
+  }
+
+  void removeSplitPayment(String id) {
+    _splitPayments.removeWhere((p) => p.id == id);
+    notifyListeners();
+  }
+
+  void clearSplitPayments() {
+    _splitPayments.clear();
+    notifyListeners();
+  }
+
+  int get totalSplitCentavos => _splitPayments.fold(0, (acc, p) => acc + p.valorCentavos);
+  int get restanteSplitCentavos => totalInCents - totalSplitCentavos;
 
   Map<String, double> _estoqueMap = {};
   Map<String, double> get estoqueMap => _estoqueMap;
@@ -502,9 +532,15 @@ class PdvExpressController extends ChangeNotifier {
 
       if (ordemParaEditar != null) {
         final o = ordemParaEditar!;
-        final pedidoRow = await (db.select(db.pedidosTable)
+        var pedidoRow = await (db.select(db.pedidosTable)
               ..where((t) => t.id.equals(o.pedidoId)))
             .getSingleOrNull();
+
+        if (pedidoRow == null) {
+          pedidoRow = await (db.select(db.pedidosTable)
+                ..where((t) => t.id.equals(o.id)))
+              .getSingleOrNull();
+        }
 
         if (pedidoRow != null) {
           _cliente = DadosCliente(
@@ -561,14 +597,17 @@ class PdvExpressController extends ChangeNotifier {
             );
           }
 
-          if (pedidoRow.formaPagamentoId != null) {
-            _selectedFormaPagamento = _formasPagamento.where((f) => f.id == pedidoRow.formaPagamentoId).firstOrNull;
-          }
-          if (_selectedFormaPagamento == null && pedidoRow.formaPagamentoNome != null) {
-            _paymentMethod = pedidoRow.formaPagamentoNome!;
-            _selectedFormaPagamento = _formasPagamento.where((f) => f.nome.toLowerCase() == pedidoRow.formaPagamentoNome!.toLowerCase()).firstOrNull;
-          } else if (_selectedFormaPagamento != null) {
-            _paymentMethod = _selectedFormaPagamento!.nome;
+          final pRow = pedidoRow;
+          if (pRow != null) {
+            if (pRow.formaPagamentoId != null) {
+              _selectedFormaPagamento = _formasPagamento.where((f) => f.id == pRow.formaPagamentoId).firstOrNull;
+            }
+            if (_selectedFormaPagamento == null && pRow.formaPagamentoNome != null) {
+              _paymentMethod = pRow.formaPagamentoNome!;
+              _selectedFormaPagamento = _formasPagamento.where((f) => f.nome.toLowerCase() == pRow.formaPagamentoNome!.toLowerCase()).firstOrNull;
+            } else if (_selectedFormaPagamento != null) {
+              _paymentMethod = _selectedFormaPagamento!.nome;
+            }
           }
 
           final itemRows = await (db.select(db.itensPedidoTable)
@@ -584,7 +623,22 @@ class PdvExpressController extends ChangeNotifier {
               quantity: row.quantidade,
             ));
           }
+        }
 
+        // Resiliência adicional: Se o carrinho estiver vazio mas a ordem tiver itens (ex: KDS / Cloud)
+        if (_cart.isEmpty && o.itens.isNotEmpty) {
+          _cart.clear();
+          for (final it in o.itens) {
+            _cart.add(PdvItem(
+              productId: it.produtoId,
+              name: it.nomeProduto,
+              priceInCents: 0,
+              quantity: it.quantidade,
+            ));
+          }
+        }
+
+        if (_cart.isNotEmpty || pedidoRow != null) {
           await _recalculatePrices();
           _state = PdvState.drafting;
           _passoAtual = 1;
@@ -980,6 +1034,7 @@ class PdvExpressController extends ChangeNotifier {
       _paymentMethod = 'Dinheiro';
     }
     _errorMessage = null;
+    _splitPayments.clear();
     _pixTimer?.cancel();
     _pixCountdown = 120;
     _passoAtual = 0;
@@ -1196,6 +1251,7 @@ class PdvExpressController extends ChangeNotifier {
         pedido: pedido,
         itens: draftItens,
         paymentMethod: formaPgtoNome,
+        pagamentos: _splitPayments.isNotEmpty ? _splitPayments : null,
         clienteNome: nomeClienteFinal,
         clienteTelefone: _cliente.telefone,
         enderecoJson: enderecoStr,
@@ -1276,6 +1332,9 @@ class PdvExpressController extends ChangeNotifier {
       _resetTimer = Timer(const Duration(seconds: 4), () {
         reset();
       });
+
+      // Mensageria WhatsApp no PDV Express é orquestrada com exclusividade pela tela
+      // (pdv_express_screen.dart), respeitando o switch do operador, itens e dados de PIX.
 
     } catch (e) {
       _errorMessage = 'Falha ao persistir transação de venda: $e';
@@ -1535,6 +1594,18 @@ class PdvExpressController extends ChangeNotifier {
       _paymentMethod = _selectedFormaPagamento?.nome ?? 'Dinheiro';
       _state = PdvState.selectingPayment;
       _passoAtual = 2;
+      // Processamento de Mensageria de Cancelamento (Fase D2: Integrado e Seguro)
+      _processarWhatsAppCancelamentoPdv(
+        pedidoId: venda.id,
+        numeroPedido: venda.id.length >= 8 ? venda.id.substring(0, 8) : venda.id,
+        tipoLogistica: venda.tipoLogistica,
+        clienteNome: _cliente.nomeExibicao ?? _cliente.nome ?? 'Consumidor',
+        clienteTelefone: _cliente.telefone,
+        clienteId: _cliente.id,
+        formaPagamento: _paymentMethod,
+        valorTotalCentavos: venda.valorTotalCentavos,
+      );
+
       _lastVenda = null;
       notifyListeners();
 
@@ -1554,6 +1625,50 @@ class PdvExpressController extends ChangeNotifier {
     _pixTimer?.cancel();
     _paymentMethod = 'PIX Contingente';
     _persistVenda();
+  }
+
+
+  /// Processa eventos de cancelamento de pedido no PDV (Fase D2: Seguro e Desacoplado)
+  void _processarWhatsAppCancelamentoPdv({
+    required String pedidoId,
+    required String numeroPedido,
+    required String tipoLogistica,
+    required String clienteNome,
+    required String? clienteTelefone,
+    required String? clienteId,
+    required String formaPagamento,
+    required int valorTotalCentavos,
+  }) {
+    scheduleMicrotask(() async {
+      try {
+        final activeTenant = tenantContext.tenantId;
+        final empresaUsarWa = _empresaConfig?.usarWhatsApp ?? true;
+        if (!empresaUsarWa) return;
+
+        bool clienteAceita = false;
+        if (clienteId != null && clienteId.isNotEmpty) {
+          final clienteData = await clienteRepo.findById(clienteId);
+          clienteAceita = clienteData?.aceitaWhatsapp ?? false;
+        }
+
+        await WhatsAppService.processarEventoPedidoAutomatico(
+          tenantId: activeTenant,
+          pedidoId: pedidoId,
+          numeroPedido: numeroPedido,
+          eventoId: WhatsAppService.kEventoPedidoCancelado,
+          tipoLogistica: tipoLogistica,
+          formaPagamento: formaPagamento,
+          statusPagamento: 'CANCELADO',
+          rawPhone: clienteTelefone,
+          clienteNome: clienteNome,
+          clienteAceitaWhatsapp: clienteAceita,
+          valorTotalCentavos: valorTotalCentavos,
+          eventInstanceId: 'pdv_${pedidoId}_cancelado',
+        );
+      } catch (e) {
+        debugPrint('[PDV Express] Mensageria de cancelamento isolada por segurança: $e');
+      }
+    });
   }
 
   @override

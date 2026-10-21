@@ -1213,57 +1213,70 @@
     <button type="button" class="modal-close" id="order-detail-close-btn" aria-label="Fechar">&times;</button>
 
     <div style="text-align:center;margin-bottom:16px">
-      <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">Detalhes do Pedido</div>
+      <div id="detail-modal-header-subtitle" style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">Acompanhamento do Pedido</div>
       <h2 id="detail-order-number" style="font-size:24px;font-weight:800;color:var(--brand-400);margin:4px 0">#—</h2>
       <div id="detail-status-badge" class="order-status-pill status-confirmado" style="display:inline-block;margin-top:4px">Confirmado</div>
     </div>
 
-    <!-- Timeline em tempo real -->
-    <div class="status-timeline" id="detail-status-timeline" style="margin-bottom:20px"></div>
-
-    <!-- Informações do Pedido -->
-    <div style="background:var(--surface-subtle, rgba(255,255,255,0.05));border-radius:12px;padding:14px;margin-bottom:16px;font-size:13px;display:flex;flex-direction:column;gap:6px">
-      <div><strong id="detail-order-date-label">📅 Previsão de Entrega:</strong> <span id="detail-order-date">-</span></div>
-      <div><strong>🚚 Modalidade:</strong> <span id="detail-order-logistics">-</span></div>
-      <div><strong>💳 Pagamento:</strong> <span id="detail-order-payment">-</span></div>
-      <div id="detail-address-container" style="display:none"><strong>📍 Endereço:</strong> <span id="detail-order-address">-</span></div>
-      <div id="detail-obs-container" style="display:none"><strong>📝 Observações:</strong> <span id="detail-order-obs">-</span></div>
+    <!-- Banner de Pedido Cancelado -->
+    <div id="detail-cancelled-banner" style="display:none;background:rgba(239, 68, 68, 0.12);border:1px solid rgba(239, 68, 68, 0.35);border-radius:12px;padding:16px 14px;margin-bottom:14px;text-align:center">
+      <div style="font-size:26px;margin-bottom:4px">❌</div>
+      <div style="font-weight:800;color:#ef4444;font-size:16px;margin-bottom:4px">Pedido Cancelado</div>
+      <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:8px">Este pedido foi cancelado e não se encontra mais em produção.</div>
+      <div id="detail-cancelled-reason" style="font-size:12.5px;color:#fca5a5;background:rgba(0,0,0,0.3);border-radius:8px;padding:8px 12px;display:none;text-align:left">
+        <strong>📝 Motivo informado:</strong> <span id="detail-cancelled-reason-text">Sem observações</span>
+      </div>
     </div>
 
-    <!-- Bloco Pix se o pedido for Pix -->
-    <div id="detail-pix-container" style="display:none;background:rgba(249, 115, 22, 0.08);border:1px dashed rgba(249, 115, 22, 0.3);border-radius:12px;padding:14px;margin-bottom:16px;font-size:13px">
-      <div style="font-weight:800;color:var(--brand-400);margin-bottom:8px">⚡ Informações para Pagamento via Pix</div>
-      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12.5px;color:var(--text-secondary)">
-        <div><strong>Favorecido:</strong> <span id="detail-pix-favorecido" style="color:var(--text-primary);font-weight:700">-</span></div>
-        <div><strong>Banco / Instituição:</strong> <span id="detail-pix-banco" style="color:var(--text-primary);font-weight:700">-</span></div>
-        <div><strong>Chave Pix (<span id="detail-pix-tipo">Chave</span>):</strong> <span id="detail-pix-chave" style="font-family:monospace;font-weight:700;color:var(--brand-400)">-</span></div>
+    <!-- Banner Inteligente de Divulgação da Plataforma Online (para pedidos feitos no Balcão/PDV) -->
+    <div id="detail-promo-cardapio-banner" class="promo-cardapio-banner" style="display:none">
+      <div class="promo-banner-badge">✨ Pedido de Balcão / Presencial</div>
+      <div class="promo-banner-title">Sabia que você pode pedir direto pelo Cardápio Online?</div>
+      <p class="promo-banner-desc">Você está acompanhando seu pedido em tempo real! Nos seus próximos pedidos, faça diretamente por aqui sem filas, com fotos de todos os itens e acompanhamento automático.</p>
+      <button type="button" class="promo-banner-btn" id="btn-explorar-cardapio-online">
+        🍽️ Ver Cardápio & Fazer Pedido Online
+      </button>
+    </div>
+
+    <!-- Timeline em tempo real -->
+    <div class="status-timeline" id="detail-status-timeline" style="margin-bottom:16px"></div>
+
+    <!-- Informações Essenciais do Pedido -->
+    <div style="background:var(--surface-subtle, rgba(255,255,255,0.05));border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;display:flex;flex-direction:column;gap:6px">
+      <div id="detail-order-date-row" style="display:flex;justify-content:space-between"><strong id="detail-order-date-label">📅 Previsão:</strong> <span id="detail-order-date" style="font-weight:600">-</span></div>
+      <div id="detail-order-logistics-row" style="display:flex;justify-content:space-between"><strong>🚚 Modalidade:</strong> <span id="detail-order-logistics" style="font-weight:600">-</span></div>
+      <div id="detail-order-payment-row" style="display:flex;justify-content:space-between"><strong>💳 Pagamento:</strong> <span id="detail-order-payment" style="font-weight:600">-</span></div>
+      <div id="detail-address-container" style="display:none;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06)"><strong>📍 Endereço de Entrega:</strong> <div id="detail-order-address" style="margin-top:2px;color:var(--text-secondary)">-</div></div>
+      <div id="detail-obs-container" style="display:none;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06)"><strong>📝 Obs:</strong> <span id="detail-order-obs" style="color:var(--text-secondary)">-</span></div>
+    </div>
+
+    <!-- Bloco Pix Simplificado (Apenas se pendente e for Pix) -->
+    <div id="detail-pix-container" style="display:none;background:rgba(249, 115, 22, 0.08);border:1px dashed rgba(249, 115, 22, 0.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:12.5px">
+      <div style="font-weight:800;color:var(--brand-400);margin-bottom:6px">⚡ Pagamento via Pix Pendente</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+        Chave (<span id="detail-pix-tipo">Pix</span>): <strong id="detail-pix-chave" style="color:var(--text-primary);font-family:monospace">-</strong>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button type="button" class="btn btn-primary btn-sm" id="btn-detail-copiar-pix-payload" style="font-size:11.5px;font-weight:800">
-          📋 Copiar Pix com Valor
-        </button>
-        <button type="button" class="btn btn-secondary btn-sm" id="btn-detail-copiar-pix-chave" style="font-size:11.5px;font-weight:800">
-          🔑 Copiar Chave
-        </button>
-      </div>
+      <button type="button" class="btn btn-primary btn-sm btn-full" id="btn-detail-copiar-pix-payload" style="font-size:12px;font-weight:800">
+        📋 Copiar Código Pix Copia e Cola
+      </button>
     </div>
 
     <!-- Itens do Pedido -->
-    <div style="font-weight:700;margin-bottom:8px;font-size:14px">🛒 Itens do Pedido</div>
-    <div id="detail-items-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px"></div>
+    <div style="font-weight:700;margin-bottom:6px;font-size:13px;color:var(--text-secondary)">🛒 Itens do Pedido</div>
+    <div id="detail-items-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
 
     <!-- Resumo de Valores -->
-    <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;margin-bottom:20px">
-      <div style="display:flex;justify-content:space-between;font-weight:800;font-size:18px;color:var(--brand-400)">
-        <span>Total</span>
+    <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:10px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;font-weight:900;font-size:17px;color:var(--brand-400)">
+        <span>Total do Pedido</span>
         <span id="detail-order-total">R$ 0,00</span>
       </div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;gap:10px">
-        <button type="button" class="btn btn-secondary btn-full" id="detail-close-modal-btn">Fechar</button>
-        <button type="button" class="btn btn-primary btn-full" id="detail-reorder-btn" style="display:flex;align-items:center;justify-content:center;gap:6px">🔁 Pedir de Novo</button>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-secondary btn-full" id="detail-close-modal-btn" style="font-size:13px">Fechar</button>
+        <button type="button" class="btn btn-primary btn-full" id="detail-reorder-btn" style="display:none;align-items:center;justify-content:center;gap:6px;font-size:13px">🔁 Pedir de Novo</button>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <button type="button" class="btn btn-ghost btn-sm" id="btn-detail-copy-link" style="border:1px dashed var(--surface-border);font-size:11.5px;font-weight:700">
