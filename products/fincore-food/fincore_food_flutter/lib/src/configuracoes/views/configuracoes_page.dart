@@ -628,16 +628,43 @@ class _ConfiguracoesPageState extends State<ConfiguracoesPage> {
 
       try {
         final sb = Supabase.instance.client;
+        final tel = _telefoneEmpresaCtrl.text.trim();
+        final nomeF = _nomeEmpresaCupomCtrl.text.trim().isNotEmpty
+            ? _nomeEmpresaCupomCtrl.text.trim()
+            : (_empresa?.nomeFantasia ?? '');
+        final razS = _tipoPessoa == 'FISICA'
+            ? (_nomeEmpresaCupomCtrl.text.trim().isNotEmpty ? _nomeEmpresaCupomCtrl.text.trim() : (_empresa?.razaoSocial ?? ''))
+            : (_razaoSocialCtrl.text.trim().isNotEmpty ? _razaoSocialCtrl.text.trim() : (_empresa?.razaoSocial ?? ''));
+
         await sb.from('empresa_configuracao').upsert({
           'tenantId': targetTenantId,
           'logoUrl': _logoUrl,
+          'pixKey': _pixKeys.isEmpty ? null : jsonEncode(_pixKeys.map((x) => x.toJson()).toList()),
+          'pixFavorecido': _pixKeys.isNotEmpty ? _pixKeys.first.favorecido : null,
+          'pixBanco': _pixKeys.isNotEmpty ? _pixKeys.first.banco : null,
+          'pixTipo': _pixKeys.isNotEmpty ? _pixKeys.first.tipo : 'CPF',
           'updatedAt': DateTime.now().toIso8601String(),
         }, onConflict: 'tenantId');
-        await sb.from('empresa').update({
-          'logoUrl': _logoUrl,
+
+        final empresaMap = <String, dynamic>{
           'updatedAt': DateTime.now().toIso8601String(),
-        }).eq('id', targetTenantId);
-      } catch (_) {}
+        };
+        if (_logoUrl != null) empresaMap['logoUrl'] = _logoUrl;
+        if (tel.isNotEmpty) empresaMap['telefone'] = tel;
+        if (nomeF.isNotEmpty) empresaMap['nomeFantasia'] = nomeF;
+        if (razS.isNotEmpty) empresaMap['razaoSocial'] = razS;
+        if (_emailEmpresaCtrl.text.trim().isNotEmpty) {
+          empresaMap['email'] = _emailEmpresaCtrl.text.trim();
+        }
+        if (_enderecoCidadeCtrl.text.trim().isNotEmpty) {
+          empresaMap['cidade'] = _enderecoCidadeCtrl.text.trim();
+        }
+
+        await sb.from('empresa').update(empresaMap).eq('id', targetTenantId);
+        debugPrint('[ConfiguracoesPage] Empresa sincronizada com Supabase de imediato: $empresaMap');
+      } catch (err) {
+        debugPrint('[ConfiguracoesPage] Erro ao sincronizar empresa com Supabase: $err');
+      }
 
       if (_empresa != null) {
         final updatedEmpresa = CoreEmpresa(
