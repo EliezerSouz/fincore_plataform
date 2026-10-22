@@ -1,7 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  SharedPreferences.setMockInitialValues({});
   group('WhatsApp Template Engine - Motor de Condicionais & Tags Inteligentes', () {
     test('Cenário 1: Se PIX, exibe chave PIX; se Cartão/Dinheiro, não exibe chave nem linhas sobrando', () {
       const template = '''
@@ -354,6 +357,34 @@ void main() {
       expect(msgInterpolada, contains('Olá, Eliezer!'));
       expect(msgInterpolada, contains('Seu pedido *#555* foi entregue com muito carinho'));
       expect(msgInterpolada, contains(vars['{link_avaliacao}']!));
+    });
+
+    test('Cenário 10: Auto-injeção de avaliacao_pos_venda em bases com templates já salvos', () async {
+      // Simula uma base legada de templates salvos que só continha contato_pedido e comprovante
+      final listaLegada = [
+        const WhatsAppTemplate(
+          id: 'contato_pedido',
+          titulo: 'Confirmação de Pedido',
+          emoji: '📋',
+          descricao: 'Confirmação',
+          categoria: 'operacional',
+          isPadrao: true,
+          evento: 'pedido_criado',
+          ordem: 1,
+          conteudo: 'Olá, {cliente}! Pedido recebido!',
+        ),
+      ];
+
+      await WhatsAppService.salvarTemplates(listaLegada, tenantId: 'tenant_teste_legado');
+      final templatesCarregados = await WhatsAppService.getTemplates(
+        tenantId: 'tenant_teste_legado',
+        nomeEmpresa: 'Delivery Teste',
+      );
+
+      // Deve auto-injetar pedido_cancelado, pedido_aprovado E avaliacao_pos_venda
+      expect(templatesCarregados.any((t) => t.id == 'pedido_cancelado'), isTrue);
+      expect(templatesCarregados.any((t) => t.id == 'pedido_aprovado'), isTrue);
+      expect(templatesCarregados.any((t) => t.id == 'avaliacao_pos_venda' || t.evento == 'pedido_entregue'), isTrue);
     });
   });
 }

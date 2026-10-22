@@ -59,6 +59,7 @@ class _PedidosPageState extends State<PedidosPage> {
   DateTime? _historyDateTo;
 
   Timer? _deadlinesTimer;
+  final Set<String> _processandoAcaoRapida = {};
 
   void _forceRebuild() {
     if (mounted) setState(() {});
@@ -1155,95 +1156,106 @@ class _PedidosPageState extends State<PedidosPage> {
   }
 
   Future<void> _executarAcaoRapida(OrdemPreparo o) async {
-    // Se for um pedido Web que ainda aguarda aprovação, aprova e mantém na fila como pendente
-    if (o.status == StatusOrdemPreparo.pendente && _controller.isPedidoAguardandoAprovacao(o)) {
-      await _controller.aprovarPedidoWeb(o);
-      final notificado = await _isWhatsAppDisparadoAutomatico(o, WhatsAppService.kEventoPedidoAprovadoWeb);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: FincoreColors.success,
-            behavior: SnackBarBehavior.floating,
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    notificado
-                        ? '✅ Pedido Web aceito e cliente notificado via WhatsApp!'
-                        : '✅ Pedido Web aceito com sucesso!',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+    if (_processandoAcaoRapida.contains(o.id)) return;
+    _processandoAcaoRapida.add(o.id);
+
+    try {
+      // Se for um pedido Web que ainda aguarda aprovação, aprova e mantém na fila como pendente
+      if (o.status == StatusOrdemPreparo.pendente && _controller.isPedidoAguardandoAprovacao(o)) {
+        await _controller.aprovarPedidoWeb(o);
+        final notificado = await _isWhatsAppDisparadoAutomatico(o, WhatsAppService.kEventoPedidoAprovadoWeb);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: FincoreColors.success,
+              behavior: SnackBarBehavior.floating,
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      notificado
+                          ? '✅ Pedido Web aceito e cliente notificado via WhatsApp!'
+                          : '✅ Pedido Web aceito com sucesso!',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
+              duration: const Duration(seconds: 3),
             ),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+          );
+        }
+        return;
       }
-      return;
-    }
 
-    final prox = _proximoStatus(o);
-    if (prox == null) return;
+      final prox = _proximoStatus(o);
+      if (prox == null) return;
 
-    await _controller.moverStatus(o, prox);
+      await _controller.moverStatus(o, prox);
 
-    // Se avançou para saiuParaEntrega, notifica o cliente conforme hierarquia
-    if (prox == StatusOrdemPreparo.saiuParaEntrega && mounted) {
-      final hierarquia = await WhatsAppService.avaliarHierarquiaEvento(
-        eventoId: WhatsAppService.kEventoPedidoSaiuEntrega,
-        tenantId: o.tenantId,
-      );
+      // Se avançou para saiuParaEntrega, notifica o cliente conforme hierarquia
+      if (prox == StatusOrdemPreparo.saiuParaEntrega && mounted) {
+        final hierarquia = await WhatsAppService.avaliarHierarquiaEvento(
+          eventoId: WhatsAppService.kEventoPedidoSaiuEntrega,
+          tenantId: o.tenantId,
+        );
 
-      if (hierarquia.eventoDesativado) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Color(0xFF16A34A),
-              behavior: SnackBarBehavior.floating,
-              duration: Duration(seconds: 3),
-              content: Row(
-                children: [
-                  Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '🛵 Pedido marcado como saiu para entrega!',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+        if (hierarquia.eventoDesativado) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                backgroundColor: Color(0xFF16A34A),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 3),
+                content: Row(
+                  children: [
+                    Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '🛵 Pedido marcado como saiu para entrega!',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          );
-        }
-      } else if (hierarquia.podeDispararAutomatico && hierarquia.isApiConectada) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Color(0xFF16A34A),
-              behavior: SnackBarBehavior.floating,
-              duration: Duration(seconds: 3),
-              content: Row(
-                children: [
-                  Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '🛵 Pedido saiu para entrega e cliente notificado via WhatsApp!',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            );
+          }
+        } else if (hierarquia.podeDispararAutomatico && hierarquia.isApiConectada) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                backgroundColor: Color(0xFF16A34A),
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 3),
+                content: Row(
+                  children: [
+                    Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '🛵 Pedido saiu para entrega e cliente notificado via WhatsApp!',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          );
+            );
+          }
+        } else {
+          // Contingência manual somente se a política for manual ou API desconectada
+          _abrirWhatsAppParaOrdem(o, saiuParaEntrega: true);
         }
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processandoAcaoRapida.remove(o.id));
       } else {
-        // Contingência manual somente se a política for manual ou API desconectada
-        _abrirWhatsAppParaOrdem(o, saiuParaEntrega: true);
+        _processandoAcaoRapida.remove(o.id);
       }
     }
   }

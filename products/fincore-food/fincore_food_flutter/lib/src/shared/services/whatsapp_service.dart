@@ -834,6 +834,15 @@ class WhatsAppService {
             );
             templates.add(aprovadoT);
           }
+          // Garante que o template oficial de avaliação pós-venda esteja disponível mesmo em bases já salvas
+          if (!templates.any((t) => t.id == 'avaliacao_pos_venda' || t.evento == 'pedido_entregue')) {
+            final padroes = getTemplatesPadrao(nomeEmpresa: nomeEmpresa, linkCardapio: linkCardapio);
+            final avaliacaoT = padroes.firstWhere(
+              (t) => t.id == 'avaliacao_pos_venda' || t.evento == 'pedido_entregue',
+              orElse: () => padroes.last,
+            );
+            templates.add(avaliacaoT);
+          }
           return templates;
         }
       }
@@ -1565,6 +1574,7 @@ class WhatsAppService {
 
   // Chaves de idempotência processadas nesta sessão local
   static final Set<String> _simulatedIdempotencyKeys = <String>{};
+  static final Set<String> _inFlightKeys = <String>{};
   static final List<WhatsAppSimulatedDecision> _simulatedHistory = <WhatsAppSimulatedDecision>[];
   static final WhatsAppMessageLogRepository _logRepo = WhatsAppMessageLogRepository();
 
@@ -1586,6 +1596,7 @@ class WhatsAppService {
   /// Limpa o histórico de simulações (utilizado em testes unitários)
   static void limparHistoricoSimulacoes() {
     _simulatedIdempotencyKeys.clear();
+    _inFlightKeys.clear();
     _simulatedHistory.clear();
     manualPromptNotifier.value = null;
     _logRepo.limparLogsParaTestes();
@@ -1957,6 +1968,19 @@ class WhatsAppService {
               ? '$tenantId:$pedidoId:$eventoId'
               : 'auto:${tenantId ?? "default"}:${pedidoId ?? "avulso"}:${const Uuid().v4()}');
 
+      // Trava atômica em memória contra disparos concorrentes simultâneos
+      if (_inFlightKeys.contains(resolvedKey)) {
+        debugPrint('[WhatsAppService] 🛑 Disparo concorrente bloqueado em memória: $resolvedKey');
+        return WhatsAppSendResult(
+          status: WhatsAppSendStatus.erroApi,
+          sucesso: false,
+          erro: 'Disparo concorrente bloqueado por idempotência em voo ($resolvedKey)',
+          telefoneMascarado: EvolutionApiClient.mascararTelefone(rawPhone),
+          idempotencyKey: resolvedKey,
+          timestamp: DateTime.now(),
+        );
+      }
+
       // Validação de Idempotência Persistida no SQLite para eventos automáticos
       if (await _logRepo.existeIdempotencia(resolvedKey)) {
         return WhatsAppSendResult(
@@ -1968,40 +1992,48 @@ class WhatsAppService {
           timestamp: DateTime.now(),
         );
       }
+
+      _inFlightKeys.add(resolvedKey);
     }
 
-    final cfg = config ?? await EvolutionApiClient.carregarConfig(tenantId: tenantId);
-    final resultado = await EvolutionApiClient.enviarMensagemTexto(
-      config: cfg,
-      numeroDestino: rawPhone,
-      textoMensagem: mensagem,
-      tenantId: tenantId,
-      pedidoId: pedidoId,
-      eventoId: eventoId,
-      idempotencyKey: resolvedKey,
-    );
-
-    // Grava registro de auditoria forense persistente no banco de dados local
-    if (resultado.sucesso) {
-      final record = WhatsAppMessageLogRecord(
-        id: const Uuid().v4(),
-        tenantId: tenantId ?? 'default',
-        pedidoId: pedidoId ?? '',
-        eventoId: eventoId ?? (isManualIntent ? 'manual' : 'direto'),
+    try {
+      final cfg = config ?? await EvolutionApiClient.carregarConfig(tenantId: tenantId);
+      final resultado = await EvolutionApiClient.enviarMensagemTexto(
+        config: cfg,
+        numeroDestino: rawPhone,
+        textoMensagem: mensagem,
+        tenantId: tenantId,
+        pedidoId: pedidoId,
+        eventoId: eventoId,
         idempotencyKey: resolvedKey,
-        destinatarioMascarado: resultado.telefoneMascarado ?? EvolutionApiClient.mascararTelefone(rawPhone),
-        instancia: resultado.instancia ?? cfg.instanceName,
-        mensagemPreview: mensagem.length > 120 ? '${mensagem.substring(0, 120)}...' : mensagem,
-        status: resultado.status.name,
-        messageId: resultado.messageId,
-        httpStatusCode: resultado.httpStatusCode,
-        erro: resultado.erro,
-        criadoEm: resultado.timestamp,
       );
-      await _logRepo.registrarLog(record);
-    }
 
-    return resultado;
+      // Grava registro de auditoria forense persistente no banco de dados local
+      if (resultado.sucesso) {
+        final record = WhatsAppMessageLogRecord(
+          id: const Uuid().v4(),
+          tenantId: tenantId ?? 'default',
+          pedidoId: pedidoId ?? '',
+          eventoId: eventoId ?? (isManualIntent ? 'manual' : 'direto'),
+          idempotencyKey: resolvedKey,
+          destinatarioMascarado: resultado.telefoneMascarado ?? EvolutionApiClient.mascararTelefone(rawPhone),
+          instancia: resultado.instancia ?? cfg.instanceName,
+          mensagemPreview: mensagem.length > 120 ? '${mensagem.substring(0, 120)}...' : mensagem,
+          status: resultado.status.name,
+          messageId: resultado.messageId,
+          httpStatusCode: resultado.httpStatusCode,
+          erro: resultado.erro,
+          criadoEm: resultado.timestamp,
+        );
+        await _logRepo.registrarLog(record);
+      }
+
+      return resultado;
+    } finally {
+      if (!isManualIntent) {
+        _inFlightKeys.remove(resolvedKey);
+      }
+    }
   }
 
   /// Obtém a chave PIX oficial configurada na empresa/tenant (sem duplicidade de fontes)
@@ -2148,7 +2180,10 @@ class WhatsAppService {
       final templateIdVinculado = mappingEventos[eventoId] ??
           (eventoId == kEventoPedidoAprovadoWeb ? (mappingEventos['pedido_aprovado'] ?? mappingEventos['pedido_aprovado_web']) : null) ??
           (eventoId == kEventoPedidoCriadoPdv ? mappingEventos['pedido_criado'] : null) ??
-          (eventoId == kEventoPedidoEntregue ? mappingEventos['pedido_entregue'] : null);
+          (eventoId == kEventoPedidoPronto ? mappingEventos['pedido_pronto'] : null) ??
+          (eventoId == kEventoPedidoSaiuEntrega ? mappingEventos['saiu_entrega'] : null) ??
+          (eventoId == kEventoPedidoEntregue ? (mappingEventos['pedido_entregue'] ?? mappingEventos['avaliacao_pos_venda']) : null) ??
+          (eventoId == kEventoPedidoCancelado ? mappingEventos['pedido_cancelado'] : null);
 
       // 3. Localiza template aplicável ao evento:
       WhatsAppTemplate? templateConfirmacao;
@@ -2165,42 +2200,45 @@ class WhatsAppService {
               (t.evento == eventoId ||
                   (eventoId == kEventoPedidoCriadoPdv && (t.evento == 'pedido_criado' || t.id == 'comprovante')) ||
                   (eventoId == kEventoPedidoAprovadoWeb && (t.evento == 'pedido_aprovado' || t.evento == 'pedido_aprovado_web' || t.id == 'pedido_aprovado')) ||
-                  (eventoId == kEventoPedidoEntregue && (t.evento == 'pedido_entregue' || t.id == 'avaliacao_pos_venda'))))
+                  (eventoId == kEventoPedidoPronto && (t.evento == 'pedido_pronto' || t.id == 'pedido_pronto')) ||
+                  (eventoId == kEventoPedidoSaiuEntrega && (t.evento == 'saiu_entrega' || t.id == 'saiu_entrega')) ||
+                  (eventoId == kEventoPedidoEntregue && (t.evento == 'pedido_entregue' || t.id == 'avaliacao_pos_venda')) ||
+                  (eventoId == kEventoPedidoCancelado && (t.evento == 'pedido_cancelado' || t.id == 'pedido_cancelado'))))
           .firstOrNull;
 
-      // C. Se for pedido cancelado e ainda não achou, busca o template de cancelamento
-      if (templateConfirmacao == null && eventoId == kEventoPedidoCancelado) {
-        templateConfirmacao = templates.where((t) => t.id == 'pedido_cancelado').firstOrNull;
+      // C. Fallbacks estritos por evento (NUNCA misturar ou enviar confirmação de pedido em status errados):
+      if (templateConfirmacao == null) {
+        final padroes = getTemplatesPadrao(nomeEmpresa: empNome, linkCardapio: linkCardapio);
+        if (eventoId == kEventoPedidoEntregue) {
+          templateConfirmacao = templates.where((t) => t.id == 'avaliacao_pos_venda' || t.evento == 'pedido_entregue').firstOrNull ??
+              padroes.where((t) => t.id == 'avaliacao_pos_venda' || t.evento == 'pedido_entregue').firstOrNull;
+        } else if (eventoId == kEventoPedidoCancelado) {
+          templateConfirmacao = templates.where((t) => t.id == 'pedido_cancelado' || t.evento == 'pedido_cancelado').firstOrNull ??
+              padroes.where((t) => t.id == 'pedido_cancelado' || t.evento == 'pedido_cancelado').firstOrNull;
+        } else if (eventoId == kEventoPedidoPronto) {
+          templateConfirmacao = templates.where((t) => t.id == 'pedido_pronto' || t.evento == 'pedido_pronto').firstOrNull ??
+              padroes.where((t) => t.id == 'pedido_pronto' || t.evento == 'pedido_pronto').firstOrNull;
+        } else if (eventoId == kEventoPedidoSaiuEntrega) {
+          templateConfirmacao = templates.where((t) => t.id == 'saiu_entrega' || t.evento == 'saiu_entrega').firstOrNull ??
+              padroes.where((t) => t.id == 'saiu_entrega' || t.evento == 'saiu_entrega').firstOrNull;
+        } else if (eventoId == kEventoPedidoAprovadoWeb) {
+          templateConfirmacao = templates.where((t) => t.id == 'pedido_aprovado' || t.evento == 'pedido_aprovado').firstOrNull ??
+              padroes.where((t) => t.id == 'pedido_aprovado' || t.evento == 'pedido_aprovado').firstOrNull;
+        } else if (eventoId == kEventoPedidoCriadoPdv) {
+          templateConfirmacao = templates.where((t) => t.id == 'contato_pedido' || t.id == 'comprovante').firstOrNull ??
+              padroes.where((t) => t.id == 'contato_pedido').firstOrNull;
+        }
       }
-
-      // D. Se for pedido entregue e ainda não achou, busca o template de avaliação pós-venda
-      if (templateConfirmacao == null && eventoId == kEventoPedidoEntregue) {
-        templateConfirmacao = templates.where((t) => t.id == 'avaliacao_pos_venda').firstOrNull;
-      }
-
-      // D. Fallback seguro: se NÃO for cancelamento, busca contato_pedido ou o primeiro
-      templateConfirmacao ??= (eventoId == kEventoPedidoCancelado)
-          ? null
-          : templates.firstWhere(
-              (t) => t.id == 'contato_pedido',
-              orElse: () => templates.first,
-            );
 
       if (templateConfirmacao == null) {
         debugPrint('[WhatsAppService] Nenhum template ativo configurado para o evento $eventoId. Disparo cancelado com segurança.');
         return;
       }
 
-      // Identificador único da instância do evento para proteger contra repetição do MESMO evento,
-      // mas permitir novos envios se o pedido for alterado (nova versão / novo evento legítimo).
-      final eventRef = eventInstanceId ??
-          (versaoPedido != null
-              ? 'v$versaoPedido'
-              : (dataAlteracao != null
-                  ? 'ts_${dataAlteracao.millisecondsSinceEpoch}'
-                  : 'evt_${DateTime.now().millisecondsSinceEpoch}'));
-
-      final keyConfirmacao = '$tenantId:$pedidoId:$eventoId:$eventRef:confirmacao';
+      // Chave canônica de idempotência por evento de pedido:
+      // Garante que cada evento de ciclo de vida (aprovação, pronto, entrega, cancelamento)
+      // seja enviado no máximo UMA ÚNICA VEZ para o mesmo pedido.
+      final keyConfirmacao = '$tenantId:$pedidoId:$eventoId:confirmacao';
       final textoConfirmacao = interpolarTemplate(templateConfirmacao.conteudo, vars);
 
       await enviarMensagem(
@@ -2216,16 +2254,19 @@ class WhatsAppService {
 
       // 4. CONDIÇÃO ESPECIAL PIX (Regra 5 e 6 da Fase D2)
       // SE forma de pagamento == PIX E pagamento == PENDENTE
+      // IMPORTANTE: Cobrança PIX secundária SÓ deve ser enviada no evento de CRIAÇÃO ou APROVAÇÃO,
+      // NUNCA em eventos de produção, entrega ou finalização!
       final isPix = formaPagamento.trim().toUpperCase() == 'PIX';
       final isPendente = statusPagamento.trim().toUpperCase() != 'PAGO';
+      final isEventoInicial = eventoId == kEventoPedidoCriadoPdv || eventoId == kEventoPedidoAprovadoWeb;
 
-      if (isPix && isPendente) {
+      if (isPix && isPendente && isEventoInicial) {
         final templatePix = templates.firstWhere(
           (t) => t.id == 'cobranca_pix' || t.condicaoFormaPagamento == 'PIX',
           orElse: () => getTemplatesPadrao(nomeEmpresa: empNome).firstWhere((t) => t.id == 'cobranca_pix'),
         );
 
-        final keyPix = '$tenantId:$pedidoId:$eventoId:$eventRef:pix';
+        final keyPix = '$tenantId:$pedidoId:$eventoId:pix';
         final textoPix = interpolarTemplate(templatePix.conteudo, vars);
 
         await enviarMensagem(
