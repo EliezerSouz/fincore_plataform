@@ -49,6 +49,16 @@ String _extrairTipoDiasRepasse(String? texto, [TipoFormaPagamento? tipo]) {
   return 'corridos';
 }
 
+String _extrairPixFavorecido(String? texto) {
+  final match = RegExp(r'\[Favorecido:\s*([^\]]+)\]', caseSensitive: false).firstMatch(texto ?? '');
+  return match?.group(1)?.trim() ?? '';
+}
+
+String _extrairPixCidade(String? texto) {
+  final match = RegExp(r'\[Cidade:\s*([^\]]+)\]', caseSensitive: false).firstMatch(texto ?? '');
+  return match?.group(1)?.trim() ?? '';
+}
+
 class FormasPagamentoView extends StatefulWidget {
   final VoidCallback? onChanged;
 
@@ -93,6 +103,8 @@ class _FormasPagamentoViewState extends State<FormasPagamentoView> {
         .replaceAll(RegExp(r'\[Prazo:\s*\d+\s*dias?\]\s*', caseSensitive: false), '')
         .replaceAll(RegExp(r'\[Taxa:\s*[0-9]+(?:[\.,][0-9]+)?\s*%\]\s*', caseSensitive: false), '')
         .replaceAll(RegExp(r'\[Repasse:\s*\d+\s*dias(?:\s+[a-zà-ú]+)?\]\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\[Favorecido:\s*[^\]]+\]\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\[Cidade:\s*[^\]]+\]\s*', caseSensitive: false), '')
         .trim();
     final descricaoCtrl = TextEditingController(text: cleanDescricao);
     final prazoDiasCtrl = TextEditingController(text: '${_extrairPrazoDias(forma?.descricao, forma?.nome)}');
@@ -105,6 +117,8 @@ class _FormasPagamentoViewState extends State<FormasPagamentoView> {
 
     final pixChaveCtrl = TextEditingController(text: forma?.pixChave ?? '');
     final pixTipoBancoCtrl = TextEditingController(text: forma?.pixTipoBanco ?? '');
+    final pixFavorecidoCtrl = TextEditingController(text: _extrairPixFavorecido(forma?.descricao));
+    final pixCidadeCtrl = TextEditingController(text: _extrairPixCidade(forma?.descricao));
     String pixTipoChave = forma?.pixTipoChave ?? 'CPF';
     String? bandeira = forma?.bandeiraPadrao;
     bool ativo = forma?.ativo ?? true;
@@ -316,15 +330,53 @@ class _FormasPagamentoViewState extends State<FormasPagamentoView> {
                                 ],
                               ),
                               const SizedBox(height: 10),
-                              const FincoreFieldLabel(label: 'CHAVE PIX'),
+                              const FincoreFieldLabel(label: 'CHAVE PIX', isRequired: true),
                               FincoreTextField(
                                 controller: pixChaveCtrl,
                                 hintText: 'Informe a chave (ex: 123.456.789-00 ou contato@loja.com)',
+                                validator: (v) {
+                                  if (tipo == TipoFormaPagamento.pix && (v == null || v.trim().isEmpty)) {
+                                    return 'Chave PIX é obrigatória para cobrança';
+                                  }
+                                  return null;
+                                },
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const FincoreFieldLabel(label: 'FAVORECIDO / BENEFICIÁRIO (OPCIONAL)'),
+                                        FincoreTextField(
+                                          controller: pixFavorecidoCtrl,
+                                          hintText: 'Ex: Solange Maria (Vazio = usa Empresa)',
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const FincoreFieldLabel(label: 'CIDADE DO TITULAR (OPCIONAL)'),
+                                        FincoreTextField(
+                                          controller: pixCidadeCtrl,
+                                          hintText: 'Ex: Pouso Alegre (Vazio = usa Empresa)',
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
                               const Text(
-                                'Esta chave será impressa no cupom fiscal/não-fiscal e utilizada na cobrança quando esta forma de PIX for escolhida.',
-                                style: TextStyle(fontSize: 10, color: FincoreColors.textMuted),
+                                '💡 O padrão Bacen/EMV exige Favorecido e Cidade para gerar o código Copia e Cola funcional. Caso deixe em branco, o sistema usará automaticamente os dados cadastrados da sua Empresa.',
+                                style: TextStyle(fontSize: 10.5, color: Color(0xFF10B981)),
                               ),
                             ],
                           ),
@@ -569,6 +621,15 @@ class _FormasPagamentoViewState extends State<FormasPagamentoView> {
                     final dias = int.tryParse(prazoRepasseCtrl.text.trim()) ?? (tipo == TipoFormaPagamento.cartaoDebito ? 1 : 30);
                     final prefixoCartao = '[Taxa: ${taxa.toStringAsFixed(2)}%] [Repasse: $dias dias $tipoDiasRepasse]';
                     finalDescricao = finalDescricao != null ? '$prefixoCartao $finalDescricao' : prefixoCartao;
+                  } else if (tipo == TipoFormaPagamento.pix) {
+                    final fav = pixFavorecidoCtrl.text.trim();
+                    final cid = pixCidadeCtrl.text.trim();
+                    String tagsPix = '';
+                    if (fav.isNotEmpty) tagsPix += '[Favorecido: $fav] ';
+                    if (cid.isNotEmpty) tagsPix += '[Cidade: $cid] ';
+                    if (tagsPix.isNotEmpty) {
+                      finalDescricao = finalDescricao != null ? '${tagsPix.trim()} $finalDescricao' : tagsPix.trim();
+                    }
                   }
 
                   final nova = FormaPagamento(
@@ -602,7 +663,7 @@ class _FormasPagamentoViewState extends State<FormasPagamentoView> {
                   if (mounted) {
                     _carregar();
                     widget.onChanged?.call();
-                    Navigator.of(ctx).pop();
+                    if (ctx.mounted) Navigator.of(ctx).pop();
                   }
                 },
                 style: ElevatedButton.styleFrom(

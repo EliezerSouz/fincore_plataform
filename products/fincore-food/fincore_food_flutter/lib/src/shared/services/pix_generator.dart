@@ -149,15 +149,15 @@ class PixGenerator {
     // 58: Country Code (Fixed "BR")
     payload += _formatTlv('58', 'BR');
 
-    // 59: Merchant Name (Máx 25 chars, sem acentos)
-    final cleanFav = _removerAcentos(favorecido);
+    // 59: Merchant Name (Máx 25 chars, sem acentos, maiúsculo padrão Bacen)
+    final cleanFav = _removerAcentos(favorecido).toUpperCase();
     final name = cleanFav.substring(0, cleanFav.length.clamp(0, 25));
-    payload += _formatTlv('59', name.isNotEmpty ? name : 'Estabelecimento');
+    payload += _formatTlv('59', name.isNotEmpty ? name : 'ESTABELECIMENTO');
 
-    // 60: Merchant City (Máx 15 chars, sem acentos)
-    final cleanCity = _removerAcentos(cidade);
+    // 60: Merchant City (Máx 15 chars, sem acentos, maiúsculo padrão Bacen)
+    final cleanCity = _removerAcentos(cidade).toUpperCase();
     final city = cleanCity.substring(0, cleanCity.length.clamp(0, 15));
-    payload += _formatTlv('60', city.isNotEmpty ? city : 'Sorocaba');
+    payload += _formatTlv('60', city.isNotEmpty ? city : 'POUSO ALEGRE');
 
     // 62: Additional Data Field Template (Subtag 05: Reference Label "***")
     payload += _formatTlv('62', _formatTlv('05', '***'));

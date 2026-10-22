@@ -8,7 +8,7 @@
 // ─── Configurações do Supabase & Backend ─────────────────────────────
 const SUPABASE_URL     = 'https://nlaxdeqbordmovukyypk.supabase.co';
 const SUPABASE_ANON    = 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy';
-const DEFAULT_TENANT_ID = '65109ff8-443f-41ce-94c8-8311dfc79764'; // Delivery do Eli
+const DEFAULT_TENANT_ID = '64f61559-2c0c-46e0-8411-3aa299541fdf'; // Solange Salgados Artesanais
 
 // ─── Inicialização do Cliente Supabase ──────────────────────────────
 const { createClient } = supabase;
@@ -1250,25 +1250,133 @@ function getBaseUnitPrice(produto) {
   return 100;
 }
 
-function gerarPayloadPixEMV(chave, nome, cidade, valorCentavos, txid = '***') {
+function normalizarChavePixBacen(chave, tipo = '') {
   if (!chave) return '';
-  const cleanStr = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  let clean = String(chave).trim();
+  const tipoUpper = String(tipo || '').toUpperCase().trim();
+
+  // 1. Tipo Telefone / Celular
+  if (tipoUpper.includes('TEL') || tipoUpper.includes('CEL') || tipoUpper.includes('FONE')) {
+    let digits = clean.replace(/\D/g, '');
+    if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+      digits = digits.substring(2);
+    }
+    return `+55${digits}`;
+  }
+
+  // 2. CPF
+  if (tipoUpper.includes('CPF')) {
+    return clean.replace(/\D/g, '');
+  }
+
+  // 3. CNPJ
+  if (tipoUpper.includes('CNPJ')) {
+    return clean.replace(/\D/g, '');
+  }
+
+  // 4. E-mail
+  if (tipoUpper.includes('EMAIL') || tipoUpper.includes('E-MAIL') || clean.includes('@')) {
+    return clean.toLowerCase().replace(/\s+/g, '');
+  }
+
+  // 5. Auto-detecção inteligente quando tipo omitido
+  if (clean.includes('@')) {
+    return clean.toLowerCase().replace(/\s+/g, '');
+  }
+  if (clean.startsWith('+')) {
+    return `+${clean.replace(/\D/g, '')}`;
+  }
+
+  const digits = clean.replace(/\D/g, '');
+  // CNPJ: 14 dígitos
+  if (digits.length === 14) return digits;
+
+  // Telefone com DDI 55 já embutido
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
+    return `+${digits}`;
+  }
+
+  // Telefone fixo (10 dígitos: DDD + 8 dígitos)
+  if (digits.length === 10) return `+55${digits}`;
+
+  // Celular 11 dígitos (DDD + 9 dígitos)
+  if (digits.length === 11) {
+    const ddd = parseInt(digits.substring(0, 2), 10);
+    const nono = digits.substring(2, 3);
+    // Se tem formato de celular brasileiro com 9 no início
+    if (ddd >= 11 && ddd <= 99 && nono === '9' && (clean.includes('(') || clean.includes('-') || clean.includes(' ') || clean.length > 11)) {
+      return `+55${digits}`;
+    }
+    return digits; // CPF 11 dígitos
+  }
+
+  // Chave Aleatória (EVP UUID) ou texto
+  return clean.toLowerCase().replace(/\s+/g, '');
+}
+
+function getEmpresaWhatsAppClean() {
+  const raw = state.empresa?.whatsapp || state.empresa?.telefone || '';
+  let digits = String(raw).replace(/\D/g, '');
+  if (!digits) return '';
+
+  // Corrige duplicações acidentais de DDI 55 (ex: 555535998339825 -> 5535998339825)
+  while (digits.startsWith('5555')) {
+    digits = digits.substring(2);
+  }
+
+  // Se tem 10 ou 11 dígitos (DDD + número), adiciona o DDI 55
+  if (digits.length === 10 || digits.length === 11) {
+    return `55${digits}`;
+  }
+
+  // Se tem 12 ou 13 dígitos e já começa com 55, está perfeito
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
+    return digits;
+  }
+
+  // Fallback
+  if (!digits.startsWith('55') && digits.length <= 11) {
+    return `55${digits}`;
+  }
+  return digits;
+}
+
+function gerarPayloadPixEMV(chave, nome, cidade, valorCentavos, txid = '***', tipoChave = '') {
+  if (!chave) return '';
+  const chaveNormalizada = normalizarChavePixBacen(chave, tipoChave);
+  if (!chaveNormalizada) return '';
+
+  const cleanAscii = (s) => (s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9 ]/g, '')
+    .trim()
+    .toUpperCase();
+
   const formatField = (id, val) => {
     const len = String(val.length).padStart(2, '0');
     return `${id}${len}${val}`;
   };
 
-  const merchantName = cleanStr(nome).slice(0, 25) || 'FINCORE FOOD';
-  const merchantCity = cleanStr(cidade).slice(0, 15) || 'POUSO ALEGRE';
+  const merchantName = cleanAscii(nome).slice(0, 25) || cleanAscii(state.empresa?.nomeFantasia || state.empresa?.razaoSocial).slice(0, 25) || 'FINCORE FOOD';
+  const merchantCity = cleanAscii(cidade).slice(0, 15) || cleanAscii(state.empresa?.cidade).slice(0, 15) || 'POUSO ALEGRE';
   const formattedValor = (valorCentavos > 0 ? (valorCentavos / 100).toFixed(2) : '');
 
+  // 00: Payload Format Indicator (Fixed "01")
+  // 26: Merchant Account Information (GUI: br.gov.bcb.pix + chave)
   const gui = formatField('00', 'br.gov.bcb.pix');
-  const keyField = formatField('01', chave.trim());
+  const keyField = formatField('01', chaveNormalizada);
   const merchantAccountInfo = formatField('26', `${gui}${keyField}`);
 
+  // Saneamento de TxId (Tag 62 subtag 05) - max 25 chars alfanuméricos sem traços
+  let cleanTxid = cleanAscii(String(txid || '')).replace(/\s+/g, '').slice(0, 25);
+  if (!cleanTxid || cleanTxid === '***') cleanTxid = '***';
+
+  // ATENÇÃO: Tag 01 com '12' REMOVIDA! No padrão EMVCo do Bacen para QR Code Estático com valor,
+  // a Tag 01 '12' é exclusiva para QR dinâmico com API do PSP. Incluir '12' faz apps bancários
+  // (Nubank, Itaú, Bradesco, Inter, Mercado Pago) rejeitarem o payload com erro de validação.
   let payload = [
     formatField('00', '01'),
-    formatField('01', '12'),
     merchantAccountInfo,
     formatField('52', '0000'),
     formatField('53', '986'),
@@ -1276,7 +1384,7 @@ function gerarPayloadPixEMV(chave, nome, cidade, valorCentavos, txid = '***') {
     formatField('58', 'BR'),
     formatField('59', merchantName),
     formatField('60', merchantCity),
-    formatField('62', formatField('05', txid)),
+    formatField('62', formatField('05', cleanTxid)),
     '6304'
   ].join('');
 
@@ -1671,7 +1779,13 @@ function getTenantFromUrl() {
     localStorage.setItem('fincore_cardapio_tenant', urlTenant);
     return urlTenant;
   }
-  return localStorage.getItem('fincore_cardapio_tenant') || null;
+  const cached = localStorage.getItem('fincore_cardapio_tenant');
+  // Se o cached for o ID legado do Delivery do Eli, migra automaticamente para o DEFAULT_TENANT_ID
+  if (!cached || cached === '65109ff8-443f-41ce-94c8-8311dfc79764') {
+    localStorage.setItem('fincore_cardapio_tenant', DEFAULT_TENANT_ID);
+    return DEFAULT_TENANT_ID;
+  }
+  return cached;
 }
 
 async function loadEmpresa() {
@@ -1778,12 +1892,16 @@ async function loadEmpresa() {
       }
 
       // Fallback em forma_pagamento se não veio de empresa_configuracao
-      if (!state.empresa.chave_pix) {
-        const pixFp = state.formasPagamento.find(fp => String(fp.tipo || '').toLowerCase().includes('pix') || String(fp.nome || '').toLowerCase().includes('pix'));
-        if (pixFp) {
-          if (pixFp.pixChave) state.empresa.chave_pix = pixFp.pixChave;
-          if (pixFp.pixTipoBanco) state.empresa.pix_banco = pixFp.pixTipoBanco;
-          if (pixFp.pixTipoChave) state.empresa.pix_tipo = pixFp.pixTipoChave;
+      const pixFp = state.formasPagamento.find(fp => String(fp.tipo || '').toLowerCase().includes('pix') || String(fp.nome || '').toLowerCase().includes('pix'));
+      if (pixFp) {
+        if (!state.empresa.chave_pix && pixFp.pixChave) state.empresa.chave_pix = pixFp.pixChave;
+        if (!state.empresa.pix_banco && pixFp.pixTipoBanco) state.empresa.pix_banco = pixFp.pixTipoBanco;
+        if (!state.empresa.pix_tipo && pixFp.pixTipoChave) state.empresa.pix_tipo = pixFp.pixTipoChave;
+        if (pixFp.descricao) {
+          const matchFav = pixFp.descricao.match(/\[Favorecido:\s*([^\]]+)\]/i);
+          if (matchFav && matchFav[1] && !state.empresa.pix_favorecido) state.empresa.pix_favorecido = matchFav[1].trim();
+          const matchCid = pixFp.descricao.match(/\[Cidade:\s*([^\]]+)\]/i);
+          if (matchCid && matchCid[1] && !state.empresa.cidade) state.empresa.cidade = matchCid[1].trim();
         }
       }
 
@@ -1907,12 +2025,16 @@ async function loadEmpresa() {
 
     // Telefone / WhatsApp
     const phone = state.empresa.whatsapp || state.empresa.telefone;
+    const phoneClean = getEmpresaWhatsAppClean();
+    const homeInfoPhoneItem = document.getElementById('home-info-phone-item');
     const homeInfoPhone = document.getElementById('home-info-phone');
     if (homeInfoPhone) {
-      if (phone) {
-        homeInfoPhone.textContent = `WhatsApp: ${formatPhone(phone)}`;
+      if (phone && phoneClean) {
+        homeInfoPhone.innerHTML = `<a href="https://wa.me/${phoneClean}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none;font-weight:600;">WhatsApp: ${formatPhone(phone)} ↗</a>`;
+        if (homeInfoPhoneItem) homeInfoPhoneItem.style.display = '';
         homeInfoPhone.style.display = '';
       } else {
+        if (homeInfoPhoneItem) homeInfoPhoneItem.style.display = 'none';
         homeInfoPhone.style.display = 'none';
       }
     }
@@ -4414,7 +4536,7 @@ async function abrirModalConfirmacaoCheckout() {
     document.getElementById('cm-pix-tipo').textContent = state.empresa.pix_tipo || 'Chave';
     document.getElementById('cm-pix-chave').textContent = state.empresa.chave_pix;
 
-    const payload = gerarPayloadPixEMV(state.empresa.chave_pix, state.empresa.pix_favorecido, state.empresa?.cidade || 'Pouso Alegre', grandTotal);
+    const payload = gerarPayloadPixEMV(state.empresa.chave_pix, state.empresa.pix_favorecido, state.empresa?.cidade || 'Pouso Alegre', grandTotal, '***', state.empresa.pix_tipo);
     const cmBtnPayload = document.getElementById('cm-btn-copiar-pix-payload');
     if (cmBtnPayload) {
       cmBtnPayload.onclick = () => {
@@ -4845,7 +4967,7 @@ function renderConfirmationPage(order) {
       document.getElementById('confirm-pix-chave-raw').textContent = chave;
       document.getElementById('confirm-pix-valor').textContent = fmt(order.valorTotalCentavos);
 
-      const payload = gerarPayloadPixEMV(chave, favorecido, state.empresa?.cidade || 'Pouso Alegre', order.valorTotalCentavos, order.numeroPedido || order.id.slice(0, 6));
+      const payload = gerarPayloadPixEMV(chave, favorecido, state.empresa?.cidade || 'Pouso Alegre', order.valorTotalCentavos, order.numeroPedido || '***', tipo);
 
       document.getElementById('btn-confirm-copiar-pix-payload')?.setAttribute('onclick', '');
       const btnPayload = document.getElementById('btn-confirm-copiar-pix-payload');
@@ -4876,14 +4998,14 @@ function renderConfirmationPage(order) {
   }
 
   const waBtn = document.getElementById('btn-confirm-whatsapp-store');
-  if (waBtn && state.empresa?.telefone) {
-    const phoneClean = state.empresa.telefone.replace(/\D/g, '');
+  const storePhoneClean = getEmpresaWhatsAppClean();
+  if (waBtn && storePhoneClean) {
     const num = order.numeroPedido || order.id.slice(0, 6);
     const msg = `Olá! Acabei de enviar o pedido #${num} no valor de ${fmt(order.valorTotalCentavos)}. Segue meu link de acompanhamento: ${trackUrl}`;
-    waBtn.href = `https://wa.me/55${phoneClean}?text=${encodeURIComponent(msg)}`;
+    waBtn.href = `https://wa.me/${storePhoneClean}?text=${encodeURIComponent(msg)}`;
     waBtn.style.display = 'inline-flex';
-  } else if (pixContainer) {
-    pixContainer.style.display = 'none';
+  } else if (waBtn) {
+    waBtn.style.display = 'none';
   }
 
   const subEl = document.getElementById('confirm-subtitle');
@@ -5380,7 +5502,7 @@ function openOrderDetailModal(order) {
       const pixChaveEl = document.getElementById('detail-pix-chave');
       if (pixChaveEl) pixChaveEl.textContent = chave;
 
-      const payload = gerarPayloadPixEMV(chave, favorecido, state.empresa?.cidade || 'Pouso Alegre', order.valorTotalCentavos, order.numeroPedido || order.id.slice(0, 6));
+      const payload = gerarPayloadPixEMV(chave, favorecido, state.empresa?.cidade || 'Pouso Alegre', order.valorTotalCentavos, order.numeroPedido || '***', state.empresa?.pix_tipo);
 
       const btnPayload = document.getElementById('btn-detail-copiar-pix-payload');
       if (btnPayload) {
@@ -5429,12 +5551,14 @@ function openOrderDetailModal(order) {
   }
 
   const waDetailBtn = document.getElementById('btn-detail-whatsapp-store');
-  if (waDetailBtn && state.empresa?.telefone) {
-    const phoneClean = state.empresa.telefone.replace(/\D/g, '');
+  const detailPhoneClean = getEmpresaWhatsAppClean();
+  if (waDetailBtn && detailPhoneClean) {
     const num = order.numeroPedido || order.id.slice(0, 6);
     const msg = `Olá! Gostaria de informações sobre o meu pedido #${num}. Segue o link de acompanhamento: ${trackUrl}`;
-    waDetailBtn.href = `https://wa.me/55${phoneClean}?text=${encodeURIComponent(msg)}`;
+    waDetailBtn.href = `https://wa.me/${detailPhoneClean}?text=${encodeURIComponent(msg)}`;
     waDetailBtn.style.display = 'inline-flex';
+  } else if (waDetailBtn) {
+    waDetailBtn.style.display = 'none';
   }
 
   modal.classList.add('open');
@@ -6559,11 +6683,10 @@ function initEventListeners() {
       return;
     }
     const txt = gerarTextoResumoPedido();
-    const phone = (state.empresa?.whatsapp || state.empresa?.telefone || '').replace(/\D/g, '');
+    const phoneClean = getEmpresaWhatsAppClean();
     let url = `https://api.whatsapp.com/send?text=${encodeURIComponent(txt)}`;
-    if (phone) {
-      const fullPhone = phone.startsWith('55') ? phone : `55${phone}`;
-      url = `https://api.whatsapp.com/send?phone=${fullPhone}&text=${encodeURIComponent(txt)}`;
+    if (phoneClean) {
+      url = `https://api.whatsapp.com/send?phone=${phoneClean}&text=${encodeURIComponent(txt)}`;
     }
     window.open(url, '_blank');
     toast('📱 Redirecionando para o WhatsApp...', 'success');

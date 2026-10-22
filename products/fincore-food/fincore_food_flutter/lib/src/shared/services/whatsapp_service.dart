@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import 'package:fincore_core/fincore_core.dart';
 import '../data/whatsapp_message_log_repository.dart';
 import 'evolution_api_client.dart';
+import 'pix_generator.dart';
 export 'evolution_api_client.dart';
 export '../data/whatsapp_message_log_repository.dart';
 
@@ -2144,6 +2145,29 @@ class WhatsAppService {
           ? chavePix
           : await obterChavePixOficial(tenantId: tenantId);
 
+      String? chavePixCopiaColaResolvida = chavePixCopiaCola;
+      final isPixResolved = formaPagamento.trim().toUpperCase().contains('PIX');
+      if ((chavePixCopiaColaResolvida == null || chavePixCopiaColaResolvida.trim().isEmpty) &&
+          pixKeyResolvida.isNotEmpty &&
+          isPixResolved) {
+        try {
+          final double valorPix = (valorTotalCentavos != null && valorTotalCentavos > 0)
+              ? valorTotalCentavos / 100.0
+              : 0.0;
+          chavePixCopiaColaResolvida = PixGenerator.gerarCopiaCola(
+            chave: pixKeyResolvida,
+            favorecido: empNome,
+            cidade: (TenantContext().hasContext && (TenantContext().empresa.cidade?.isNotEmpty ?? false))
+                ? TenantContext().empresa.cidade!
+                : 'Pouso Alegre',
+            valor: valorPix,
+            mensagem: 'Pedido #$numeroPedido',
+          );
+        } catch (e) {
+          debugPrint('[WhatsAppService] Aviso ao gerar Copia e Cola PIX automático: $e');
+        }
+      }
+
       final vars = gerarVariaveisInterpolacao(
         clienteNome: clienteNome,
         nomeEmpresa: empNome,
@@ -2172,7 +2196,7 @@ class WhatsAppService {
         linkCardapio: linkCardapio,
         linkRastreio: linkRastreio,
         chavePix: pixKeyResolvida,
-        chavePixCopiaCola: chavePixCopiaCola,
+        chavePixCopiaCola: chavePixCopiaColaResolvida,
       );
 
       final templates = await getTemplates(tenantId: tenantId, nomeEmpresa: empNome);
