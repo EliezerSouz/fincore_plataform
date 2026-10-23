@@ -4,6 +4,7 @@ Este arquivo Ã© mantido automaticamente pelo script de release (	ools/build_an
 
 | VersÃ£o | Data | Commit | Pacote FULL | Pacote UPDATE | Notas de Release |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| **v1.8.12** (Build 58) | 2026-10-23 | `0b0d842` | [v1.8.12_2026-10-23/fincore_food](v1.8.12_2026-10-23/fincore_food) (46,65 MB) | [v1.8.12_2026-10-23/fincore_food_update](v1.8.12_2026-10-23/fincore_food_update) (42,96 MB) | feat(cardapio,pdv): vitrine de pedido expresso com filtro por estoque, tiers de preco e auto-cep v2.9.8  |
 | **v1.8.11** (Build 57) | 2026-10-22 | `4983926` | [v1.8.11_2026-10-22/fincore_food](v1.8.11_2026-10-22/fincore_food) (46,61 MB) | [v1.8.11_2026-10-22/fincore_food_update](v1.8.11_2026-10-22/fincore_food_update) (42,93 MB) | fix(whatsapp,pdv,cardapio): anti-duplicidade, linkPreview condicional, parser WhatsApp resiliente e responsividade mobile  |
 | **v1.8.10** (Build 56) | 2026-10-22 | `749cc4a` | [v1.8.10_2026-10-22/fincore_food](v1.8.10_2026-10-22/fincore_food) (46,61 MB) | [v1.8.10_2026-10-22/fincore_food_update](v1.8.10_2026-10-22/fincore_food_update) (42,93 MB) | Validacao e2e da sincronizacao multi-tabelas, correcao de tenantId em entidades raiz, integridade de schema e logs de auditoria |
 | **v1.8.7** (Build 53) | 2026-10-21 | `ebac181` | [v1.8.7_2026-10-21/fincore_food](v1.8.7_2026-10-21/fincore_food) (46,61 MB) | [v1.8.7_2026-10-21/fincore_food_update](v1.8.7_2026-10-21/fincore_food_update) (42,93 MB) | fix(cardapio-web): remover sufixo Plataforma Gourmet do rodape de avaliacao  |
