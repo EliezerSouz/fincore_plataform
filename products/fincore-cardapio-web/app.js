@@ -6144,10 +6144,12 @@ async function handleRegister(e) {
     resetAuthLayout();
     updateHeaderUI();
 
-    const nextScreen = state.redirectAfterAuth || (state.cart.length > 0 ? 'screen-checkout' : 'screen-home');
+    const urlParams = new URLSearchParams(window.location.search);
+    const isExpresso = urlParams.get('modo') === 'expresso' || urlParams.get('expresso') === '1';
+    const nextScreen = state.redirectAfterAuth || (isExpresso ? 'screen-expresso' : (state.cart.length > 0 ? 'screen-checkout' : 'screen-home'));
     state.redirectAfterAuth = null;
     showScreen(nextScreen);
-    toast('🎉 Cadastro concluído com sucesso! Pode fazer seu pedido.', 'success');
+    toast('🎉 Cadastro salvo com sucesso! Pode continuar seu pedido.', 'success');
   } catch (err) {
     toast('Erro ao salvar cadastro: ' + err.message, 'error');
   } finally {
@@ -6300,7 +6302,7 @@ async function loadUserProfile() {
 
   try {
     const targetTenant = state.tenantId || DEFAULT_TENANT_ID;
-    const { data, error } = await sb
+    const { data } = await sb
       .from('cardapio_clientes')
       .select('*')
       .eq('user_id', user.id)
@@ -6308,7 +6310,6 @@ async function loadUserProfile() {
       .maybeSingle();
 
     if (data) {
-      // Se já existe registro, atualiza se nome ou email estiverem vazios
       let updated = false;
       const updates = {};
       if (!data.nome && googleName) {
@@ -6326,40 +6327,40 @@ async function loadUserProfile() {
       }
       state.profile = data;
     } else {
-      // Primeiro login (ex: Google OAuth): auto-provisionar em cardapio_clientes para a loja atual
+      // Se não existe para este tenant, busca se já tem cadastro preenchido em qualquer outro tenant para reaproveitar tudo!
+      const { data: anyProf } = await sb
+        .from('cardapio_clientes')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
       const initialProfile = {
         user_id: user.id,
         tenant_id: targetTenant,
-        nome: googleName,
-        email: googleEmail,
-        whatsapp: googlePhone,
-        uf: state.empresa?.estado || 'SP',
-        cidade: state.empresa?.cidade || ''
+        nome: anyProf?.nome || googleName,
+        email: anyProf?.email || googleEmail,
+        whatsapp: anyProf?.whatsapp || googlePhone,
+        cep: anyProf?.cep || null,
+        uf: anyProf?.uf || state.empresa?.estado || 'SP',
+        logradouro: anyProf?.logradouro || null,
+        numero: anyProf?.numero || null,
+        bairro: anyProf?.bairro || null,
+        cidade: anyProf?.cidade || state.empresa?.cidade || '',
+        complemento: anyProf?.complemento || null,
+        referencia: anyProf?.referencia || null,
+        endereco_padrao: anyProf?.endereco_padrao || null,
+        cliente_local_id: anyProf?.cliente_local_id || null,
       };
 
-      // Inserção resiliente para usuário novo sem erro de onConflict
-      const { data: newProfile, error: insertErr } = await sb
+      const { data: newProfile } = await sb
         .from('cardapio_clientes')
         .insert(initialProfile)
         .select()
         .maybeSingle();
 
-      if (newProfile) {
-        state.profile = newProfile;
-      } else {
-        // Se porventura já existia registro concorrente, busca novamente
-        const { data: retryData } = await sb
-          .from('cardapio_clientes')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('tenant_id', targetTenant)
-          .maybeSingle();
-
-        state.profile = retryData || {
-          ...initialProfile,
-          id: user.id
-        };
-      }
+      state.profile = newProfile || initialProfile;
     }
   } catch (e) {
     console.warn('Erro ao carregar ou auto-provisionar perfil do usuário:', e);
@@ -6379,8 +6380,6 @@ async function loadUserProfile() {
 
   if (isProfileComplete(state.profile)) {
     resetAuthLayout();
-  } else {
-    prepareGoogleOnboardingUI(user);
   }
 }
 
@@ -7866,42 +7865,47 @@ async function initApp() {
   initEventListeners();
 
   try {
-    // 1. Carrega sessão do Supabase se existir
+    // 1. Carrega dados do tenant e da empresa PRIMEIRO (para saber o tenant_id da URL)
+    await loadEmpresa();
+
+    // 2. Carrega sessão do Supabase se existir
     const { data: { session } } = await sb.auth.getSession();
     state.session = session;
 
-    // 2. Escuta mudanças na autenticação (ex: login com Google OAuth)
+    // 3. Carrega perfil do usuário se já estiver logado (com o tenantId correto da URL)
+    if (session) {
+      await loadUserProfile();
+    }
+
+    // 4. Escuta mudanças na autenticação sem sequestrar a tela inicial
     sb.auth.onAuthStateChange(async (event, newSession) => {
       state.session = newSession;
       if (newSession) {
         await loadUserProfile();
         await loadCustomerOrders(false);
 
-        // Se faltam WhatsApp ou endereço no cadastro:
+        const activeScreen = document.querySelector('.screen.active')?.id;
         const complete = isProfileComplete(state.profile);
-        if (!complete) {
-          prepareGoogleOnboardingUI(newSession.user);
-          showScreen('screen-auth');
-          toast('🎉 Conectado com sucesso! Complete seu WhatsApp e endereço para fazer pedidos.', 'info', 5000);
-          return;
-        }
 
-        // Se o cliente já tem cadastro completo:
+        // Só redireciona se o usuário estava no checkout aguardando login
         if (state.redirectAfterAuth === 'screen-checkout') {
-          state.redirectAfterAuth = null;
-          showScreen('screen-checkout');
-          toast(`Bem-vindo(a), ${state.profile?.nome || 'Cliente'}! Continue para finalizar seu pedido.`, 'success', 3500);
+          if (!complete) {
+            prepareGoogleOnboardingUI(newSession.user);
+            showScreen('screen-auth');
+            toast('📱 Complete seu WhatsApp e endereço para finalizar seu pedido.', 'info', 5000);
+          } else {
+            state.redirectAfterAuth = null;
+            showScreen('screen-checkout');
+            toast(`Bem-vindo(a), ${state.profile?.nome || 'Cliente'}! Continue para finalizar seu pedido.`, 'success', 3500);
+          }
         } else if (state.redirectAfterAuth === 'screen-account') {
           state.redirectAfterAuth = null;
           showScreen('screen-account');
         } else if (state.redirectAfterAuth === 'screen-orders') {
           state.redirectAfterAuth = null;
           showScreen('screen-orders');
-        } else {
-          const activeScreen = document.querySelector('.screen.active')?.id;
-          if (activeScreen === 'screen-auth') {
-            showScreen('screen-home');
-          }
+        } else if (activeScreen === 'screen-auth' && complete) {
+          showScreen('screen-home');
         }
       } else {
         state.profile = null;
@@ -7909,14 +7913,6 @@ async function initApp() {
         updateHeaderUI();
       }
     });
-
-    // 3. Carrega perfil do usuário se já estiver logado
-    if (session) {
-      await loadUserProfile();
-    }
-
-    // 4. Carrega dados do tenant e da empresa
-    await loadEmpresa();
 
     // 5. Carrega catálogo de produtos e precificação em lote
     await loadCatalog();
@@ -7926,16 +7922,20 @@ async function initApp() {
       await loadCustomerOrders();
     }
 
-    // 7. Exibe a tela inicial ou tela de conclusão de cadastro caso logado e incompleto
-    if (state.session && !isProfileComplete(state.profile)) {
-      prepareGoogleOnboardingUI(state.session.user);
-      showScreen('screen-auth');
+    // 7. Navegação inicial baseada estritamente nos parâmetros da URL (NUNCA bloquear visitante com cadastro)
+    const urlParams = new URLSearchParams(window.location.search);
+    const isModoExpresso = urlParams.get('modo') === 'expresso' || urlParams.get('expresso') === '1';
+    const isModoCardapio = urlParams.get('cardapio') === '1' || urlParams.get('c') === '1';
+
+    if (isModoExpresso) {
+      showScreen('screen-expresso');
+    } else if (isModoCardapio) {
+      showScreen('screen-cardapio');
     } else {
       showScreen('screen-home');
     }
 
     // 7.1 Rastreamento Público por Link / Token (?p=UUID ou ?pedido=UUID ou ?rastreio=UUID)
-    const urlParams = new URLSearchParams(window.location.search);
     const trackId = urlParams.get('p') || urlParams.get('pedido') || urlParams.get('rastreio');
     const tenantParam = urlParams.get('tenant_id') || urlParams.get('tenant') || urlParams.get('t') || state.tenantId;
     if (trackId) {
