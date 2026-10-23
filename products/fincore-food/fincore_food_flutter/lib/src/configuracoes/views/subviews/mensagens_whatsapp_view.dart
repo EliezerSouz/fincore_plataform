@@ -2731,6 +2731,31 @@ class MensagensWhatsAppViewState extends State<MensagensWhatsAppView> {
               widget.onChanged?.call();
             },
           ),
+          const SizedBox(height: 8),
+
+          // 4. Switch de Card / Link Preview Condicional
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              'Gerar Card de Pré-visualização (Link Preview) ao enviar links',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: FincoreColors.textPrimary),
+            ),
+            subtitle: const Text(
+              'Gera o card visual do WhatsApp apenas para mensagens que contiverem um link HTTP/HTTPS real (evita cards soltos ou vazios).',
+              style: TextStyle(fontSize: 10.5, color: FincoreColors.textMuted),
+            ),
+            value: _pdvConfig.enviarLinkPreview,
+            activeColor: const Color(0xFF25D366),
+            onChanged: (val) async {
+              setState(() {
+                _pdvConfig = _pdvConfig.copyWith(enviarLinkPreview: val);
+              });
+              await WhatsAppService.salvarPdvConfig(_pdvConfig, tenantId: _tenantId);
+              final evoCfg = await EvolutionApiClient.carregarConfig(tenantId: _tenantId);
+              await EvolutionApiClient.salvarConfig(evoCfg.copyWith(enviarLinkPreview: val), tenantId: _tenantId);
+              widget.onChanged?.call();
+            },
+          ),
         ],
       ),
     );

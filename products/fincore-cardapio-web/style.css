@@ -66,7 +66,7 @@ body {
   min-height: 100dvh;
   overflow-x: hidden;
   line-height: 1.5;
-  padding-bottom: 75px; /* Espaço para a bottom nav no mobile */
+  padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)); /* Espaço ergonômico para bottom nav no mobile com safe area */
 }
 
 @media (min-width: 769px) {
@@ -433,7 +433,7 @@ input, textarea, select { font-family: inherit; }
   bottom: 0;
   left: 0;
   right: 0;
-  height: 64px;
+  height: calc(64px + env(safe-area-inset-bottom, 0px));
   background: rgba(14, 14, 18, 0.94);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -442,7 +442,7 @@ input, textarea, select { font-family: inherit; }
   align-items: center;
   justify-content: space-around;
   z-index: 850;
-  padding: 0 8px;
+  padding: 0 8px env(safe-area-inset-bottom, 0px) 8px;
 }
 
 @media (min-width: 769px) {
@@ -498,7 +498,7 @@ input, textarea, select { font-family: inherit; }
 /* ─── Floating Bottom Cart Bar ────────────────────────────────── */
 .bottom-cart-bar {
   position: fixed;
-  bottom: 74px; /* Acima da bottom nav no mobile */
+  bottom: calc(74px + env(safe-area-inset-bottom, 0px)); /* Acima da bottom nav no mobile com safe-area */
   left: 16px;
   right: 16px;
   max-width: 480px;
@@ -2634,7 +2634,7 @@ input, textarea, select { font-family: inherit; }
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-top: 1px solid var(--surface-border);
-  padding: 12px 16px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)) 16px;
   z-index: 999;
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.75);
 }
@@ -2687,9 +2687,11 @@ input, textarea, select { font-family: inherit; }
   color: var(--error);
 }
 
-/* Oculta a barra de navegação global inferior quando o usuário estiver no checkout para liberar 100% de espaço */
-body.in-checkout .bottom-nav,
-body:has(#screen-checkout.active) .bottom-nav {
+/* Oculta a barra de navegação global inferior e floating cart quando o usuário estiver no checkout para liberar 100% de espaço */
+body.in-checkout .bottom-nav-bar,
+body.in-checkout .bottom-cart-bar,
+body:has(#screen-checkout.active) .bottom-nav-bar,
+body:has(#screen-checkout.active) .bottom-cart-bar {
   display: none !important;
 }
 
@@ -4271,8 +4273,110 @@ html, body {
   }
 }
 
-/* Otimização Ergonômica dos Cards no Mobile (<= 640px) */
+/* Otimização Ergonômica dos Componentes no Mobile (<= 640px) */
 @media (max-width: 640px) {
+  .app-header {
+    height: 58px;
+  }
+
+  .header-inner {
+    padding: 0 12px;
+    gap: 8px;
+  }
+
+  .header-store-name {
+    font-size: 14px;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .header-cart-badge-btn {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .cart-badge-total {
+    display: none; /* Oculta texto de valor longo no header em telas mobile */
+  }
+
+  .header-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+  }
+
+  .catalog-top-controls {
+    top: 58px;
+    padding: 8px 12px;
+  }
+
+  .home-hero {
+    padding: 16px 12px 14px 12px;
+  }
+
+  .home-greeting-row {
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .home-store-avatar {
+    width: 46px;
+    height: 46px;
+    font-size: 20px;
+    border-radius: 14px;
+  }
+
+  .home-greeting-title {
+    font-size: 18px;
+    line-height: 1.25;
+  }
+
+  .home-store-tagline {
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .home-search-box {
+    padding: 2px 4px 2px 14px;
+  }
+
+  .home-search-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .home-quick-intent-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .intent-shortcut-card {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .isc-icon-box {
+    width: 34px;
+    height: 34px;
+    font-size: 17px;
+    border-radius: 10px;
+  }
+
+  .isc-title {
+    font-size: 12.5px;
+    line-height: 1.2;
+  }
+
+  .isc-desc {
+    display: none; /* Em telas compactas, oculta texto secundário mantendo o card limpo */
+  }
+
+  .isc-arrow {
+    font-size: 12px;
+  }
+
   .product-card {
     padding: 10px;
     gap: 8px;
@@ -4302,7 +4406,7 @@ html, body {
   }
 
   .product-card-btn-add {
-    height: 34px;
+    height: 36px;
     font-size: 12.5px;
     padding: 6px 10px;
   }
@@ -4322,19 +4426,36 @@ html, body {
   }
 }
 
-/* Modal de Produto como Bottom Sheet Compacto em Telas Móveis (<= 640px) */
+/* Telas ultra compactas (<= 380px) */
+@media (max-width: 380px) {
+  .header-store-name {
+    max-width: 105px;
+  }
+
+  .home-quick-intent-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .featured-products-grid, #products-grid-wrapper {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
+
+/* Modais globais como Bottom Sheet ergonômico em telas móveis (<= 640px) */
 @media (max-width: 640px) {
-  .modal-overlay {
+  .modal-overlay, .modal-backdrop {
     align-items: flex-end !important;
     padding: 0 !important;
   }
 
-  #product-modal .modal-sheet {
+  .modal-sheet, .modal-card, #product-modal .modal-sheet, #auth-modal .modal-sheet, #orders-modal .modal-sheet {
     width: 100% !important;
     max-width: 100% !important;
     border-radius: 22px 22px 0 0 !important;
-    max-height: 88dvh !important;
-    max-height: 88vh !important;
+    max-height: 90dvh !important;
+    max-height: 90vh !important;
     margin: 0 !important;
     display: flex !important;
     flex-direction: column !important;

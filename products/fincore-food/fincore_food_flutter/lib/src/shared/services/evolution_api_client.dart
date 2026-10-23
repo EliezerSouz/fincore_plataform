@@ -67,6 +67,7 @@ class EvolutionApiConfig {
   final String apiKey;
   final String instanceName;
   final bool ativo;
+  final bool enviarLinkPreview;
   final Duration timeout;
 
   const EvolutionApiConfig({
@@ -74,6 +75,7 @@ class EvolutionApiConfig {
     required this.apiKey,
     required this.instanceName,
     this.ativo = true,
+    this.enviarLinkPreview = true,
     this.timeout = const Duration(seconds: 10),
   });
 
@@ -82,6 +84,7 @@ class EvolutionApiConfig {
     String? apiKey,
     String? instanceName,
     bool? ativo,
+    bool? enviarLinkPreview,
     Duration? timeout,
   }) {
     return EvolutionApiConfig(
@@ -89,6 +92,7 @@ class EvolutionApiConfig {
       apiKey: apiKey ?? this.apiKey,
       instanceName: instanceName ?? this.instanceName,
       ativo: ativo ?? this.ativo,
+      enviarLinkPreview: enviarLinkPreview ?? this.enviarLinkPreview,
       timeout: timeout ?? this.timeout,
     );
   }
@@ -98,6 +102,7 @@ class EvolutionApiConfig {
         'apiKey': apiKey,
         'instanceName': instanceName,
         'ativo': ativo,
+        'enviarLinkPreview': enviarLinkPreview,
         'timeoutSeconds': timeout.inSeconds,
       };
 
@@ -116,6 +121,7 @@ class EvolutionApiConfig {
       apiKey: apiKey,
       instanceName: json['instanceName']?.toString() ?? '',
       ativo: json['ativo'] as bool? ?? true,
+      enviarLinkPreview: json['enviarLinkPreview'] as bool? ?? true,
       timeout: Duration(seconds: json['timeoutSeconds'] as int? ?? 10),
     );
   }
@@ -415,10 +421,16 @@ class EvolutionApiClient {
         : config.apiUrl;
     final targetUri = Uri.parse('$cleanUrl/message/sendText/${config.instanceName}');
 
+    // O card de preview só deve ser enviado se:
+    // 1. A configuração permitir (config.enviarLinkPreview == true)
+    // 2. A mensagem contiver efetivamente um link HTTP/HTTPS
+    final bool contemLink = textoMensagem.contains(RegExp(r'https?:\/\/', caseSensitive: false));
+    final bool deveGerarPreview = config.enviarLinkPreview && contemLink;
+
     final payload = {
       'number': phoneToSend,
       'text': textoMensagem,
-      'linkPreview': true,
+      'linkPreview': deveGerarPreview,
     };
 
     HttpClient? client;

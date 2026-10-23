@@ -1510,6 +1510,10 @@ class _PedidosPageState extends State<PedidosPage> {
         templateIdSugerido = 'saiu_entrega';
       } else if (o.status == StatusOrdemPreparo.pronto) {
         templateIdSugerido = 'pedido_pronto';
+      } else if (o.status == StatusOrdemPreparo.entregue) {
+        templateIdSugerido = 'avaliacao_pos_venda';
+      } else if (o.status == StatusOrdemPreparo.cancelado) {
+        templateIdSugerido = 'pedido_cancelado';
       } else if (o.status == StatusOrdemPreparo.pendente) {
         templateIdSugerido = 'comprovante';
       } else {
@@ -2430,22 +2434,30 @@ class _PedidosPageState extends State<PedidosPage> {
 
               // Botão Principal: APROVAR PEDIDO
               ElevatedButton.icon(
-                onPressed: () async {
-                  await _controller.aprovarPedidoWeb(ordem);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        backgroundColor: FincoreColors.success,
-                        content: Text('✅ Pedido $numStr aprovado com sucesso e integrado à fila!'),
-                        duration: const Duration(seconds: 3),
-                      ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-                label: const Text(
-                  'APROVAR PEDIDO',
-                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
+                onPressed: _controller.isProcessandoAprovacao(ordem.id)
+                    ? null
+                    : () async {
+                        await _controller.aprovarPedidoWeb(ordem);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: FincoreColors.success,
+                              content: Text('✅ Pedido $numStr aprovado com sucesso e integrado à fila!'),
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                        }
+                      },
+                icon: _controller.isProcessandoAprovacao(ordem.id)
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.check_circle_outline_rounded, size: 18),
+                label: Text(
+                  _controller.isProcessandoAprovacao(ordem.id) ? 'APROVANDO...' : 'APROVAR PEDIDO',
+                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: FincoreColors.success,

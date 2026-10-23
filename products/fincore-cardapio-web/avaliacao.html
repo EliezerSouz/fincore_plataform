@@ -417,14 +417,14 @@
 
     const SUPABASE_URL = 'https://nlaxdeqbordmovukyypk.supabase.co';
     const SUPABASE_ANON = 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy';
-    const DEFAULT_TENANT_ID = '65109ff8-443f-41ce-94c8-8311dfc79764'; // Delivery do Eli
+    const DEFAULT_TENANT_ID = '64f61559-2c0c-46e0-8411-3aa299541fdf'; // Solange Salgados Artesanais
 
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 
     // Parâmetros da URL
     const urlParams = new URLSearchParams(window.location.search);
-    const tenantIdParam = urlParams.get('tenant_id') || DEFAULT_TENANT_ID;
+    const tenantIdParam = urlParams.get('tenant_id') || urlParams.get('tenant') || DEFAULT_TENANT_ID;
     const pedidoParam = urlParams.get('pedido') || '';
     const numParam = urlParams.get('num') || '';
 
@@ -487,13 +487,25 @@
 
     async function carregarDados() {
       try {
-        // 1. Carrega dados da empresa / tenant
-        const { data: emp } = await sb
+        // 1. Carrega dados da empresa / tenant (por id ou tenantId ou fallback)
+        let { data: emp } = await sb
           .from('empresa')
-          .select('nomeFantasia, razaoSocial, logoUrl')
-          .eq('tenantId', tenantIdParam)
+          .select('nomeFantasia, razaoSocial, logoUrl, telefone')
+          .or(`id.eq.${tenantIdParam},tenantId.eq.${tenantIdParam}`)
           .limit(1)
           .maybeSingle();
+
+        if (!emp) {
+          const { data: vwEmp } = await sb.from('vw_cardapio_empresa').select('*').limit(1).maybeSingle();
+          if (vwEmp) {
+            emp = {
+              nomeFantasia: vwEmp.nome_fantasia,
+              razaoSocial: vwEmp.razao_social,
+              logoUrl: null,
+              telefone: vwEmp.whatsapp,
+            };
+          }
+        }
 
         if (emp) {
           tenantData = emp;

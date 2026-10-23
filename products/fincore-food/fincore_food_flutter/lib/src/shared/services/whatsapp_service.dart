@@ -144,12 +144,14 @@ class WhatsAppPdvConfig {
   final bool enviarPix2MsgPadrao; // Se true, o checkbox de 2ª msg com PIX vem marcado (default: false por enquanto)
   final String formatoPixPadrao; // 'bloco_completo', 'chave', 'copia_cola'
   final bool enviarWhatsAppPadrao; // Se true, o switch de envio vem ativado ao finalizar venda (default: true)
+  final bool enviarLinkPreview; // Se true e a mensagem tiver link, gera o card visual na Evolution API
 
   const WhatsAppPdvConfig({
     this.templateId = 'comprovante',
     this.enviarPix2MsgPadrao = false,
     this.formatoPixPadrao = 'bloco_completo',
     this.enviarWhatsAppPadrao = true,
+    this.enviarLinkPreview = true,
   });
 
   WhatsAppPdvConfig copyWith({
@@ -157,12 +159,14 @@ class WhatsAppPdvConfig {
     bool? enviarPix2MsgPadrao,
     String? formatoPixPadrao,
     bool? enviarWhatsAppPadrao,
+    bool? enviarLinkPreview,
   }) {
     return WhatsAppPdvConfig(
       templateId: templateId ?? this.templateId,
       enviarPix2MsgPadrao: enviarPix2MsgPadrao ?? this.enviarPix2MsgPadrao,
       formatoPixPadrao: formatoPixPadrao ?? this.formatoPixPadrao,
       enviarWhatsAppPadrao: enviarWhatsAppPadrao ?? this.enviarWhatsAppPadrao,
+      enviarLinkPreview: enviarLinkPreview ?? this.enviarLinkPreview,
     );
   }
 
@@ -171,6 +175,7 @@ class WhatsAppPdvConfig {
         'enviarPix2MsgPadrao': enviarPix2MsgPadrao,
         'formatoPixPadrao': formatoPixPadrao,
         'enviarWhatsAppPadrao': enviarWhatsAppPadrao,
+        'enviarLinkPreview': enviarLinkPreview,
       };
 
   factory WhatsAppPdvConfig.fromJson(Map<String, dynamic> map) {
@@ -179,6 +184,7 @@ class WhatsAppPdvConfig {
       enviarPix2MsgPadrao: map['enviarPix2MsgPadrao'] == true,
       formatoPixPadrao: map['formatoPixPadrao']?.toString() ?? 'bloco_completo',
       enviarWhatsAppPadrao: map['enviarWhatsAppPadrao'] != false,
+      enviarLinkPreview: map['enviarLinkPreview'] as bool? ?? true,
     );
   }
 }
@@ -541,10 +547,9 @@ class WhatsAppService {
         isPadrao: true,
         evento: 'pedido_criado',
         ordem: 0,
-        conteudo: '🧾 *COMPROVANTE DE VENDA #{pedido}*\n'
-            '🏢 *{loja}*\n'
-            '📍 *Canal:* Atendimento Balcão / Frente de Caixa\n\n'
-            '👋 *Olá, {cliente}!* Agradecemos a sua preferência em nossa loja física! Segue o seu comprovante detalhado:\n\n'
+        conteudo: '🧾 *COMPROVANTE DO PEDIDO #{pedido}*\n'
+            '🏢 *{loja}*\n\n'
+            '👋 *Olá, {cliente}!* Agradecemos a sua preferência! Segue o seu comprovante detalhado:\n\n'
             '🛒 *Itens Registrados:*\n'
             '{itens}\n\n'
             '💰 *Subtotal:* R\$ {subtotal}\n'
@@ -2284,7 +2289,11 @@ class WhatsAppService {
       final isPendente = statusPagamento.trim().toUpperCase() != 'PAGO';
       final isEventoInicial = eventoId == kEventoPedidoCriadoPdv || eventoId == kEventoPedidoAprovadoWeb;
 
-      if (isPix && isPendente && isEventoInicial) {
+      // Evita disparar 2ª mensagem duplicada se o texto de confirmação principal já possuir as instruções de PIX
+      final jaTemPixNoTexto = textoConfirmacao.contains('PIX') ||
+          (pixKeyResolvida.isNotEmpty && textoConfirmacao.contains(pixKeyResolvida));
+
+      if (isPix && isPendente && isEventoInicial && !jaTemPixNoTexto) {
         final templatePix = templates.firstWhere(
           (t) => t.id == 'cobranca_pix' || t.condicaoFormaPagamento == 'PIX',
           orElse: () => getTemplatesPadrao(nomeEmpresa: empNome).firstWhere((t) => t.id == 'cobranca_pix'),

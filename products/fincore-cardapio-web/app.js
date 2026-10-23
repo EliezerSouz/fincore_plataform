@@ -1860,7 +1860,13 @@ async function loadEmpresa() {
         ];
       }
 
-      if (empData) state.empresa = { ...data, ...empData };
+      if (empData) {
+        state.empresa = { ...data, ...empData };
+        if (empData.telefone) {
+          state.empresa.whatsapp = empData.telefone;
+          state.empresa.telefone = empData.telefone;
+        }
+      }
       if (configData) {
         state.empresaConfig = configData;
         let pKey = null;
@@ -1914,6 +1920,14 @@ async function loadEmpresa() {
       if (!state.empresa.pix_tipo) {
         state.empresa.pix_tipo = 'Chave Pix';
       }
+
+      // Atualiza dinamicamente título da página e meta tags OpenGraph para WhatsApp Card
+      const nomeLoja = state.empresa.nomeFantasia || state.empresa.nome_fantasia || state.empresa.razaoSocial || 'Cardápio & Encomendas Online';
+      document.title = `${nomeLoja} — Cardápio Digital`;
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      if (ogTitle) ogTitle.setAttribute('content', `🍽️ ${nomeLoja} — Cardápio & Encomendas`);
+      const ogDesc = document.querySelector('meta[property="og:description"]');
+      if (ogDesc) ogDesc.setAttribute('content', `Acesse o cardápio oficial da ${nomeLoja}. Faça seu pedido e acompanhe a entrega em tempo real!`);
 
       renderPaymentMethods();
 

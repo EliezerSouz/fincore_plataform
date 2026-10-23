@@ -344,10 +344,10 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
             ),
           );
           _selectedTemplateOption = match.id;
-          // Se o caller não passou um texto já formatado manualmente, ou se passou para usar o template, carrega o conteúdo salvo
-          if (widget.initialMessage == null || widget.initialMessage!.isEmpty) {
-            _messageController.text = _interpolarTexto(match.conteudo);
-          }
+          // Se o caller especificou um template ou se initialMessage é nulo, prioriza o texto do template interpolado
+          _messageController.text = _interpolarTexto(match.conteudo);
+        } else if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty) {
+          _messageController.text = widget.initialMessage!;
         } else if (_selectedTemplateOption != null) {
           final existe = ativos.any((t) => t.id == _selectedTemplateOption);
           if (!existe && ativos.isNotEmpty) {
@@ -449,6 +449,7 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
   }
 
   Future<void> _enviar() async {
+    if (_enviando) return;
     final rawPhone = _phoneController.text;
     final digitos = WhatsAppService.sanitizarTelefone(rawPhone);
 
@@ -523,6 +524,7 @@ class _WhatsAppDialogState extends State<WhatsAppDialog> {
   }
 
   Future<void> _enviarViaEvolutionApi() async {
+    if (_enviando) return;
     final rawPhone = _phoneController.text.trim();
     final digitos = WhatsAppService.sanitizarTelefone(rawPhone);
 

@@ -566,6 +566,10 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
         templateIdSugerido = 'saiu_entrega';
       } else if (widget.ordem.status == StatusOrdemPreparo.pronto) {
         templateIdSugerido = 'pedido_pronto';
+      } else if (widget.ordem.status == StatusOrdemPreparo.entregue) {
+        templateIdSugerido = 'avaliacao_pos_venda';
+      } else if (widget.ordem.status == StatusOrdemPreparo.cancelado) {
+        templateIdSugerido = 'pedido_cancelado';
       } else if (widget.ordem.status == StatusOrdemPreparo.pendente) {
         templateIdSugerido = 'comprovante';
       } else {

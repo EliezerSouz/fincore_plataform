@@ -356,14 +356,24 @@ class WhatsAppOrderAiParser {
     }
 
     // Regex para identificar cabeçalhos típicos de conversas exportadas ou copiadas do WhatsApp:
-    // Ex: "[08:45, 20/10/2026] Lucas S&S União Quimica: Oi bom dia"
-    // Ex: "20/10/2026 08:45 - Lucas S&S: Tudo bem?"
+    // Ex: "[08:45, 20/10/2026] Lucas: Oi"
+    // Ex: "[20/10/2026, 08:45:10] Lucas: Oi"
+    // Ex: "20/10/2026, 08:45 - Lucas: Tudo bem?"
+    // Ex: "08:45 - +55 19 99999-8888: Olá"
     final headerRegex = RegExp(
-      r'^(?:\[\d{1,2}:\d{2}(?::\d{2})?(?:,\s*\d{1,2}[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?)?\]|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}[,\s]+\d{1,2}:\d{2}(?::\d{2})?\s*[-–])\s*([^:\n]+?):\s*(.*)$',
+      r'^(?:\[(?:(?:\d{1,2}[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?)[,\s]+)?\d{1,2}:\d{2}(?::\d{2})?(?:[,\s]+(?:\d{1,2}[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?))?(?:\s*(?:AM|PM|am|pm))?\]|(?:\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})?[,\s]*\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM|am|pm))?\s*[-–])\s*([^:\n]+?):\s*(.*)$',
+      caseSensitive: false,
     );
 
     // 5. Varredura Linha a Linha para Campos Estruturados e Itens
     for (final rawLine in lines) {
+      final trimmedLine = rawLine.trim();
+
+      // Ignora linhas que são exclusivamente data/hora isolada (copiada do WhatsApp Web ou celular)
+      if (RegExp(r'^(?:\[?\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM|am|pm))?\]?|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}(?:[,\s]+\d{1,2}:\d{2})?)$', caseSensitive: false).hasMatch(trimmedLine)) {
+        continue;
+      }
+
       String lineToProcess = rawLine;
 
       // Se a linha começar com cabeçalho de mensagem do WhatsApp, extrai o remetente

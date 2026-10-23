@@ -114,6 +114,9 @@ class CentralPedidosController extends ChangeNotifier {
   OrdemPreparo? _lastNewOrder;
   OrdemPreparo? get lastNewOrder => _lastNewOrder;
 
+  final Set<String> _processandoAprovacaoWeb = {};
+  bool isProcessandoAprovacao(String id) => _processandoAprovacaoWeb.contains(id);
+
   CentralPedidosController({OrdemPreparoRepository? ordemRepo})
       : _ordemRepo =
             ordemRepo ?? DependencyInjection().get<OrdemPreparoRepository>() {
@@ -1406,9 +1409,16 @@ class CentralPedidosController extends ChangeNotifier {
   }
 
   Future<void> aprovarPedidoWeb(OrdemPreparo ordem) async {
-    final now = DateTime.now().toUtc();
-    final db = DependencyInjection().get<FincoreDatabase>();
-    final outboxService = DependencyInjection().get<OutboxService>();
+    if (_processandoAprovacaoWeb.contains(ordem.id)) {
+      debugPrint('[CentralPedidos] 🛑 Aprovação concorrente bloqueada para ordem ${ordem.id}');
+      return;
+    }
+    _processandoAprovacaoWeb.add(ordem.id);
+
+    try {
+      final now = DateTime.now().toUtc();
+      final db = DependencyInjection().get<FincoreDatabase>();
+      final outboxService = DependencyInjection().get<OutboxService>();
 
     String? operadorNome;
     try {
@@ -1494,6 +1504,9 @@ class CentralPedidosController extends ChangeNotifier {
     );
 
     notifyListeners();
+    } finally {
+      _processandoAprovacaoWeb.remove(ordem.id);
+    }
   }
 
   /// Processa mensageria do WhatsApp para a Central de Pedidos (Fase D2: Integrado e Seguro)
