@@ -223,5 +223,26 @@ _ kibe : 70
       expect(match!.id, 'cli-1');
       expect(match.nome, 'Lucas União Química');
     });
+
+    test('Não deve extrair datas ou horários de mensagens do WhatsApp como telefone', () {
+      const msg = '''
+[14:20, 23/10/2026] Solange: Olá boa tarde!
+[14:21, 23/10/2026] Solange: Me vê 100 coxinhas e 50 bolinhas de queijo
+''';
+      final res = parser.parseLocal(msg);
+      expect(res.clienteTelefone, isNull);
+      expect(res.clienteNome, 'Solange');
+    });
+
+    test('Deve extrair telefone do remetente quando formato for número internacional', () {
+      const msg = '''
+[14:20, 23/10/2026] +55 35 99250-3114: Boa tarde!
+Quero 1x Pizza Calabresa
+''';
+      final res = parser.parseLocal(msg, catalogoProdutos: catalogoMock);
+      expect(res.clienteTelefone, contains('99250-3114'));
+      expect(res.itens.length, 1);
+      expect(res.itens.first.produtoMatched?.id, 'prod-1');
+    });
   });
 }

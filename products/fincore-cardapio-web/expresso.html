@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Pronta Entrega — Pedido Rápido</title>
+  <meta name="description" content="Confira os itens disponíveis para pronta entrega e faça seu pedido em instantes sem complicação!" />
+  <meta property="og:title" content="⚡ Pedido Rápido & Pronta Entrega" />
+  <meta property="og:description" content="Confira os itens disponíveis para pronta entrega e faça seu pedido em instantes!" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://fincore-cardapio-web.vercel.app/cardapio_preview.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="675" />
+  <meta name="twitter:card" content="summary_large_image" />
 
   <!-- Google Fonts: Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -268,6 +276,32 @@
 
     .product-card:hover {
       box-shadow: var(--shadow-lg);
+    }
+
+    @media (max-width: 480px) {
+      .product-card {
+        padding: 10px 12px;
+        gap: 10px;
+      }
+      .product-thumb {
+        width: 62px;
+        height: 62px;
+        font-size: 24px;
+      }
+      .product-name {
+        font-size: 13.5px;
+      }
+      .product-price {
+        font-size: 14px;
+      }
+      .qty-btn {
+        width: 26px;
+        height: 26px;
+      }
+      .qty-val {
+        min-width: 24px;
+        font-size: 12.5px;
+      }
     }
 
     .product-thumb {
@@ -1035,8 +1069,20 @@
         return urlTenant.trim();
       }
       const cached = localStorage.getItem('fincore_cardapio_tenant');
+      if (cached === '64f61559-2c0c-46e0-8411-3aa299541fdf') {
+        localStorage.removeItem('fincore_cardapio_tenant');
+        return null;
+      }
       if (cached && cached.trim().length > 0) return cached.trim();
       return null;
+    }
+
+    function sanitizeWaPhone(raw) {
+      if (!raw) return '';
+      let digits = String(raw).replace(/\D/g, '');
+      while (digits.startsWith('5555')) digits = digits.substring(2);
+      if (digits.length === 10 || digits.length === 11) digits = '55' + digits;
+      return digits;
     }
 
     function formatMoeda(cents) {
@@ -1078,10 +1124,11 @@
             document.getElementById('brand-city').textContent = `${data.cidade}`;
           }
 
-          if (data.whatsapp) {
-            const cleanWa = data.whatsapp.replace(/\D/g, '');
+          const rawPhone = data.whatsapp || data.telefone;
+          if (rawPhone) {
+            const cleanWa = sanitizeWaPhone(rawPhone);
             const btnWa = document.getElementById('btn-contact-wa');
-            btnWa.href = `https://wa.me/55${cleanWa}`;
+            btnWa.href = `https://wa.me/${cleanWa}`;
             btnWa.style.display = 'inline-block';
           }
         }
@@ -1634,13 +1681,14 @@
       document.getElementById('succ-order-total').textContent = `Total: ${formatMoeda(totalCentavos)}`;
 
       // Monta texto pré-formatado para o WhatsApp da loja
-      if (app.empresa && app.empresa.whatsapp) {
-        const cleanWa = app.empresa.whatsapp.replace(/\D/g, '');
+      const rawStorePhone = app.empresa?.whatsapp || app.empresa?.telefone;
+      if (rawStorePhone) {
+        const cleanWa = sanitizeWaPhone(rawStorePhone);
         const itensTxt = Object.values(app.carrinho).map(it => `• ${it.qty}x ${it.produto.nome}`).join('%0A');
         const msg = `Olá! Acabei de enviar o *Pedido %23${numPedido}* pela Vitrine de Pronta Entrega!%0A%0A*Cliente:* ${encodeURIComponent(nome)}%0A*Itens:*%0A${itensTxt}%0A%0A*Total:* ${encodeURIComponent(formatMoeda(totalCentavos))}%0A*Forma:* ${encodeURIComponent(app.tipoLogistica)} - ${encodeURIComponent(app.formaPagamento)}`;
 
         const btnWa = document.getElementById('btn-wa-confirm');
-        btnWa.href = `https://wa.me/55${cleanWa}?text=${msg}`;
+        btnWa.href = `https://wa.me/${cleanWa}?text=${msg}`;
         btnWa.style.display = 'inline-flex';
       }
     }

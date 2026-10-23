@@ -76,16 +76,26 @@ class _DialogImportarPedidoIaState extends State<DialogImportarPedidoIa> {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       if (data != null && data.text != null && data.text!.trim().isNotEmpty) {
         final text = data.text!.trim();
-        // Se parecer um pedido (tem palavras comuns como 'rua', 'entrega', 'pedido', 'x', etc.)
         final lower = text.toLowerCase();
-        if (lower.contains('pedido') ||
+        // Detecta se parece uma mensagem/pedido do WhatsApp
+        final parecePedido = lower.contains('pedido') ||
             lower.contains('rua') ||
             lower.contains('entrega') ||
             lower.contains('pix') ||
-            lower.contains('nome:') ||
+            lower.contains('dinheiro') ||
             lower.contains('troco') ||
-            lower.contains('1x') ||
-            lower.contains('2x')) {
+            lower.contains('balcao') ||
+            lower.contains('balcão') ||
+            lower.contains('retirada') ||
+            lower.contains('whats') ||
+            lower.contains('cliente') ||
+            lower.contains('nome') ||
+            RegExp(r'\d+\s*(?:x|un|coxinha|kibe|quibe|pastel|salgado|pizza|marmita|refeicao|suco|coca|cento|combo)', caseSensitive: false).hasMatch(text) ||
+            RegExp(r'[:–-]\s*\d+', caseSensitive: false).hasMatch(text) ||
+            RegExp(r'\[\d{1,2}:\d{2}', caseSensitive: false).hasMatch(text) ||
+            (text.contains('\n') && RegExp(r'\d').hasMatch(text));
+
+        if (parecePedido) {
           _textController.text = text;
           if (mounted) setState(() {});
         }

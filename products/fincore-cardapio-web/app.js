@@ -1788,6 +1788,11 @@ function getTenantFromUrl() {
     return urlTenant.trim();
   }
   const cached = localStorage.getItem('fincore_cardapio_tenant');
+  // Se o cached for o ID legado de teste (Solange Salgados), limpa do storage
+  if (cached === '64f61559-2c0c-46e0-8411-3aa299541fdf') {
+    localStorage.removeItem('fincore_cardapio_tenant');
+    return null;
+  }
   if (cached && cached.trim().length > 0) {
     return cached.trim();
   }

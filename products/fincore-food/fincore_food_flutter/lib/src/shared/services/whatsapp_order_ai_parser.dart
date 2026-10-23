@@ -304,13 +304,18 @@ class WhatsAppOrderAiParser {
     final List<ItemPedidoIaParsed> itensIdentificados = [];
 
     // 1. Extração de Telefone no texto global
+    // Remove datas e horários antes de varrer telefones soltos para evitar falso-positivo em datas (ex: 20/10/2026 -> 20102026)
+    final textSemDatas = rawText
+        .replaceAll(RegExp(r'\b\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b'), ' ')
+        .replaceAll(RegExp(r'\b\d{1,2}:\d{2}(?::\d{2})?\b'), ' ');
+
     final phoneRegex = RegExp(
-      r'(?:(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?(?:9\s?\d{4}[-\s]?\d{4}|\d{4}[-\s]?\d{4}))',
+      r'(?:(?:\+?55\s?)?(?:\(?([1-9][0-9])\)?\s?)(?:(?:9\s?[0-9]{4}[-\s]?[0-9]{4})|(?:[2-8][0-9]{3}[-\s]?[0-9]{4})|(?:[0-9]{8,9})))',
     );
-    final phoneMatch = phoneRegex.firstMatch(rawText);
+    final phoneMatch = phoneRegex.firstMatch(textSemDatas);
     if (phoneMatch != null) {
       final rawDigits = phoneMatch.group(0)!.replaceAll(RegExp(r'\D'), '');
-      if (rawDigits.length >= 8) {
+      if (rawDigits.length >= 10 && rawDigits.length <= 13) {
         clienteTelefone = _formatarTelefone(rawDigits);
       }
     }
@@ -384,8 +389,8 @@ class WhatsAppOrderAiParser {
 
         // Se o remetente for um telefone
         final digitsSender = sender.replaceAll(RegExp(r'\D'), '');
-        if (digitsSender.length >= 8 && RegExp(r'^\+?\d[\d\s\-\(\)]+$').hasMatch(sender)) {
-          clienteTelefone ??= _formatarTelefone(digitsSender);
+        if (digitsSender.length >= 10 && RegExp(r'^\+?\d[\d\s\-\(\)]+$').hasMatch(sender)) {
+          clienteTelefone = _formatarTelefone(digitsSender);
         } else if (sender.isNotEmpty) {
           final senderLower = sender.toLowerCase();
           if (!senderLower.startsWith('você') &&
@@ -838,7 +843,7 @@ class WhatsAppOrderAiParser {
               matchedEnd.contains('qtd') ||
               matchedEnd.contains('un') ||
               matchedEnd.contains('cento') ||
-              q >= 5;
+              q >= 1;
           if (temIndicador) {
             quantidade = q;
             temQuantidadeIdentificada = true;
@@ -929,7 +934,7 @@ class WhatsAppOrderAiParser {
     // Remove pontuação
     s = s.replaceAll(RegExp(r'[^\w\s]'), ' ');
 
-    // Remove stopwords para melhor correspondência
+    // Remove stopwords para melhor correspondência e normaliza plurais culinários
     final words = s.split(RegExp(r'\s+')).where((w) {
       return w != 'de' &&
           w != 'do' &&
@@ -944,6 +949,20 @@ class WhatsAppOrderAiParser {
           w != 'pra' &&
           w != 'porcao' &&
           w != 'refrigerante';
+    }).map((w) {
+      if (w.endsWith('s') && w.length > 3) {
+        if (w.endsWith('oes') || w.endsWith('aes')) {
+          return '${w.substring(0, w.length - 3)}ao';
+        }
+        if (w.endsWith('eis')) {
+          return '${w.substring(0, w.length - 3)}el';
+        }
+        if (w.endsWith('is')) {
+          return '${w.substring(0, w.length - 2)}il';
+        }
+        return w.substring(0, w.length - 1);
+      }
+      return w;
     });
 
     return words.join(' ').trim();

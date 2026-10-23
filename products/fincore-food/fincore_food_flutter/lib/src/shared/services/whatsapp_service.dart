@@ -2290,7 +2290,7 @@ class WhatsAppService {
       final isEventoInicial = eventoId == kEventoPedidoCriadoPdv || eventoId == kEventoPedidoAprovadoWeb;
 
       // Evita disparar 2ª mensagem duplicada se o texto de confirmação principal já possuir as instruções de PIX
-      final jaTemPixNoTexto = textoConfirmacao.contains('PIX') ||
+      final jaTemPixNoTexto = textoConfirmacao.toUpperCase().contains('PIX') ||
           (pixKeyResolvida.isNotEmpty && textoConfirmacao.contains(pixKeyResolvida));
 
       if (isPix && isPendente && isEventoInicial && !jaTemPixNoTexto) {
