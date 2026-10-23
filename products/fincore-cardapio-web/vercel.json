@@ -12,6 +12,10 @@
       "dest": "/avaliacao.html"
     },
     {
+      "src": "/expresso",
+      "dest": "/expresso.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "/$1"
     }

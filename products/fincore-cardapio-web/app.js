@@ -8,7 +8,7 @@
 // ─── Configurações do Supabase & Backend ─────────────────────────────
 const SUPABASE_URL     = 'https://nlaxdeqbordmovukyypk.supabase.co';
 const SUPABASE_ANON    = 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy';
-const DEFAULT_TENANT_ID = '64f61559-2c0c-46e0-8411-3aa299541fdf'; // Solange Salgados Artesanais
+const DEFAULT_TENANT_ID = null; // Sem tenant estático forçado: resolução 100% dinâmica
 
 // ─── Inicialização do Cliente Supabase ──────────────────────────────
 const { createClient } = supabase;
@@ -18,7 +18,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 const state = {
   session:            null,    // Sessão Supabase Auth
   profile:            null,    // Registro do cliente em cardapio_clientes
-  tenantId:           DEFAULT_TENANT_ID,
+  tenantId:           getTenantFromUrl(),
   empresa:            null,    // Dados da vw_cardapio_empresa + empresa
   empresaConfig:      null,    // Configurações da empresa (Pix, horários)
   horariosAtendimento: null,   // Dias, horários de atendimento e prazo mínimo
@@ -1783,17 +1783,15 @@ function getTenantFromUrl() {
     params.get('slug') ||
     params.get('t');
 
-  if (urlTenant) {
-    localStorage.setItem('fincore_cardapio_tenant', urlTenant);
-    return urlTenant;
+  if (urlTenant && urlTenant.trim().length > 0) {
+    localStorage.setItem('fincore_cardapio_tenant', urlTenant.trim());
+    return urlTenant.trim();
   }
   const cached = localStorage.getItem('fincore_cardapio_tenant');
-  // Se o cached for o ID legado do Delivery do Eli, migra automaticamente para o DEFAULT_TENANT_ID
-  if (!cached || cached === '65109ff8-443f-41ce-94c8-8311dfc79764') {
-    localStorage.setItem('fincore_cardapio_tenant', DEFAULT_TENANT_ID);
-    return DEFAULT_TENANT_ID;
+  if (cached && cached.trim().length > 0) {
+    return cached.trim();
   }
-  return cached;
+  return null;
 }
 
 async function loadEmpresa() {
@@ -1820,16 +1818,16 @@ async function loadEmpresa() {
 
     if (tenantId) {
       query = query.eq('tenant_id', tenantId);
-    } else {
-      query = query.eq('tenant_id', DEFAULT_TENANT_ID);
     }
 
     let { data, error } = await query.maybeSingle();
     if (error || !data) {
-      // Fallback: busca a primeira empresa disponível no view se o tenant informado não for encontrado
+      // Fallback: se o tenant especificado não for encontrado ou não fornecido, busca a primeira empresa ativa
       const { data: fallbackEmp } = await sb.from('vw_cardapio_empresa').select('*').limit(1).maybeSingle();
       if (fallbackEmp) {
         data = fallbackEmp;
+        tenantId = fallbackEmp.tenant_id;
+        localStorage.setItem('fincore_cardapio_tenant', tenantId);
       } else {
         return;
       }

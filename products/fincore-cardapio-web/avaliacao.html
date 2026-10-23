@@ -426,14 +426,12 @@
 
     const SUPABASE_URL = 'https://nlaxdeqbordmovukyypk.supabase.co';
     const SUPABASE_ANON = 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy';
-    const DEFAULT_TENANT_ID = '64f61559-2c0c-46e0-8411-3aa299541fdf'; // Solange Salgados Artesanais
-
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 
     // Parâmetros da URL
     const urlParams = new URLSearchParams(window.location.search);
-    const tenantIdParam = urlParams.get('tenant_id') || urlParams.get('tenant') || DEFAULT_TENANT_ID;
+    let tenantIdParam = urlParams.get('tenant_id') || urlParams.get('tenant') || '';
     const pedidoParam = urlParams.get('pedido') || '';
     const numParam = urlParams.get('num') || '';
 

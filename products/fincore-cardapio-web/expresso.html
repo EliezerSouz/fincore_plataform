@@ -1,0 +1,1652 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pronta Entrega — Pedido Rápido</title>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- Supabase JS CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    :root {
+      --primary: #f97316;
+      --primary-hover: #ea580c;
+      --primary-light: #fff7ed;
+      --success: #16a34a;
+      --success-light: #f0fdf4;
+      --danger: #ef4444;
+      --danger-light: #fef2f2;
+      --warning: #eab308;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --radius: 14px;
+      --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.06), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
+      --shadow-lg: 0 10px 30px -4px rgba(0, 0, 0, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding-bottom: 90px;
+    }
+
+    /* ── Header Elegante ── */
+    .header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+    }
+
+    .header-content {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--primary-light);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 800;
+      flex-shrink: 0;
+      border: 1px solid rgba(249, 115, 22, 0.2);
+      overflow: hidden;
+    }
+
+    .brand-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .brand-text {
+      min-width: 0;
+    }
+
+    .brand-name {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text-main);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .brand-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 2px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .status-open {
+      background: var(--success-light);
+      color: var(--success);
+    }
+
+    .status-closed {
+      background: #fef3c7;
+      color: #b45309;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* ── Banner de Destaque ── */
+    .hero-banner {
+      background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+      color: white;
+      padding: 16px 20px;
+      margin: 16px auto;
+      max-width: 800px;
+      width: calc(100% - 32px);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 15px rgba(234, 88, 12, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .hero-title {
+      font-size: 16px;
+      font-weight: 800;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .hero-sub {
+      font-size: 12.5px;
+      opacity: 0.95;
+      line-height: 1.4;
+    }
+
+    .hero-icon {
+      font-size: 32px;
+      flex-shrink: 0;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+
+    /* ── Aviso Loja Fechada ── */
+    .closed-alert {
+      display: none;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #92400e;
+      padding: 12px 16px;
+      margin: 0 auto 14px;
+      max-width: 800px;
+      width: calc(100% - 32px);
+      border-radius: var(--radius);
+      font-size: 12.5px;
+      line-height: 1.4;
+    }
+
+    .closed-alert strong {
+      display: block;
+      margin-bottom: 2px;
+      font-weight: 700;
+    }
+
+    /* ── Container de Produtos ── */
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 0 16px;
+      width: 100%;
+      flex: 1;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 16px 0 12px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .items-count {
+      font-size: 12px;
+      background: #e2e8f0;
+      color: #475569;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 700;
+    }
+
+    /* ── Cards dos Produtos ── */
+    .products-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .product-card {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 14px;
+      box-shadow: var(--shadow);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .product-card:hover {
+      box-shadow: var(--shadow-lg);
+    }
+
+    .product-thumb {
+      width: 74px;
+      height: 74px;
+      border-radius: 10px;
+      background: #f1f5f9;
+      flex-shrink: 0;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .product-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .product-details {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .product-name {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .product-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+
+    .product-meta-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .badge-stock {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--success-light);
+      color: var(--success);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 6px;
+      border: 1px solid rgba(22, 163, 74, 0.2);
+    }
+
+    .badge-tier {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: #ede9fe;
+      color: #6d28d9;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
+    .product-price-col {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .product-price {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text-main);
+    }
+
+    /* ── Seletor de Quantidade Moderno ── */
+    .qty-control {
+      display: inline-flex;
+      align-items: center;
+      background: #f1f5f9;
+      border-radius: 10px;
+      padding: 3px;
+      border: 1px solid #cbd5e1;
+    }
+
+    .qty-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: white;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text-main);
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+      user-select: none;
+      transition: background 0.1s, transform 0.1s;
+    }
+
+    .qty-btn:active {
+      transform: scale(0.92);
+      background: #e2e8f0;
+    }
+
+    .qty-val {
+      min-width: 28px;
+      text-align: center;
+      font-size: 13.5px;
+      font-weight: 800;
+      color: var(--text-main);
+    }
+
+    /* ── Estados Vazios / Carregamento ── */
+    .loading-state, .empty-state {
+      text-align: center;
+      padding: 48px 16px;
+      color: var(--text-muted);
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(249, 115, 22, 0.2);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Barra Flutuante de Checkout (Sticky) ── */
+    .bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      border-top: 1px solid var(--border);
+      padding: 12px 16px;
+      z-index: 100;
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+      display: none;
+      transform: translateY(100%);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .bottom-bar.active {
+      display: block;
+      transform: translateY(0);
+    }
+
+    .bottom-bar-content {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .bar-summary {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .bar-qty {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .bar-total {
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--text-main);
+    }
+
+    .btn-checkout {
+      background: var(--success);
+      color: white;
+      border: none;
+      padding: 13px 24px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .btn-checkout:active {
+      transform: scale(0.97);
+      background: #15803d;
+    }
+
+    /* ── Modal de Finalização ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    @media (min-width: 640px) {
+      .modal-overlay {
+        align-items: center;
+        padding: 20px;
+      }
+    }
+
+    .modal-card {
+      background: white;
+      width: 100%;
+      max-width: 560px;
+      border-radius: 20px 20px 0 0;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+      animation: slideUp 0.25s ease-out;
+    }
+
+    @media (min-width: 640px) {
+      .modal-card {
+        border-radius: 20px;
+      }
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-close-modal {
+      background: #f1f5f9;
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+    }
+
+    .modal-body {
+      padding: 18px 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-label {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #334155;
+    }
+
+    .form-input {
+      padding: 11px 13px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      font-size: 13.5px;
+      color: var(--text-main);
+      outline: none;
+      transition: border 0.15s, box-shadow 0.15s;
+    }
+
+    .form-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+    }
+
+    /* Pílulas de Seleção (Entrega / Retirada) */
+    .pill-group {
+      display: flex;
+      gap: 8px;
+    }
+
+    .pill-btn {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1.5px solid #cbd5e1;
+      background: white;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .pill-btn.active {
+      border-color: var(--primary);
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+
+    .delivery-calc-box {
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12.5px;
+    }
+
+    .order-summary-box {
+      background: #f8fafc;
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12.5px;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-muted);
+    }
+
+    .summary-total {
+      border-top: 1px solid #e2e8f0;
+      padding-top: 8px;
+      margin-top: 4px;
+      font-weight: 800;
+      font-size: 15px;
+      color: var(--text-main);
+    }
+
+    .modal-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      background: white;
+    }
+
+    .btn-submit-order {
+      width: 100%;
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(249, 115, 22, 0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+
+    .btn-submit-order:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-submit-order:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* ── Tela de Sucesso ── */
+    .success-overlay {
+      position: fixed;
+      inset: 0;
+      background: white;
+      z-index: 300;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .success-icon {
+      width: 72px;
+      height: 72px;
+      background: var(--success-light);
+      color: var(--success);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      margin-bottom: 16px;
+      animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    @keyframes pop {
+      0% { transform: scale(0.5); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .success-title {
+      font-size: 20px;
+      font-weight: 900;
+      color: var(--text-main);
+      margin-bottom: 6px;
+    }
+
+    .success-sub {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      max-width: 380px;
+      line-height: 1.45;
+      margin-bottom: 24px;
+    }
+
+    .success-card {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      width: 100%;
+      max-width: 380px;
+      margin-bottom: 24px;
+      text-align: left;
+    }
+
+    .btn-wa-confirm {
+      width: 100%;
+      max-width: 380px;
+      background: #25d366;
+      color: white;
+      text-decoration: none;
+      padding: 13px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+      margin-bottom: 10px;
+    }
+
+    .btn-back-home {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 600;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Topo da Empresa -->
+  <header class="header">
+    <div class="header-content">
+      <div class="brand-info">
+        <div class="brand-logo" id="brand-logo">⚡</div>
+        <div class="brand-text">
+          <div class="brand-name" id="brand-name">Carregando...</div>
+          <div class="brand-meta">
+            <span class="status-badge status-open" id="status-badge">
+              <span class="status-dot"></span>
+              <span id="status-text">Aberto</span>
+            </span>
+            <span id="brand-city">Delivery</span>
+          </div>
+        </div>
+      </div>
+      <a href="javascript:void(0)" id="btn-contact-wa" style="display:none; color:#25d366; font-size:20px; text-decoration:none;" title="Falar no WhatsApp">
+        💬
+      </a>
+    </div>
+  </header>
+
+  <!-- Banner de Destaque -->
+  <div class="hero-banner">
+    <div>
+      <div class="hero-title">⚡ Pronta Entrega & Envio Imediato</div>
+      <div class="hero-sub" id="hero-subtitle">Escolha os itens disponíveis em estoque agora e receba rapidinho sem complicação!</div>
+    </div>
+    <div class="hero-icon">🛵</div>
+  </div>
+
+  <!-- Alerta de Loja Fechada -->
+  <div class="closed-alert" id="closed-alert">
+    <strong>⏰ Estamos fora do horário de atendimento imediato</strong>
+    <span id="closed-msg">Você pode fazer seu pedido agora e agendaremos para a próxima abertura!</span>
+  </div>
+
+  <!-- Conteúdo Principal -->
+  <main class="container">
+    <div class="section-header">
+      <div class="section-title">
+        <span>Itens Prontos em Estoque</span>
+      </div>
+      <span class="items-count" id="items-count">0 disponíveis</span>
+    </div>
+
+    <!-- Lista de Produtos -->
+    <div class="products-list" id="products-list">
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <div>Localizando produtos disponíveis em estoque...</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Barra Fixa de Finalização (Sticky Footer) -->
+  <div class="bottom-bar" id="bottom-bar">
+    <div class="bottom-bar-content">
+      <div class="bar-summary">
+        <span class="bar-qty" id="bar-qty">0 itens selecionados</span>
+        <span class="bar-total" id="bar-total">R$ 0,00</span>
+      </div>
+      <button class="btn-checkout" id="btn-open-checkout">
+        <span>Continuar Pedido</span>
+        <span>➔</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Modal de Checkout Direto (1 Passo) -->
+  <div class="modal-overlay" id="modal-checkout">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>⚡ Finalizar Pedido Rápido</span>
+        </div>
+        <button class="btn-close-modal" id="btn-close-modal">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- 1. Dados Básicos -->
+        <div class="form-group">
+          <label class="form-label">Seu Nome Completo *</label>
+          <input type="text" class="form-input" id="inp-nome" placeholder="Como podemos te chamar?" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">WhatsApp (para confirmação e rastreio) *</label>
+          <input type="tel" class="form-input" id="inp-phone" placeholder="(00) 00000-0000" maxlength="15" />
+        </div>
+
+        <!-- 2. Tipo de Pedido -->
+        <div class="form-group">
+          <label class="form-label">Forma de Retirada / Recebimento</label>
+          <div class="pill-group">
+            <button class="pill-btn active" id="btn-tipo-entrega" type="button">🛵 Entrega no Endereço</button>
+            <button class="pill-btn" id="btn-tipo-retirada" type="button">🏪 Retirada no Balcão</button>
+          </div>
+        </div>
+
+        <!-- Bloco de Endereço (se entrega) -->
+        <div id="block-endereco" style="display:flex; flex-direction:column; gap:10px;">
+          <div class="form-group">
+            <label class="form-label">CEP (busca automática de rua e taxa)</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" class="form-input" id="inp-cep" placeholder="00000-000" maxlength="9" style="flex:1;" />
+              <button type="button" id="btn-buscar-cep" style="padding:0 14px; background:#e2e8f0; border:none; border-radius:10px; font-weight:700; cursor:pointer;">Buscar</button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 2fr 1fr; gap:8px;">
+            <div class="form-group">
+              <label class="form-label">Rua / Logradouro *</label>
+              <input type="text" class="form-input" id="inp-rua" placeholder="Ex: Av. Principal" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Número *</label>
+              <input type="text" class="form-input" id="inp-num" placeholder="123" />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div class="form-group">
+              <label class="form-label">Bairro *</label>
+              <input type="text" class="form-input" id="inp-bairro" placeholder="Ex: Centro" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Complemento</label>
+              <input type="text" class="form-input" id="inp-compl" placeholder="Apto, Bloco, etc." />
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Horário Previsto -->
+        <div class="form-group">
+          <label class="form-label">Previsão / Horário Desejado</label>
+          <input type="text" class="form-input" id="inp-horario" readonly style="background:#f8fafc; font-weight:600;" />
+        </div>
+
+        <!-- 4. Forma de Pagamento -->
+        <div class="form-group">
+          <label class="form-label">Forma de Pagamento</label>
+          <div class="pill-group">
+            <button class="pill-btn active" id="btn-pag-pix" type="button">🔑 PIX</button>
+            <button class="pill-btn" id="btn-pag-cartao" type="button">💳 Cartão</button>
+            <button class="pill-btn" id="btn-pag-dinheiro" type="button">💵 Dinheiro</button>
+          </div>
+        </div>
+
+        <!-- Troco se dinheiro -->
+        <div class="form-group" id="block-troco" style="display:none;">
+          <label class="form-label">Precisa de troco para quanto?</label>
+          <input type="text" class="form-input" id="inp-troco" placeholder="Ex: 50,00 ou deixe em branco se não precisar" />
+        </div>
+
+        <!-- Chave Pix se Pix -->
+        <div id="block-pix-info" style="display:none; background:#f0fdf4; border:1px dashed #86efac; border-radius:10px; padding:10px; font-size:12px; color:#166534;">
+          <strong>Chave PIX da Loja:</strong> <span id="pix-key-val">Cadastrada na empresa</span>
+        </div>
+
+        <!-- Observações -->
+        <div class="form-group">
+          <label class="form-label">Alguma observação para a cozinha / entrega?</label>
+          <input type="text" class="form-input" id="inp-obs" placeholder="Ex: Sem cebola, campainha estragada..." />
+        </div>
+
+        <!-- Resumo Financeiro -->
+        <div class="order-summary-box">
+          <div class="summary-row">
+            <span>Subtotal dos produtos:</span>
+            <span id="sum-subtotal">R$ 0,00</span>
+          </div>
+          <div class="summary-row" id="row-taxa-entrega">
+            <span>Taxa de Entrega:</span>
+            <span id="sum-taxa">Grátis</span>
+          </div>
+          <div class="summary-row summary-total">
+            <span>Total a Pagar:</span>
+            <span id="sum-total">R$ 0,00</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-submit-order" id="btn-confirm-order">
+          <span>🚀 Confirmar e Enviar Pedido</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tela de Sucesso -->
+  <div class="success-overlay" id="success-overlay">
+    <div class="success-icon">✓</div>
+    <h2 class="success-title">Pedido Enviado com Sucesso!</h2>
+    <p class="success-sub">Seu pedido já foi encaminhado diretamente para a nossa cozinha e está sendo preparado.</p>
+
+    <div class="success-card">
+      <div style="font-weight:800; font-size:15px; margin-bottom:8px;" id="succ-order-num">Pedido #000000</div>
+      <div style="font-size:12.5px; color:#475569; margin-bottom:4px;" id="succ-order-client">Cliente: -</div>
+      <div style="font-size:12.5px; color:#475569; margin-bottom:4px;" id="succ-order-type">Tipo: Entrega</div>
+      <div style="font-size:12.5px; color:#475569; margin-bottom:4px;" id="succ-order-total">Total: R$ 0,00</div>
+      <div style="font-size:11.5px; color:#16a34a; font-weight:700; margin-top:8px;" id="succ-order-time">⚡ Envio Estimado: Em breve</div>
+    </div>
+
+    <a href="#" class="btn-wa-confirm" id="btn-wa-confirm" target="_blank">
+      <span>📲 Notificar Restaurante no WhatsApp</span>
+    </a>
+
+    <button class="btn-back-home" id="btn-back-home">Fazer outro pedido</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    // ─── Supabase Backend ───
+    const SUPABASE_URL  = 'https://nlaxdeqbordmovukyypk.supabase.co';
+    const SUPABASE_ANON = 'sb_publishable_PR7Yj7hXLnn5kuiNhbcAjg_x3sN7Xsy';
+    const { createClient } = supabase;
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    // ─── Estado da Aplicação Expresso ───
+    const app = {
+      tenantId: null,
+      empresa: null,
+      config: null,
+      produtos: [],
+      precificacao: [],
+      carrinho: {}, // { [produtoId]: { produto, qty } }
+      tipoLogistica: 'Entrega',
+      formaPagamento: 'PIX',
+      taxaEntregaCentavos: 0,
+      prazoMinimoMinutos: 40,
+      isAberto: true,
+      lastOrder: null
+    };
+
+    // ─── Resolução Dinâmica de Tenant ───
+    function getTenantId() {
+      const p = new URLSearchParams(window.location.search);
+      const urlTenant = p.get('tenant_id') || p.get('tenant') || p.get('empresa') || p.get('t');
+      if (urlTenant && urlTenant.trim().length > 0) {
+        localStorage.setItem('fincore_cardapio_tenant', urlTenant.trim());
+        return urlTenant.trim();
+      }
+      const cached = localStorage.getItem('fincore_cardapio_tenant');
+      if (cached && cached.trim().length > 0) return cached.trim();
+      return null;
+    }
+
+    function formatMoeda(cents) {
+      return (Number(cents || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    // ─── Inicialização ───
+    async function init() {
+      app.tenantId = getTenantId();
+      await carregarEmpresa();
+      await carregarProdutosEPrecos();
+      configurarEventos();
+      calcularHorarioPrevisao();
+    }
+
+    // ─── Carregar Empresa e Configurações ───
+    async function carregarEmpresa() {
+      try {
+        let query = sb.from('vw_cardapio_empresa').select('*');
+        if (app.tenantId) {
+          query = query.eq('tenant_id', app.tenantId);
+        }
+        let { data, error } = await query.maybeSingle();
+
+        if (!data) {
+          const { data: firstEmp } = await sb.from('vw_cardapio_empresa').select('*').limit(1).maybeSingle();
+          data = firstEmp;
+        }
+
+        if (data) {
+          app.empresa = data;
+          app.tenantId = data.tenant_id;
+          localStorage.setItem('fincore_cardapio_tenant', app.tenantId);
+
+          document.getElementById('brand-name').textContent = data.nome_fantasia || data.razao_social || 'Nossa Loja';
+          document.title = `Pronta Entrega — ${data.nome_fantasia || 'Cardápio Rápido'}`;
+
+          if (data.cidade) {
+            document.getElementById('brand-city').textContent = `${data.cidade}`;
+          }
+
+          if (data.whatsapp) {
+            const cleanWa = data.whatsapp.replace(/\D/g, '');
+            const btnWa = document.getElementById('btn-contact-wa');
+            btnWa.href = `https://wa.me/55${cleanWa}`;
+            btnWa.style.display = 'inline-block';
+          }
+        }
+
+        // Carregar configurações da empresa (horários, PIX, regras de estoque)
+        if (app.tenantId) {
+          const { data: cfg } = await sb.from('empresa_configuracao').select('*').eq('tenantId', app.tenantId).maybeSingle();
+          if (cfg) {
+            app.config = cfg;
+            if (cfg.cardapio_prazo_minimo) {
+              const parsedMin = parseInt(cfg.cardapio_prazo_minimo, 10);
+              if (!isNaN(parsedMin) && parsedMin > 0) app.prazoMinimoMinutos = parsedMin;
+            }
+            if (cfg.pixKey) {
+              try {
+                const dec = JSON.parse(cfg.pixKey);
+                if (Array.isArray(dec) && dec.length > 0 && dec[0].chave) {
+                  document.getElementById('pix-key-val').textContent = dec[0].chave;
+                } else {
+                  document.getElementById('pix-key-val').textContent = cfg.pixKey;
+                }
+              } catch (_) {
+                document.getElementById('pix-key-val').textContent = cfg.pixKey;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Erro ao carregar empresa:', e);
+      }
+    }
+
+    // ─── Carregar Produtos e Faixas de Preço ───
+    async function carregarProdutosEPrecos() {
+      const container = document.getElementById('products-list');
+      try {
+        if (!app.tenantId) {
+          container.innerHTML = `<div class="empty-state">Loja não identificada. Por favor acesse com o link oficial fornecido pela empresa.</div>`;
+          return;
+        }
+
+        // Busca produtos ativos
+        const [{ data: prods, error: pErr }, { data: precs }, { data: regrasExpresso }] = await Promise.all([
+          sb.from('vw_cardapio_produtos').select('*').eq('tenant_id', app.tenantId).order('nome'),
+          sb.from('vw_cardapio_precificacao').select('*').eq('tenant_id', app.tenantId),
+          sb.from('empresa_configuracao').select('cardapio_expresso').eq('tenantId', app.tenantId).maybeSingle()
+        ]);
+
+        if (pErr) throw pErr;
+
+        app.precificacao = precs || [];
+
+        // Filtro por estoque mínimo (padrão 1 ou configurado pelo PDV)
+        let estoqueMin = 1;
+        if (regrasExpresso && regrasExpresso.cardapio_expresso) {
+          try {
+            const expJson = typeof regrasExpresso.cardapio_expresso === 'string'
+              ? JSON.parse(regrasExpresso.cardapio_expresso)
+              : regrasExpresso.cardapio_expresso;
+            if (expJson.estoqueMinimo != null) estoqueMin = Number(expJson.estoqueMinimo);
+            if (expJson.titulo) document.getElementById('hero-subtitle').textContent = expJson.titulo;
+          } catch (_) {}
+        }
+
+        // Itens que possuem saldo disponível em pronta entrega
+        const disponiveis = (prods || []).filter(p => {
+          const saldo = Number(p.estoque_atual || p.estoqueAtual || p.estoque || 0);
+          return saldo >= estoqueMin;
+        });
+
+        document.getElementById('items-count').textContent = `${disponiveis.length} disponíveis`;
+
+        if (disponiveis.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div style="font-size:36px; margin-bottom:8px;">📦</div>
+              <div style="font-weight:700; font-size:15px; margin-bottom:4px;">Nenhum item pronto em estoque no momento</div>
+              <div style="font-size:12.5px;">Tudo o que foi produzido hoje já foi vendido! Em breve teremos novas fornadas.</div>
+            </div>`;
+          return;
+        }
+
+        app.produtos = disponiveis;
+        renderizarProdutos();
+      } catch (e) {
+        console.error('Erro ao carregar produtos:', e);
+        container.innerHTML = `<div class="empty-state">Não foi possível carregar os produtos disponíveis no momento.</div>`;
+      }
+    }
+
+    // Calcula preço considerando regras de atacado por quantidade
+    function calcularPrecoUnitario(prod, qty) {
+      const precoBase = Number(prod.preco_venda_centavos || prod.precoVendaCentavos || prod.preco_centavos || 0);
+      const faixas = app.precificacao.filter(f => f.produto_id === prod.id || f.produtoId === prod.id);
+
+      if (faixas.length > 0 && qty > 0) {
+        faixas.sort((a, b) => Number(b.quantidade_minima || 0) - Number(a.quantidade_minima || 0));
+        const faixaAplicavel = faixas.find(f => qty >= Number(f.quantidade_minima || 0));
+        if (faixaAplicavel) {
+          return Number(faixaAplicavel.preco_centavos || faixaAplicavel.precoCentavos || precoBase);
+        }
+      }
+      return precoBase;
+    }
+
+    // ─── Renderizar Lista de Produtos ───
+    function renderizarProdutos() {
+      const container = document.getElementById('products-list');
+      container.innerHTML = '';
+
+      app.produtos.forEach(prod => {
+        const saldo = Number(prod.estoque_atual || prod.estoqueAtual || prod.estoque || 0);
+        const precoBase = Number(prod.preco_venda_centavos || prod.precoVendaCentavos || prod.preco_centavos || 0);
+        const cartItem = app.carrinho[prod.id] || { qty: 0 };
+
+        // Verifica se há faixa de atacado
+        const faixas = app.precificacao.filter(f => f.produto_id === prod.id || f.produtoId === prod.id);
+        let tierBadgeHtml = '';
+        if (faixas.length > 0) {
+          const menorFaixa = faixas.sort((a, b) => Number(a.quantidade_minima || 0) - Number(b.quantidade_minima || 0))[0];
+          tierBadgeHtml = `<span class="badge-tier">✨ A partir de ${menorFaixa.quantidade_minima} un: ${formatMoeda(menorFaixa.preco_centavos)}</span>`;
+        }
+
+        const thumbHtml = prod.imagem_url
+          ? `<img src="${prod.imagem_url}" alt="${prod.nome}" loading="lazy" />`
+          : `<span>🥪</span>`;
+
+        const card = document.createElement('div');
+        card.className = 'product-card';
+        card.id = `prod-card-${prod.id}`;
+        card.innerHTML = `
+          <div class="product-thumb">${thumbHtml}</div>
+          <div class="product-details">
+            <div class="product-name">${prod.nome}</div>
+            ${prod.descricao ? `<div class="product-desc">${prod.descricao}</div>` : ''}
+            <div class="product-meta-row">
+              <span class="badge-stock">⚡ ${saldo} em estoque</span>
+              ${tierBadgeHtml}
+            </div>
+          </div>
+          <div class="product-price-col">
+            <div class="product-price" id="price-${prod.id}">${formatMoeda(precoBase)}</div>
+            <div class="qty-control">
+              <button class="qty-btn" onclick="alterarQtd('${prod.id}', -1)" type="button">−</button>
+              <span class="qty-val" id="qty-${prod.id}">${cartItem.qty}</span>
+              <button class="qty-btn" onclick="alterarQtd('${prod.id}', 1)" type="button">+</button>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+
+      atualizarBarraFlutuante();
+    }
+
+    // ─── Controle de Quantidade ───
+    window.alterarQtd = function(prodId, delta) {
+      const prod = app.produtos.find(p => p.id === prodId);
+      if (!prod) return;
+
+      const saldoMax = Number(prod.estoque_atual || prod.estoqueAtual || prod.estoque || 9999);
+      const atual = app.carrinho[prodId]?.qty || 0;
+      let novaQtd = atual + delta;
+
+      if (novaQtd < 0) novaQtd = 0;
+      if (novaQtd > saldoMax) {
+        alert(`Desculpe! Temos apenas ${saldoMax} unidades disponíveis deste item em pronta entrega.`);
+        novaQtd = saldoMax;
+      }
+
+      if (novaQtd === 0) {
+        delete app.carrinho[prodId];
+      } else {
+        app.carrinho[prodId] = { produto: prod, qty: novaQtd };
+      }
+
+      // Atualiza na UI
+      const qtyEl = document.getElementById(`qty-${prodId}`);
+      if (qtyEl) qtyEl.textContent = novaQtd;
+
+      const priceEl = document.getElementById(`price-${prodId}`);
+      if (priceEl) {
+        const precoUn = calcularPrecoUnitario(prod, novaQtd || 1);
+        priceEl.textContent = formatMoeda(precoUn);
+      }
+
+      atualizarBarraFlutuante();
+    };
+
+    // ─── Atualizar Barra de Checkout ───
+    function atualizarBarraFlutuante() {
+      const bar = document.getElementById('bottom-bar');
+      const itens = Object.values(app.carrinho);
+      const totalQtd = itens.reduce((acc, it) => acc + it.qty, 0);
+
+      let totalCentavos = 0;
+      itens.forEach(it => {
+        const unit = calcularPrecoUnitario(it.produto, it.qty);
+        totalCentavos += unit * it.qty;
+      });
+
+      if (totalQtd > 0) {
+        bar.classList.add('active');
+        document.getElementById('bar-qty').textContent = `${totalQtd} ${totalQtd === 1 ? 'item' : 'itens'} no pedido`;
+        document.getElementById('bar-total').textContent = formatMoeda(totalCentavos);
+      } else {
+        bar.classList.remove('active');
+      }
+    }
+
+    // ─── Previsão de Horário Inteligente ───
+    function calcularHorarioPrevisao() {
+      const now = new Date();
+      now.setMinutes(now.getMinutes() + app.prazoMinimoMinutos);
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const inp = document.getElementById('inp-horario');
+      if (inp) {
+        inp.value = `Hoje por volta das ${hh}:${mm} (${app.prazoMinimoMinutos} min)`;
+      }
+    }
+
+    // ─── Configurar Eventos do Checkout ───
+    function configurarEventos() {
+      const modal = document.getElementById('modal-checkout');
+      const btnOpen = document.getElementById('btn-open-checkout');
+      const btnClose = document.getElementById('btn-close-modal');
+
+      btnOpen.addEventListener('click', () => {
+        modal.style.display = 'flex';
+        atualizarResumoModal();
+      });
+
+      btnClose.addEventListener('click', () => {
+        modal.style.display = 'none';
+      });
+
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.style.display = 'none';
+      });
+
+      // Máscara de Telefone
+      const phoneInp = document.getElementById('inp-phone');
+      phoneInp.addEventListener('input', (e) => {
+        let v = e.target.value.replace(/\D/g, '');
+        if (v.length > 11) v = v.slice(0, 11);
+        if (v.length > 6) {
+          e.target.value = `(${v.slice(0, 2)}) ${v.slice(2, 7)}-${v.slice(7)}`;
+        } else if (v.length > 2) {
+          e.target.value = `(${v.slice(0, 2)}) ${v.slice(2)}`;
+        } else if (v.length > 0) {
+          e.target.value = `(${v}`;
+        }
+      });
+
+      // Alternância de Logística (Entrega / Retirada)
+      const btnEntrega = document.getElementById('btn-tipo-entrega');
+      const btnRetirada = document.getElementById('btn-tipo-retirada');
+      const blockEnd = document.getElementById('block-endereco');
+
+      btnEntrega.addEventListener('click', () => {
+        app.tipoLogistica = 'Entrega';
+        btnEntrega.classList.add('active');
+        btnRetirada.classList.remove('active');
+        blockEnd.style.display = 'flex';
+        document.getElementById('row-taxa-entrega').style.display = 'flex';
+        atualizarResumoModal();
+      });
+
+      btnRetirada.addEventListener('click', () => {
+        app.tipoLogistica = 'Retirada';
+        btnRetirada.classList.add('active');
+        btnEntrega.classList.remove('active');
+        blockEnd.style.display = 'none';
+        document.getElementById('row-taxa-entrega').style.display = 'none';
+        atualizarResumoModal();
+      });
+
+      // Alternância de Forma de Pagamento
+      const btnPix = document.getElementById('btn-pag-pix');
+      const btnCartao = document.getElementById('btn-pag-cartao');
+      const btnDinheiro = document.getElementById('btn-pag-dinheiro');
+      const blockTroco = document.getElementById('block-troco');
+      const blockPix = document.getElementById('block-pix-info');
+
+      btnPix.addEventListener('click', () => {
+        app.formaPagamento = 'PIX';
+        btnPix.classList.add('active');
+        btnCartao.classList.remove('active');
+        btnDinheiro.classList.remove('active');
+        blockTroco.style.display = 'none';
+        blockPix.style.display = 'block';
+      });
+
+      btnCartao.addEventListener('click', () => {
+        app.formaPagamento = 'Cartão';
+        btnCartao.classList.add('active');
+        btnPix.classList.remove('active');
+        btnDinheiro.classList.remove('active');
+        blockTroco.style.display = 'none';
+        blockPix.style.display = 'none';
+      });
+
+      btnDinheiro.addEventListener('click', () => {
+        app.formaPagamento = 'Dinheiro';
+        btnDinheiro.classList.add('active');
+        btnPix.classList.remove('active');
+        btnCartao.classList.remove('active');
+        blockTroco.style.display = 'flex';
+        blockPix.style.display = 'none';
+      });
+
+      // Busca Automática por CEP
+      document.getElementById('btn-buscar-cep').addEventListener('click', buscarCep);
+
+      // Botão de Envio de Pedido
+      document.getElementById('btn-confirm-order').addEventListener('click', enviarPedido);
+
+      // Botão Novo Pedido
+      document.getElementById('btn-back-home').addEventListener('click', () => {
+        window.location.reload();
+      });
+    }
+
+    // ─── Busca de Endereço via CEP ───
+    async function buscarCep() {
+      const cep = document.getElementById('inp-cep').value.replace(/\D/g, '');
+      if (cep.length !== 8) {
+        alert('Por favor digite um CEP válido com 8 dígitos.');
+        return;
+      }
+      try {
+        const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+        const d = await res.json();
+        if (d.erro) {
+          alert('CEP não localizado.');
+          return;
+        }
+        document.getElementById('inp-rua').value = d.logradouro || '';
+        document.getElementById('inp-bairro').value = d.bairro || '';
+        document.getElementById('inp-num').focus();
+
+        // Tenta calcular taxa de entrega se configurada no Supabase
+        await calcularTaxaEntrega(d.bairro);
+      } catch (e) {
+        console.warn('Erro ao consultar CEP:', e);
+      }
+    }
+
+    async function calcularTaxaEntrega(bairro) {
+      if (!app.tenantId) return;
+      try {
+        const { data: taxas } = await sb.from('taxas_entrega').select('*').eq('tenantId', app.tenantId).eq('ativo', true);
+        if (taxas && taxas.length > 0) {
+          // Busca correspondência por bairro
+          const taxaBairro = taxas.find(t => t.nome && t.nome.toLowerCase().includes(bairro.toLowerCase()));
+          if (taxaBairro) {
+            app.taxaEntregaCentavos = Number(taxaBairro.valorCentavos || 0);
+          } else {
+            // Padrão geral da primeira taxa
+            app.taxaEntregaCentavos = Number(taxas[0].valorCentavos || 0);
+          }
+        }
+        atualizarResumoModal();
+      } catch (_) {}
+    }
+
+    function atualizarResumoModal() {
+      const itens = Object.values(app.carrinho);
+      let subtotal = 0;
+      itens.forEach(it => {
+        const unit = calcularPrecoUnitario(it.produto, it.qty);
+        subtotal += unit * it.qty;
+      });
+
+      const taxa = app.tipoLogistica === 'Entrega' ? app.taxaEntregaCentavos : 0;
+      const total = subtotal + taxa;
+
+      document.getElementById('sum-subtotal').textContent = formatMoeda(subtotal);
+      document.getElementById('sum-taxa').textContent = taxa > 0 ? formatMoeda(taxa) : 'Grátis';
+      document.getElementById('sum-total').textContent = formatMoeda(total);
+    }
+
+    // ─── Enviar Pedido para o Supabase e Central de Pedidos ───
+    async function enviarPedido() {
+      const btn = document.getElementById('btn-confirm-order');
+      const nome = document.getElementById('inp-nome').value.trim();
+      const phone = document.getElementById('inp-phone').value.trim();
+
+      if (!nome) {
+        alert('Por favor informe o seu nome completo.');
+        document.getElementById('inp-nome').focus();
+        return;
+      }
+      if (phone.replace(/\D/g, '').length < 10) {
+        alert('Por favor informe um telefone WhatsApp válido.');
+        document.getElementById('inp-phone').focus();
+        return;
+      }
+
+      let enderecoObj = null;
+      if (app.tipoLogistica === 'Entrega') {
+        const rua = document.getElementById('inp-rua').value.trim();
+        const num = document.getElementById('inp-num').value.trim();
+        const bairro = document.getElementById('inp-bairro').value.trim();
+        if (!rua || !num || !bairro) {
+          alert('Por favor preencha a rua, número e bairro para a entrega.');
+          return;
+        }
+        enderecoObj = {
+          logradouro: rua,
+          numero: num,
+          bairro: bairro,
+          complemento: document.getElementById('inp-compl').value.trim(),
+          cep: document.getElementById('inp-cep').value.trim()
+        };
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = `<div class="spinner" style="width:20px; height:20px; margin:0 8px 0 0; border-width:2px;"></div> Enviando pedido...`;
+
+      try {
+        const itensCart = Object.values(app.carrinho);
+        let subtotalCentavos = 0;
+        itensCart.forEach(it => {
+          const unit = calcularPrecoUnitario(it.produto, it.qty);
+          subtotalCentavos += unit * it.qty;
+        });
+
+        const taxaCentavos = app.tipoLogistica === 'Entrega' ? app.taxaEntregaCentavos : 0;
+        const totalFinalCentavos = subtotalCentavos + taxaCentavos;
+        const pedidoId = crypto.randomUUID();
+        const ordemId = crypto.randomUUID();
+        const agora = new Date().toISOString();
+
+        // Número sequencial simples
+        const numPedidoAleatorio = Math.floor(100000 + Math.random() * 900000);
+
+        // 1. Gravar em 'pedido'
+        const pedidoRow = {
+          id: pedidoId,
+          tenantId: app.tenantId,
+          createdAt: agora,
+          updatedAt: agora,
+          createdBy: 'web_expresso',
+          updatedBy: 'web_expresso',
+          syncVersion: 1,
+          status: 'novo',
+          tipoLogistica: app.tipoLogistica,
+          clienteNomeAvulso: nome,
+          clienteTelefoneAvulso: phone,
+          valorSubtotalCentavos: subtotalCentavos,
+          valorTaxaEntregaCentavos: taxaCentavos,
+          valorTotalCentavos: totalFinalCentavos,
+          formaPagamentoNome: app.formaPagamento,
+          canalOrigem: 'web',
+          dataHoraCriacao: agora,
+          dataHoraEntregaPrevista: document.getElementById('inp-horario').value,
+          observacoes: document.getElementById('inp-obs').value.trim() || 'Pedido Rápido (Pronta Entrega)',
+          enderecoJson: enderecoObj ? JSON.stringify(enderecoObj) : null,
+          numeroPedido: numPedidoAleatorio
+        };
+
+        const { error: pErr } = await sb.from('pedido').insert(pedidoRow);
+        if (pErr) throw pErr;
+
+        // 2. Gravar em 'item_pedido'
+        const itensPayload = itensCart.map(it => {
+          const unit = calcularPrecoUnitario(it.produto, it.qty);
+          return {
+            id: crypto.randomUUID(),
+            pedidoId: pedidoId,
+            produtoId: it.produto.id,
+            nomeProduto: it.produto.nome,
+            quantidade: it.qty,
+            valorUnitarioCentavos: unit,
+            valorTotalCentavos: unit * it.qty,
+            tenantId: app.tenantId,
+            createdAt: agora,
+            updatedAt: agora,
+            createdBy: 'web_expresso',
+            updatedBy: 'web_expresso',
+            syncVersion: 1
+          };
+        });
+
+        await sb.from('item_pedido').insert(itensPayload);
+
+        // 3. Gravar em 'ordens_preparo' (para apitar imediatamente na Central de Pedidos do PDV)
+        const ordemRow = {
+          id: ordemId,
+          tenantId: app.tenantId,
+          pedidoId: pedidoId,
+          itensJson: JSON.stringify(itensCart.map(it => ({
+            produtoId: it.produto.id,
+            nomeProduto: it.produto.nome,
+            quantidade: it.qty,
+            unidade: it.produto.unidadeVenda || 'un'
+          }))),
+          status: 'pendente',
+          prioridade: 'normal',
+          criadaEm: agora,
+          createdAt: agora,
+          updatedAt: agora,
+          tempoEstimadoSegundos: app.prazoMinimoMinutos * 60,
+          observacoes: `[PRONTA_ENTREGA]\nCliente: ${nome} (${phone})\nTipo: ${app.tipoLogistica}\nPagamento: ${app.formaPagamento}`,
+          createdBy: 'web_expresso',
+          updatedBy: 'web_expresso',
+          syncVersion: 1
+        };
+
+        await sb.from('ordens_preparo').insert(ordemRow);
+
+        // 4. Gravar auditoria em 'historicos_ordem_preparo'
+        await sb.from('historicos_ordem_preparo').insert({
+          id: crypto.randomUUID(),
+          tenantId: app.tenantId,
+          ordemPreparoId: ordemId,
+          titulo: 'Pedido Recebido via Vitrine Expressa',
+          descricao: `Pedido de pronta entrega enviado pelo cliente ${nome}. Aguardando aceite do operador.`,
+          operadorNome: 'Cliente Web',
+          criadaEm: agora,
+          versao: '1.0',
+          createdAt: agora,
+          updatedAt: agora,
+          createdBy: 'web_expresso',
+          updatedBy: 'web_expresso',
+          syncVersion: 1
+        });
+
+        // Exibir tela de sucesso
+        exibirSucesso(numPedidoAleatorio, nome, totalFinalCentavos);
+      } catch (e) {
+        console.error('Erro ao enviar pedido:', e);
+        alert('Não foi possível enviar o pedido. Por favor tente novamente ou entre em contato pelo WhatsApp.');
+        btn.disabled = false;
+        btn.innerHTML = `<span>🚀 Confirmar e Enviar Pedido</span>`;
+      }
+    }
+
+    // ─── Exibir Sucesso e Preparar Notificação WhatsApp ───
+    function exibirSucesso(numPedido, nome, totalCentavos) {
+      document.getElementById('modal-checkout').style.display = 'none';
+      const overlay = document.getElementById('success-overlay');
+      overlay.style.display = 'flex';
+
+      document.getElementById('succ-order-num').textContent = `Pedido #${numPedido}`;
+      document.getElementById('succ-order-client').textContent = `Cliente: ${nome}`;
+      document.getElementById('succ-order-type').textContent = `Tipo: ${app.tipoLogistica} (${app.formaPagamento})`;
+      document.getElementById('succ-order-total').textContent = `Total: ${formatMoeda(totalCentavos)}`;
+
+      // Monta texto pré-formatado para o WhatsApp da loja
+      if (app.empresa && app.empresa.whatsapp) {
+        const cleanWa = app.empresa.whatsapp.replace(/\D/g, '');
+        const itensTxt = Object.values(app.carrinho).map(it => `• ${it.qty}x ${it.produto.nome}`).join('%0A');
+        const msg = `Olá! Acabei de enviar o *Pedido %23${numPedido}* pela Vitrine de Pronta Entrega!%0A%0A*Cliente:* ${encodeURIComponent(nome)}%0A*Itens:*%0A${itensTxt}%0A%0A*Total:* ${encodeURIComponent(formatMoeda(totalCentavos))}%0A*Forma:* ${encodeURIComponent(app.tipoLogistica)} - ${encodeURIComponent(app.formaPagamento)}`;
+
+        const btnWa = document.getElementById('btn-wa-confirm');
+        btnWa.href = `https://wa.me/55${cleanWa}?text=${msg}`;
+        btnWa.style.display = 'inline-flex';
+      }
+    }
+
+    // Inicia ao carregar
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

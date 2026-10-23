@@ -96,8 +96,12 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
   }
 
   String get _expressoUrl {
-    final base = _fullUrl;
-    return base.contains('?') ? '$base&modo=expresso' : '$base/?modo=expresso';
+    final raw = _baseUrlCtrl.text.trim();
+    final clean = raw.isEmpty ? 'https://fincore-cardapio-web.vercel.app' : raw.replaceAll(RegExp(r'/+$'), '');
+    final tId = _tenantId;
+    final path = clean.endsWith('.html') ? clean : '$clean/expresso.html';
+    if (tId.isEmpty) return path;
+    return path.contains('?') ? '$path&tenant_id=$tId' : '$path?tenant_id=$tId';
   }
 
   Future<void> _loadConfig() async {
@@ -328,6 +332,32 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
   Future<void> _shareWhatsApp() async {
     final msg = Uri.encodeComponent(
       'Olá! 👋 Conheça o cardápio online de *$_nomeEmpresa* e faça seu pedido direto pelo seu celular:\n\n🔗 $_fullUrl\n\nAproveite nossas novidades e ofertas!',
+    );
+    final uri = Uri.parse('https://api.whatsapp.com/send?text=$msg');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _openExpressoBrowser() async {
+    final uri = Uri.parse(_expressoUrl);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível abrir o link da vitrine expressa no navegador.'),
+            backgroundColor: FincoreColors.danger,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _shareExpressoWhatsApp() async {
+    final msg = Uri.encodeComponent(
+      '⚡ *Pronta Entrega em $_nomeEmpresa* 🛵\n\nConfira os itens que temos prontinhos para envio imediato hoje e faça sua escolha rápida:\n\n🔗 $_expressoUrl\n\nPeça agora antes que acabe!',
     );
     final uri = Uri.parse('https://api.whatsapp.com/send?text=$msg');
     if (await canLaunchUrl(uri)) {
@@ -934,35 +964,69 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.link_rounded, size: 20, color: FincoreColors.primary),
+                  Icon(Icons.bolt_rounded, size: 22, color: FincoreColors.primary),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Link Direto da Vitrine Expressa (ideal para Status do WhatsApp / Redes):',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: FincoreColors.textPrimary),
-                        ),
                         Text(
+                          'Vitrine Dedicada de Pronta Entrega — $_nomeEmpresa',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: FincoreColors.textPrimary),
+                        ),
+                        const SizedBox(height: 2),
+                        SelectableText(
                           _expressoUrl,
                           style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: FincoreColors.textSecondary),
                         ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: _expressoUrl));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Link do Pedido Expresso copiado!'), duration: Duration(seconds: 2)),
-                      );
-                    },
-                    icon: const Icon(Icons.copy_rounded, size: 18),
-                    tooltip: 'Copiar link expresso',
-                  ),
                 ],
               ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: _expressoUrl));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('✅ Link da Vitrine de Pronta Entrega copiado!'),
+                        backgroundColor: Color(0xFF16A34A),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.copy_rounded, size: 15),
+                  label: const Text('Copiar Link Expresso'),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: FincoreColors.border),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: _openExpressoBrowser,
+                  icon: const Icon(Icons.open_in_browser_rounded, size: 15, color: Colors.white),
+                  label: const Text('Abrir Vitrine Expressa', style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: FincoreColors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _shareExpressoWhatsApp,
+                  icon: const Icon(Icons.send_rounded, size: 15, color: Color(0xFF25D366)),
+                  label: const Text('Divulgar no WhatsApp', style: TextStyle(color: FincoreColors.textPrimary)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF25D366)),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
