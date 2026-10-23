@@ -59,10 +59,10 @@ html {
   scroll-behavior: smooth;
   width: 100%;
   max-width: 100%;
-  overflow-x: clip;
-  overflow-y: auto;
-  overscroll-behavior-x: none;
-  touch-action: pan-y;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -70,14 +70,14 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: var(--surface-bg);
   color: var(--text-primary);
-  min-height: 100dvh;
+  min-height: 100%;
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  overflow-y: visible;
   position: relative;
-  overscroll-behavior-x: none;
   line-height: 1.5;
-  padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)); /* Espaço ergonômico para bottom nav no mobile com safe area */
+  padding-bottom: calc(88px + env(safe-area-inset-bottom, 20px)); /* Espaço ergonômico para bottom nav no mobile com safe area */
 }
 
 @media (min-width: 769px) {
@@ -203,6 +203,7 @@ input, textarea, select { font-family: inherit; }
   max-width: 100%;
   box-sizing: border-box;
   overflow-x: hidden;
+  overflow-y: visible;
 }
 .screen.active { display: flex; }
 
@@ -2731,12 +2732,23 @@ input, textarea, select { font-family: inherit; }
   color: var(--error);
 }
 
-/* Oculta a barra de navegação global inferior e floating cart quando o usuário estiver no checkout para liberar 100% de espaço */
+/* Oculta a barra de navegação global inferior e floating cart no checkout e confirmação para liberar 100% de espaço e evitar sobreposição */
 body.in-checkout .bottom-nav-bar,
 body.in-checkout .bottom-cart-bar,
+body.in-confirmation .bottom-nav-bar,
+body.in-confirmation .bottom-cart-bar,
 body:has(#screen-checkout.active) .bottom-nav-bar,
-body:has(#screen-checkout.active) .bottom-cart-bar {
+body:has(#screen-checkout.active) .bottom-cart-bar,
+body:has(#screen-confirmation.active) .bottom-nav-bar,
+body:has(#screen-confirmation.active) .bottom-cart-bar {
   display: none !important;
+}
+
+body.in-checkout,
+body.in-confirmation,
+body:has(#screen-checkout.active),
+body:has(#screen-confirmation.active) {
+  padding-bottom: calc(40px + env(safe-area-inset-bottom, 20px)) !important;
 }
 
 /* ─── TELA 4: MEUS PEDIDOS ────────────────────────────────────── */
@@ -2980,20 +2992,30 @@ body:has(#screen-checkout.active) .bottom-cart-bar {
 }
 
 /* ─── TELA 7: CONFIRMAÇÃO ─────────────────────────────────────── */
+#screen-confirmation {
+  min-height: calc(100dvh - 64px);
+  padding-bottom: calc(90px + env(safe-area-inset-bottom, 24px));
+  overflow-y: visible !important;
+  box-sizing: border-box;
+}
+
 .confirmation-container {
   max-width: 520px;
-  margin: 30px auto;
-  padding: 0 16px;
+  margin: 16px auto 40px auto;
+  padding: 0 16px calc(60px + env(safe-area-inset-bottom, 24px)) 16px;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .confirmation-card {
   background: var(--surface-card);
   border: 1px solid rgba(249, 115, 22, 0.3);
   border-radius: var(--radius-xl);
-  padding: 28px 20px;
+  padding: 28px 20px calc(36px + env(safe-area-inset-bottom, 16px)) 20px;
   text-align: center;
   box-shadow: var(--shadow-glow);
+  box-sizing: border-box;
+  margin-bottom: 24px;
 }
 
 .confirmation-icon-wrap {
@@ -3146,7 +3168,9 @@ body:has(#screen-checkout.active) .bottom-cart-bar {
 .confirmation-actions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  margin-top: 20px;
+  padding-bottom: 8px;
 }
 
 /* ─── MODALS & DRAWERS ────────────────────────────────────────── */
@@ -4301,11 +4325,21 @@ body:has(#screen-checkout.active) .bottom-cart-bar {
    REFINAMENTO MOBILE & PREVENÇÃO DE ZOOM / BOTTOM SHEET GOURMET
    ═══════════════════════════════════════════════════════════════════ */
 
-/* Prevenção rigorosa de rolagem lateral e transbordamento global */
-html, body {
+/* Prevenção rigorosa de rolagem lateral mantendo rolagem vertical 100% livre */
+html {
   width: 100% !important;
   max-width: 100% !important;
   overflow-x: hidden !important;
+  overflow-y: scroll !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-x: none;
+}
+
+body {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
   position: relative;
   overscroll-behavior-x: none;
 }

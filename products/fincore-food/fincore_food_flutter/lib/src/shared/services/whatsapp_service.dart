@@ -643,9 +643,9 @@ class WhatsAppService {
         ordem: 2,
         conteudo: '🛍️ *SEU PEDIDO ESTÁ PRONTO!* 🎉✨\n\n'
             '👋 Olá, *{cliente}*!\n'
-            'O seu pedido *#{pedido}* já foi preparado e está prontinho esperando por você na *$emp*! 😋🔥\n\n'
+            'O seu pedido *#{pedido}* já está separado e prontinho esperando por você na *$emp*! 📦✨\n\n'
             '🏢 *Local de Retirada:* {endereco_empresa}\n\n'
-            'Pode vir retirar quando quiser. Estamos te esperando com tudo fresquinho! 🚀',
+            'Pode vir retirar quando quiser. Estamos à sua disposição! 🤝🌟',
       ),
       WhatsAppTemplate(
         id: 'saiu_entrega',
@@ -693,18 +693,18 @@ class WhatsAppService {
       ),
       WhatsAppTemplate(
         id: 'cardapio_digital',
-        titulo: 'Cardápio Digital & Novidades',
+        titulo: 'Catálogo Digital & Novidades',
         emoji: '✨',
-        descricao: 'Divulga o link do cardápio digital oficial para o cliente.',
+        descricao: 'Divulga o link do catálogo digital oficial para o cliente.',
         categoria: 'marketing',
         isPadrao: true,
         evento: 'geral',
         ordem: 5,
-        conteudo: '✨ *Olá, {cliente}!* Bateu aquela fome? 😋🔥\n\n'
-            'Confira o nosso cardápio digital completo com fotos, promoções e novidades fresquinhas da *$emp*:\n\n'
-            '🌐 *Acesse o link e faça seu pedido direto por aqui:*\n'
+        conteudo: '✨ *Olá, {cliente}!* Tudo bem? 😊\n\n'
+            'Conheça nosso catálogo digital completo com novidades e ofertas especiais da *$emp*:\n\n'
+            '🛍️ *Acesse o link e faça seu pedido com praticidade:*\n'
             '$cardapio\n\n'
-            'É super rápido, fácil e você acompanha o preparo em tempo real! 🚀🍔',
+            'É super rápido, seguro e você acompanha todo o andamento em tempo real! 📦🌟',
       ),
       WhatsAppTemplate(
         id: 'confirmar_endereco',

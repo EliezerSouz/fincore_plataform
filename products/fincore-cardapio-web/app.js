@@ -1596,8 +1596,9 @@ function showScreen(screenId) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  // Marcar body para ocultar a barra de navegação global inferior durante o checkout
+  // Marcar body para ocultar a barra de navegação global inferior durante o checkout e confirmação
   document.body.classList.toggle('in-checkout', screenId === 'screen-checkout');
+  document.body.classList.toggle('in-confirmation', screenId === 'screen-confirmation');
 
   // Atualizar botões da barra superior desktop
   document.querySelectorAll('.desktop-nav-link').forEach(link => {
