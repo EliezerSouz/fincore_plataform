@@ -41,7 +41,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- Estilos -->
-  <link rel="stylesheet" href="style.css?v=2.9.7" />
+  <link rel="stylesheet" href="style.css?v=2.9.8" />
 </head>
 <body>
 
@@ -137,6 +137,26 @@
 
   <!-- Container Principal de Conteúdo da Home -->
   <div class="home-main-container">
+
+    <!-- BANNER PEDIDO EXPRESSO (Pronta Entrega por Estoque) -->
+    <section class="home-section home-expresso-section" id="home-expresso-banner" style="display:none">
+      <div class="expresso-hero-card">
+        <div class="ehc-badge-row">
+          <span class="ehc-badge-pill">⚡ Pronta Entrega</span>
+          <span class="ehc-stock-pill" id="home-expresso-stock-badge">🟢 Itens em estoque</span>
+        </div>
+        <div class="ehc-content">
+          <h2 class="ehc-title" id="home-expresso-title">Disponíveis para Envio Imediato</h2>
+          <p class="ehc-desc">Escolha direta de produtos disponíveis com pronta entrega. Peça em 1 minuto sem complicação!</p>
+        </div>
+        <div class="ehc-action-wrap">
+          <button type="button" class="btn btn-expresso-cta" id="btn-home-expresso-cta">
+            <span>Pedir com Pronta Entrega</span>
+            <span class="ehc-arrow">⚡ →</span>
+          </button>
+        </div>
+      </div>
+    </section>
 
     <!-- 1. CATEGORIAS HORIZONTAIS EM CARROSSEL (Acesso Imediato) -->
     <section class="home-section home-categories-carousel-section" id="home-categories-section">
@@ -361,6 +381,67 @@
       </div>
     </div>
   </section>
+</main>
+
+<!-- ─── TELA EXPRESSO: VITRINE PRONTA ENTREGA (POR ESTOQUE) ─── -->
+<main class="screen" id="screen-expresso">
+  <div class="expresso-top-header">
+    <div class="eth-left">
+      <button type="button" class="back-btn" id="expresso-back-btn" aria-label="Voltar para o Início">←</button>
+      <div class="eth-titles">
+        <div class="eth-badge-row">
+          <span class="expresso-pill-live">⚡ Pronta Entrega</span>
+          <span class="expresso-pill-stock" id="expresso-header-stock-badge">Estoque Mínimo Ativo</span>
+        </div>
+        <h1 class="expresso-title" id="expresso-screen-title">Disponíveis para Envio Imediato</h1>
+        <p class="expresso-subtitle">Selecione as quantidades diretamente e conclua seu pedido com agilidade.</p>
+      </div>
+    </div>
+    <div class="eth-actions">
+      <button type="button" class="btn btn-sm btn-ghost" id="expresso-btn-ver-cardapio-completo">
+        Ver Cardápio Completo 🍽️
+      </button>
+    </div>
+  </div>
+
+  <!-- Alerta de Horário / Status da Loja na tela expressa -->
+  <div class="expresso-schedule-banner" id="expresso-schedule-banner">
+    <!-- Preenchido dinamicamente via JS com previsão ou próximo expediente -->
+  </div>
+
+  <!-- Grid de Produtos Pronta Entrega -->
+  <section class="expresso-products-section">
+    <div id="expresso-empty-state" class="empty-state" style="display:none">
+      <div class="empty-icon">📦</div>
+      <p class="empty-title">Nenhum item com pronta entrega no momento</p>
+      <p class="empty-desc">Todos os produtos desta modalidade estão reservados ou abaixo do estoque mínimo. Você pode realizar encomendas programadas pelo cardápio completo!</p>
+      <button type="button" class="btn btn-primary" id="btn-expresso-empty-go-cardapio" style="margin-top:14px">
+        Ver Cardápio Completo e Encomendas
+      </button>
+    </div>
+    <div class="expresso-grid" id="expresso-products-grid">
+      <!-- Cards renderizados dinamicamente via JS com seletores numéricos rápidos -->
+    </div>
+  </section>
+
+  <!-- Barra Fixa Inferior de Pedido Expresso -->
+  <div class="expresso-sticky-bar" id="expresso-sticky-bar" style="display:none">
+    <div class="esb-inner">
+      <div class="esb-info">
+        <div class="esb-count-wrap">
+          <span class="esb-badge-count" id="expresso-bar-count">0</span>
+          <span class="esb-label-items" id="expresso-bar-label">itens</span>
+        </div>
+        <div class="esb-total-wrap">
+          <span class="esb-total-label">Subtotal:</span>
+          <strong class="esb-total-val" id="expresso-bar-total">R$ 0,00</strong>
+        </div>
+      </div>
+      <button type="button" class="btn btn-expresso-confirm" id="btn-expresso-go-checkout">
+        <span>Avançar para Conclusão ⚡</span>
+      </button>
+    </div>
+  </div>
 </main>
 
 <!-- ─── TELA 3: CHECKOUT / ENCOMENDA ──────────────────────────── -->
@@ -1480,8 +1561,191 @@
   </div>
 </div>
 
+<!-- ─── MODAL DE FECHAMENTO EXPRESSO (Single-Step) ──────────── -->
+<div class="modal-backdrop" id="modal-expresso-checkout" role="dialog" aria-modal="true">
+  <div class="modal-card expresso-modal-card">
+    <button type="button" class="modal-close" id="expresso-modal-close-btn" aria-label="Fechar">&times;</button>
+
+    <div class="expresso-modal-header">
+      <div class="emh-badge">⚡ Conclusão Rápida</div>
+      <h2 class="emh-title">Fechar Pedido Expresso</h2>
+      <p class="emh-subtitle">Preencha seus dados em etapa única para envio imediato.</p>
+    </div>
+
+    <!-- Resumo dos Itens Selecionados no Expresso -->
+    <div class="expresso-modal-section">
+      <div class="ems-title-row">
+        <span class="ems-title">🛒 Itens Selecionados</span>
+        <button type="button" class="btn-link-edit" id="btn-expresso-edit-items">Editar Itens</button>
+      </div>
+      <div class="expresso-items-summary-list" id="expresso-modal-items-list">
+        <!-- Renderizado dinamicamente -->
+      </div>
+    </div>
+
+    <form id="form-expresso-checkout" novalidate>
+      <!-- Dados do Cliente -->
+      <div class="expresso-modal-section">
+        <span class="ems-title">👤 Seus Dados</span>
+        <div class="form-row gap-sm">
+          <div class="form-group flex-1">
+            <label class="form-label" for="expresso-cliente-nome">Nome Completo *</label>
+            <input class="form-input" type="text" id="expresso-cliente-nome" placeholder="Seu nome" required />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label" for="expresso-cliente-phone">WhatsApp *</label>
+            <input class="form-input" type="tel" id="expresso-cliente-phone" placeholder="(00) 00000-0000" maxlength="15" required />
+          </div>
+        </div>
+      </div>
+
+      <!-- Modalidade de Recebimento -->
+      <div class="expresso-modal-section">
+        <span class="ems-title">📍 Como Deseja Receber?</span>
+        <div class="expresso-logistica-toggle">
+          <button type="button" class="expresso-log-btn active" id="expresso-btn-entrega" data-logistica="Entrega">
+            <span>🛵 Entrega no Endereço</span>
+          </button>
+          <button type="button" class="expresso-log-btn" id="expresso-btn-retirada" data-logistica="Retirada">
+            <span>🏪 Retirar na Loja (Grátis)</span>
+          </button>
+        </div>
+
+        <!-- Seção de Endereço (visível quando Entrega) -->
+        <div id="expresso-address-box" class="expresso-address-box">
+          <div class="form-row gap-sm">
+            <div class="form-group" style="flex:1.2">
+              <label class="form-label" for="expresso-cep">CEP *</label>
+              <div class="input-with-button">
+                <input class="form-input" type="text" id="expresso-cep" placeholder="00000-000" maxlength="9" />
+                <button type="button" class="btn btn-sm btn-secondary" id="expresso-cep-btn">Buscar</button>
+              </div>
+            </div>
+            <div class="form-group" style="flex:2">
+              <label class="form-label" for="expresso-bairro">Bairro *</label>
+              <input class="form-input" type="text" id="expresso-bairro" placeholder="Seu bairro" />
+            </div>
+          </div>
+          <div class="form-row gap-sm">
+            <div class="form-group" style="flex:3">
+              <label class="form-label" for="expresso-logradouro">Rua / Logradouro *</label>
+              <input class="form-input" type="text" id="expresso-logradouro" placeholder="Ex: Rua das Flores" />
+            </div>
+            <div class="form-group" style="flex:1">
+              <label class="form-label" for="expresso-numero">Número *</label>
+              <input class="form-input" type="text" id="expresso-numero" placeholder="123" />
+            </div>
+          </div>
+          <div class="form-row gap-sm">
+            <div class="form-group flex-1">
+              <label class="form-label" for="expresso-cidade">Cidade *</label>
+              <input class="form-input" type="text" id="expresso-cidade" placeholder="Cidade" />
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="expresso-complemento">Complemento (opcional)</label>
+              <input class="form-input" type="text" id="expresso-complemento" placeholder="Apto, Bloco..." />
+            </div>
+          </div>
+        </div>
+
+        <!-- Endereço de Retirada (visível quando Retirada) -->
+        <div id="expresso-retirada-box" class="expresso-retirada-box" style="display:none">
+          <div class="retirada-info-card">
+            <span class="ric-icon">🏪</span>
+            <div class="ric-content">
+              <strong>Retirada no Balcão da Loja</strong>
+              <span id="expresso-retirada-endereco-text">Carregando endereço da loja...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Previsão de Entrega / Data e Hora -->
+      <div class="expresso-modal-section">
+        <span class="ems-title">⏰ Previsão de Entrega / Retirada</span>
+        <div class="expresso-schedule-info" id="expresso-schedule-info-box">
+          <!-- Aviso dinâmico de atendimento e prazo -->
+        </div>
+        <div class="form-row gap-sm" style="margin-top:8px">
+          <div class="form-group flex-1">
+            <label class="form-label" for="expresso-data">Data</label>
+            <input class="form-input" type="date" id="expresso-data" required />
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label" for="expresso-hora">Horário</label>
+            <input class="form-input" type="time" id="expresso-hora" required />
+          </div>
+        </div>
+      </div>
+
+      <!-- Forma de Pagamento -->
+      <div class="expresso-modal-section">
+        <span class="ems-title">💳 Forma de Pagamento</span>
+        <div class="expresso-payment-options" id="expresso-payment-options">
+          <label class="expresso-pay-chip active">
+            <input type="radio" name="expresso-payment" value="Pix" checked />
+            <span class="epc-icon">💠</span>
+            <span class="epc-label">Pix</span>
+          </label>
+          <label class="expresso-pay-chip">
+            <input type="radio" name="expresso-payment" value="Cartão de Crédito" />
+            <span class="epc-icon">💳</span>
+            <span class="epc-label">Cartão Crédito</span>
+          </label>
+          <label class="expresso-pay-chip">
+            <input type="radio" name="expresso-payment" value="Cartão de Débito" />
+            <span class="epc-icon">💳</span>
+            <span class="epc-label">Cartão Débito</span>
+          </label>
+          <label class="expresso-pay-chip">
+            <input type="radio" name="expresso-payment" value="Dinheiro" />
+            <span class="epc-icon">💵</span>
+            <span class="epc-label">Dinheiro</span>
+          </label>
+        </div>
+        <div id="expresso-troco-box" class="form-group" style="display:none;margin-top:10px">
+          <label class="form-label" for="expresso-troco">Precisa de troco para quanto?</label>
+          <input class="form-input" type="text" id="expresso-troco" placeholder="Ex: 50,00" />
+        </div>
+      </div>
+
+      <!-- Observações do Pedido -->
+      <div class="expresso-modal-section">
+        <label class="form-label" for="expresso-obs">Observações do Pedido (opcional)</label>
+        <textarea class="form-textarea" id="expresso-obs" rows="2" placeholder="Ex: Deixar na portaria, campainha não funciona..."></textarea>
+      </div>
+
+      <!-- Resumo Financeiro Final -->
+      <div class="expresso-totals-box">
+        <div class="etb-row">
+          <span>Subtotal dos itens</span>
+          <span id="expresso-modal-subtotal">R$ 0,00</span>
+        </div>
+        <div class="etb-row">
+          <span>Taxa de Entrega</span>
+          <span id="expresso-modal-taxa" class="text-success">Grátis</span>
+        </div>
+        <div class="etb-row grand">
+          <span>Total a Pagar</span>
+          <span class="grand-value" id="expresso-modal-total">R$ 0,00</span>
+        </div>
+      </div>
+
+      <!-- Ações Finais -->
+      <div class="expresso-modal-actions">
+        <button type="submit" class="btn btn-expresso-submit" id="btn-expresso-submit">
+          <span>🚀 Confirmar e Enviar Pedido</span>
+        </button>
+        <button type="button" class="btn btn-ghost btn-full" id="btn-expresso-cancel">
+          Voltar para a seleção
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Script principal -->
-<script src="app.js?v=2.9.4"></script>
+<script src="app.js?v=2.9.8"></script>
 
 </body>
 </html>

@@ -42,6 +42,11 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
   final _mensagemFechadoCtrl = TextEditingController(text: 'Estamos fora do horário de atendimento. Faça seu pedido agendado!');
   List<Map<String, dynamic>> _bloqueiosAgendamento = [];
 
+  // ─── Vitrine de Pedido Expresso (Pronta Entrega por Estoque) ───
+  bool _modoExpressoAtivo = true;
+  final _estoqueMinimoExpressoCtrl = TextEditingController(text: '1');
+  final _tituloExpressoCtrl = TextEditingController(text: 'Disponíveis para Envio Imediato');
+
   final Map<String, ({bool ativo, String abertura, String fechamento, String nome})> _diasSemana = {
     'dom': (ativo: true, abertura: '08:00', fechamento: '22:00', nome: 'Domingo'),
     'seg': (ativo: true, abertura: '08:00', fechamento: '22:00', nome: 'Segunda-feira'),
@@ -64,6 +69,8 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
     _baseUrlCtrl.dispose();
     _prazoMinimoCtrl.dispose();
     _mensagemFechadoCtrl.dispose();
+    _estoqueMinimoExpressoCtrl.dispose();
+    _tituloExpressoCtrl.dispose();
     super.dispose();
   }
 
@@ -86,6 +93,11 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
     if (tId.isEmpty) return base;
 
     return base.contains('?') ? '$base&tenant_id=$tId' : '$base/?tenant_id=$tId';
+  }
+
+  String get _expressoUrl {
+    final base = _fullUrl;
+    return base.contains('?') ? '$base&modo=expresso' : '$base/?modo=expresso';
   }
 
   Future<void> _loadConfig() async {
@@ -169,17 +181,26 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
           }
         }
       }
+      if (data.containsKey('modoExpresso') && data['modoExpresso'] is Map) {
+        final exp = data['modoExpresso'] as Map<String, dynamic>;
+        _modoExpressoAtivo = exp['ativo'] as bool? ?? true;
+        _estoqueMinimoExpressoCtrl.text = (exp['estoqueMinimo'] ?? 1).toString();
+        _tituloExpressoCtrl.text = exp['titulo'] as String? ?? 'Disponíveis para Envio Imediato';
+      }
       if (mounted) setState(() {});
     } catch (_) {}
   }
 
-  /// Salva todas as configurações do cardápio digital (URL, status, prazos, horários e bloqueios)
+  /// Salva todas as configurações do cardápio digital (URL, status, prazos, horários, bloqueios e vitrine expressa)
   Future<void> salvar() async {
     final tId = _tenantId;
     if (tId.isEmpty) return;
 
     try {
       final prazoMin = int.tryParse(_prazoMinimoCtrl.text.trim()) ?? 120;
+      final estoqueMin = int.tryParse(_estoqueMinimoExpressoCtrl.text.trim()) ?? 1;
+      final tituloExp = _tituloExpressoCtrl.text.trim().isEmpty ? 'Disponíveis para Envio Imediato' : _tituloExpressoCtrl.text.trim();
+
       final diasJson = <String, dynamic>{};
       for (final e in _diasSemana.entries) {
         diasJson[e.key] = {
@@ -195,6 +216,11 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
         'mensagemFechado': _mensagemFechadoCtrl.text.trim(),
         'dias': diasJson,
         'bloqueios': _bloqueiosAgendamento,
+        'modoExpresso': {
+          'ativo': _modoExpressoAtivo,
+          'estoqueMinimo': estoqueMin,
+          'titulo': tituloExp,
+        },
       };
       final jsonStr = jsonEncode(payload);
       final baseUrl = _baseUrlCtrl.text.trim();
@@ -662,7 +688,12 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
 
         const SizedBox(height: 16),
 
-        // ─── 4. CARD: DISPLAY DE MESA & GERADOR DE QR CODE ───────────────────────
+        // ─── 4. CARD: VITRINE DE PEDIDO EXPRESSO (PRONTA ENTREGA) ─────────
+        _buildExpressoCard(),
+
+        const SizedBox(height: 16),
+
+        // ─── 5. CARD: DISPLAY DE MESA & GERADOR DE QR CODE ───────────────────────
         FincoreSectionCard(
           title: 'Display de Mesa, Balcão & QR Code',
           subtitle: 'Gere materiais impressos para os clientes pedirem diretamente da mesa ou embalagem de delivery',
@@ -796,6 +827,146 @@ class CardapioDigitalViewState extends State<CardapioDigitalView> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildExpressoCard() {
+    return FincoreSectionCard(
+      title: 'Vitrine de Pedido Expresso & Pronta Entrega',
+      subtitle: 'Configurações da vitrine rápida de produtos disponíveis com filtro por estoque mínimo',
+      icon: Icons.bolt_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            title: const Text(
+              'Habilitar Vitrine de Pedido Expresso (Pronta Entrega)',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: FincoreColors.textPrimary),
+            ),
+            subtitle: const Text(
+              'Exibe a seção de compra rápida no cardápio web e permite envio de pedidos simplificados',
+              style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
+            ),
+            value: _modoExpressoAtivo,
+            activeColor: FincoreColors.primary,
+            contentPadding: EdgeInsets.zero,
+            onChanged: (val) {
+              setState(() {
+                _modoExpressoAtivo = val;
+              });
+            },
+          ),
+          const SizedBox(height: 12),
+          if (_modoExpressoAtivo) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const FincoreFieldLabel(label: 'Estoque Mínimo para Exibição:'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: _estoqueMinimoExpressoCtrl,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
+                        decoration: InputDecoration(
+                          hintText: 'Ex: 1 ou 5 unidades',
+                          prefixIcon: const Icon(Icons.inventory_2_outlined, size: 18),
+                          suffixText: 'unidades',
+                          filled: true,
+                          fillColor: FincoreColors.surfaceElevated,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: FincoreColors.border),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Apenas produtos com saldo disponível maior ou igual a esta quantidade aparecerão na vitrine expressa.',
+                        style: TextStyle(fontSize: 11, color: FincoreColors.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  flex: 3,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const FincoreFieldLabel(label: 'Título da Vitrine Rápida:'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: _tituloExpressoCtrl,
+                        style: const TextStyle(fontSize: 13, color: FincoreColors.textPrimary),
+                        decoration: InputDecoration(
+                          hintText: 'Disponíveis para Envio Imediato',
+                          prefixIcon: const Icon(Icons.local_offer_outlined, size: 18),
+                          filled: true,
+                          fillColor: FincoreColors.surfaceElevated,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: FincoreColors.border),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Título em destaque na Home e no topo da tela de pedido rápido.',
+                        style: TextStyle(fontSize: 11, color: FincoreColors.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: FincoreColors.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: FincoreColors.primary.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.link_rounded, size: 20, color: FincoreColors.primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Link Direto da Vitrine Expressa (ideal para Status do WhatsApp / Redes):',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: FincoreColors.textPrimary),
+                        ),
+                        Text(
+                          _expressoUrl,
+                          style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: FincoreColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: _expressoUrl));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Link do Pedido Expresso copiado!'), duration: Duration(seconds: 2)),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    tooltip: 'Copiar link expresso',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

@@ -43,6 +43,11 @@ const state = {
   selectedAddressId:  null,    // ID do endereço atualmente selecionado para entrega
   searchTerm:         '',
   activeOrderFilter:  'all',
+  expressoCart:       {},      // { [prodId]: qty }
+  expressoConfig:     { ativo: true, estoqueMinimo: 1, titulo: 'Disponíveis para Envio Imediato' },
+  expressoLogistica:  'Entrega',
+  expressoFormaPagamento: 'Pix',
+  expressoTaxaEntregaCentavos: 0,
 };
 
 // ─── Carregamento de Endereços Cadastrados do Cliente (local_entrega / perfil) ───
@@ -1628,6 +1633,8 @@ function showScreen(screenId) {
     populateAccountForm();
   } else if (screenId === 'screen-auth') {
     renderAuthScreen();
+  } else if (screenId === 'screen-expresso') {
+    renderExpressoScreen();
   }
 
   updateCartBar();
@@ -1971,6 +1978,14 @@ async function loadEmpresa() {
           if (Array.isArray(parsedH.bloqueios)) {
             state.horariosAtendimento.bloqueios = parsedH.bloqueios;
           }
+          if (parsedH.modoExpresso) {
+            state.horariosAtendimento.modoExpresso = parsedH.modoExpresso;
+            state.expressoConfig = {
+              ativo: parsedH.modoExpresso.ativo !== false,
+              estoqueMinimo: Number(parsedH.modoExpresso.estoqueMinimo ?? 1),
+              titulo: parsedH.modoExpresso.titulo || 'Disponíveis para Envio Imediato'
+            };
+          }
         } catch (e) {
           console.warn('Erro ao parsear horariosAtendimento:', e);
         }
@@ -2109,6 +2124,7 @@ async function loadCatalog() {
     renderCategoriesBar();
     renderHome();
     renderProductsGrid();
+    setupExpressoVitrine();
   } catch (e) {
     toast('Erro ao carregar cardápio: ' + e.message, 'error');
     console.error(e);
@@ -5857,6 +5873,8 @@ async function fetchViaCep(rawCep, prefix = 'reg') {
         updateCheckoutTotals();
         validateCheckoutForm();
         triggerAsyncRouteCalculation();
+      } else if (prefix === 'expresso') {
+        updateExpressoTotals();
       }
       if (numEl) numEl.focus();
     } else {
@@ -5872,6 +5890,8 @@ async function fetchViaCep(rawCep, prefix = 'reg') {
         // Aplica a taxa de fallback imediatamente para não deixar o cliente sem cálculo
         updateCheckoutTotals();
         validateCheckoutForm();
+      } else if (prefix === 'expresso') {
+        updateExpressoTotals();
       }
 
       if (bairEl && !bairEl.value) bairEl.focus();
@@ -6468,6 +6488,754 @@ function updateHeaderUI() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// MÓDULO VITRINE DE PEDIDO EXPRESSO (Pronta Entrega por Estoque) — v2.9.8
+// ═══════════════════════════════════════════════════════════════════
+
+function getSaldoEstoqueProduto(prod) {
+  if (!prod) return 0;
+  if (prod.estoqueInfo) {
+    const atual = Number(prod.estoqueInfo.quantidadeAtual || 0);
+    const reservado = Number(prod.estoqueInfo.quantidadeReservada || 0);
+    return Math.max(0, atual - reservado);
+  }
+  if (prod.estoque_atual !== undefined && prod.estoque_atual !== null) {
+    return Math.max(0, Number(prod.estoque_atual));
+  }
+  return 999;
+}
+
+function getProdutosExpressoDisponiveis() {
+  const minStock = Number(state.expressoConfig?.estoqueMinimo ?? 1);
+  return state.produtos.filter(p => {
+    if (p.ativo === false || p.status_comercial === 'indisponivel') return false;
+    const saldo = getSaldoEstoqueProduto(p);
+    return saldo >= minStock;
+  });
+}
+
+function setupExpressoVitrine() {
+  const cfg = state.expressoConfig || { ativo: true, estoqueMinimo: 1, titulo: 'Disponíveis para Envio Imediato' };
+  const banner = document.getElementById('home-expresso-banner');
+  const bannerTitle = document.getElementById('home-expresso-title');
+  const bannerBadge = document.getElementById('home-expresso-stock-badge');
+  const screenTitle = document.getElementById('expresso-screen-title');
+  const headerStockBadge = document.getElementById('expresso-header-stock-badge');
+
+  if (bannerTitle) bannerTitle.textContent = cfg.titulo || 'Disponíveis para Envio Imediato';
+  if (screenTitle) screenTitle.textContent = cfg.titulo || 'Disponíveis para Envio Imediato';
+  if (headerStockBadge) headerStockBadge.textContent = `Estoque mínimo: ${cfg.estoqueMinimo || 1} un`;
+
+  const prods = getProdutosExpressoDisponiveis();
+  if (bannerBadge) {
+    bannerBadge.textContent = `🟢 ${prods.length} ${prods.length === 1 ? 'item disponível' : 'itens disponíveis'}`;
+  }
+
+  if (banner) {
+    banner.style.display = (cfg.ativo && prods.length > 0) ? 'block' : 'none';
+  }
+
+  // Acesso direto via URL (?modo=expresso ou ?expresso=1)
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('modo') === 'expresso' || urlParams.get('expresso') === '1') {
+      showScreen('screen-expresso');
+    }
+  } catch (_) {}
+}
+
+function renderExpressoScheduleBanner() {
+  const banner = document.getElementById('expresso-schedule-banner');
+  if (!banner) return;
+
+  const now = new Date();
+  const pe = calcularPrimeiraEntregaPossivel(now, state.horariosAtendimento);
+  const prazoMin = state.horariosAtendimento?.prazoMinimoMinutos || 40;
+
+  if (pe.isHoje && pe.canOrder) {
+    banner.className = 'expresso-schedule-banner';
+    banner.innerHTML = `
+      <span class="esb-icon">⚡</span>
+      <div class="esb-text">
+        <strong>Atendimento aberto agora!</strong> Pedidos expressos têm prazo estimado em cerca de ${prazoMin} minutos (previsão às ${pe.horaFmt}).
+      </div>
+    `;
+  } else {
+    banner.className = 'expresso-schedule-banner is-closed';
+    const nextText = pe.isAmanha 
+      ? `amanhã a partir das ${pe.horaFmt}` 
+      : `${pe.diaNome || 'próximo expediente'} às ${pe.horaFmt}`;
+    banner.innerHTML = `
+      <span class="esb-icon">🕒</span>
+      <div class="esb-text">
+        <strong>Fora do expediente no momento.</strong> Seu pedido expresso será preparado e enviado no próximo atendimento (${nextText}).
+      </div>
+    `;
+  }
+}
+
+function renderExpressoScreen() {
+  renderExpressoScheduleBanner();
+  const grid = document.getElementById('expresso-products-grid');
+  const emptyState = document.getElementById('expresso-empty-state');
+  if (!grid) return;
+
+  const prods = getProdutosExpressoDisponiveis();
+
+  if (prods.length === 0) {
+    if (emptyState) emptyState.style.display = 'block';
+    grid.innerHTML = '';
+    updateExpressoStickyBar();
+    return;
+  }
+
+  if (emptyState) emptyState.style.display = 'none';
+
+  grid.innerHTML = prods.map(prod => {
+    const saldo = getSaldoEstoqueProduto(prod);
+    const inCartQty = state.expressoCart[prod.id] || 0;
+    const unitPrice = getPreco(prod, inCartQty || 1);
+    
+    // Tiers de desconto por quantidade
+    const tiers = getTiersForProduct(prod);
+    let tierTagHtml = '';
+    if (tiers && tiers.length > 1) {
+      const basePrice = tiers[0].valor_unitario_centavos;
+      if (unitPrice < basePrice) {
+        const discPct = Math.round(((basePrice - unitPrice) / basePrice) * 100);
+        tierTagHtml = `<span class="ec-tier-tag">⭐ ${discPct}% de desconto aplicado</span>`;
+      } else {
+        tierTagHtml = `<span class="ec-tier-tag" style="color:var(--text-muted)">Preço especial por atacado</span>`;
+      }
+    }
+
+    const foto = prod.foto_url || prod.imagem_url;
+    const thumbHtml = foto
+      ? `<img src="${foto}" alt="${prod.nome}" class="ec-thumb" loading="lazy" />`
+      : `<div class="ec-thumb-fallback">${getCategoryIcon(prod.categoria_icone, prod.categoria_nome)}</div>`;
+
+    const isLow = saldo <= 15;
+    const stockBadge = `<span class="ec-stock-badge ${isLow ? 'low' : ''}">🟢 ${saldo} un em estoque</span>`;
+
+    return `
+      <div class="expresso-card ${inCartQty > 0 ? 'in-cart' : ''}" id="expresso-card-${prod.id}">
+        <div class="ec-top-row">
+          <div class="ec-thumb-wrap">
+            ${thumbHtml}
+          </div>
+          <div class="ec-info">
+            ${stockBadge}
+            <h3 class="ec-name">${prod.nome}</h3>
+            ${prod.descricao ? `<p class="ec-desc">${prod.descricao}</p>` : ''}
+          </div>
+        </div>
+        <div class="ec-bottom-row">
+          <div class="ec-price-block">
+            <span class="ec-price-unit" id="expresso-price-${prod.id}">
+              ${fmt(unitPrice)} <small>/un</small>
+            </span>
+            ${tierTagHtml}
+          </div>
+          <div class="ec-stepper">
+            <button type="button" class="ec-step-btn" onclick="changeExpressoQty('${prod.id}', -1)" aria-label="Diminuir quantidade">−</button>
+            <input type="number" class="ec-step-input" id="expresso-input-${prod.id}" value="${inCartQty}" min="0" max="${saldo}" onchange="setExpressoQty('${prod.id}', this.value)" />
+            <button type="button" class="ec-step-btn" onclick="changeExpressoQty('${prod.id}', 1)" aria-label="Aumentar quantidade">+</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  updateExpressoStickyBar();
+}
+
+function changeExpressoQty(prodId, delta) {
+  const current = state.expressoCart[prodId] || 0;
+  const prod = state.produtos.find(p => p.id === prodId);
+  const saldo = getSaldoEstoqueProduto(prod);
+
+  let next = current + delta;
+  if (next < 0) next = 0;
+  if (saldo > 0 && next > saldo) {
+    next = saldo;
+    toast(`Quantidade máxima disponível em estoque: ${saldo} un.`, 'info', 2500);
+  }
+
+  setExpressoQty(prodId, next);
+}
+
+function setExpressoQty(prodId, val) {
+  const prod = state.produtos.find(p => p.id === prodId);
+  if (!prod) return;
+
+  const saldo = getSaldoEstoqueProduto(prod);
+  let qty = parseInt(val, 10);
+  if (isNaN(qty) || qty < 0) qty = 0;
+  if (saldo > 0 && qty > saldo) {
+    qty = saldo;
+    toast(`Quantidade limitada ao estoque disponível (${saldo} un).`, 'info', 2500);
+  }
+
+  if (qty > 0) {
+    state.expressoCart[prodId] = qty;
+  } else {
+    delete state.expressoCart[prodId];
+  }
+
+  const input = document.getElementById(`expresso-input-${prodId}`);
+  if (input) input.value = qty;
+
+  const card = document.getElementById(`expresso-card-${prodId}`);
+  if (card) {
+    card.classList.toggle('in-cart', qty > 0);
+  }
+
+  const priceEl = document.getElementById(`expresso-price-${prodId}`);
+  if (priceEl) {
+    const unitPrice = getPreco(prod, qty || 1);
+    priceEl.innerHTML = `${fmt(unitPrice)} <small>/un</small>`;
+  }
+
+  updateExpressoStickyBar();
+}
+
+function updateExpressoStickyBar() {
+  const bar = document.getElementById('expresso-sticky-bar');
+  const countEl = document.getElementById('expresso-bar-count');
+  const labelEl = document.getElementById('expresso-bar-label');
+  const totalEl = document.getElementById('expresso-bar-total');
+
+  let totalItems = 0;
+  let subtotalCentavos = 0;
+
+  for (const [pId, qty] of Object.entries(state.expressoCart)) {
+    if (qty > 0) {
+      const prod = state.produtos.find(p => p.id === pId);
+      if (prod) {
+        totalItems += qty;
+        subtotalCentavos += getPreco(prod, qty) * qty;
+      }
+    }
+  }
+
+  if (countEl) countEl.textContent = totalItems;
+  if (labelEl) labelEl.textContent = totalItems === 1 ? 'item selecionado' : 'itens selecionados';
+  if (totalEl) totalEl.textContent = fmt(subtotalCentavos);
+
+  if (bar) {
+    bar.style.display = totalItems > 0 ? 'block' : 'none';
+  }
+}
+
+function getExpressoCartSummary() {
+  const items = [];
+  let totalItems = 0;
+  let subtotalCentavos = 0;
+
+  for (const [pId, qty] of Object.entries(state.expressoCart)) {
+    if (qty > 0) {
+      const prod = state.produtos.find(p => p.id === pId);
+      if (prod) {
+        const unitPrice = getPreco(prod, qty);
+        const itemTotal = unitPrice * qty;
+        totalItems += qty;
+        subtotalCentavos += itemTotal;
+        items.push({
+          produto: prod,
+          qty,
+          valorUnitarioCentavos: unitPrice,
+          valorTotalCentavos: itemTotal
+        });
+      }
+    }
+  }
+
+  return { items, totalItems, subtotalCentavos };
+}
+
+function calcularTaxaEntregaExpresso(subtotalCentavos) {
+  if (state.expressoLogistica === 'Retirada') {
+    return { valorCentavos: 0, label: 'Grátis (Retirada)', isGratis: true };
+  }
+
+  const regras = state.taxasEntrega || [];
+  const bairroInput = (document.getElementById('expresso-bairro')?.value || '').trim().toLowerCase();
+  const cepInput = (document.getElementById('expresso-cep')?.value || '').replace(/\D/g, '');
+
+  let taxaEncontrada = null;
+
+  if (bairroInput && regras.length > 0) {
+    taxaEncontrada = regras.find(r => {
+      if (r.ativo && (r.tipoRegra === 'bairro' || r.tipo_regra === 'bairro') && r.bairro) {
+        const b = r.bairro.trim().toLowerCase();
+        return b === bairroInput || bairroInput.includes(b) || b.includes(bairroInput);
+      }
+      return false;
+    });
+
+    if (taxaEncontrada) {
+      const valor = parseInt(taxaEncontrada.valorCentavos || 0, 10);
+      const minGratis = parseInt(taxaEncontrada.pedidoMinimoCentavos || 0, 10);
+      const finalValor = (minGratis > 0 && subtotalCentavos >= minGratis) ? 0 : valor;
+      return { valorCentavos: finalValor, label: finalValor === 0 ? 'Grátis' : fmt(finalValor), isGratis: finalValor === 0 };
+    }
+  }
+
+  if (cepInput && cepInput.length === 8 && regras.length > 0) {
+    const cepNum = parseInt(cepInput, 10);
+    taxaEncontrada = regras.find(r => {
+      if (r.ativo && (r.tipoRegra === 'faixa_cep' || r.tipo_regra === 'faixa_cep') && r.cepInicio && r.cepFim) {
+        const ini = parseInt(String(r.cepInicio).replace(/\D/g, ''), 10);
+        const fim = parseInt(String(r.cepFim).replace(/\D/g, ''), 10);
+        return cepNum >= ini && cepNum <= fim;
+      }
+      return false;
+    });
+
+    if (taxaEncontrada) {
+      const valor = parseInt(taxaEncontrada.valorCentavos || 0, 10);
+      const minGratis = parseInt(taxaEncontrada.pedidoMinimoCentavos || 0, 10);
+      const finalValor = (minGratis > 0 && subtotalCentavos >= minGratis) ? 0 : valor;
+      return { valorCentavos: finalValor, label: finalValor === 0 ? 'Grátis' : fmt(finalValor), isGratis: finalValor === 0 };
+    }
+  }
+
+  const fallback = regras.find(r => r.ativo && (r.tipoRegra === 'padrao' || r.tipo_regra === 'padrao'));
+  if (fallback) {
+    const valor = parseInt(fallback.valorCentavos || 0, 10);
+    return { valorCentavos: valor, label: valor === 0 ? 'Grátis' : fmt(valor), isGratis: valor === 0 };
+  }
+
+  return { valorCentavos: 0, label: 'Grátis', isGratis: true };
+}
+
+function updateExpressoTotals() {
+  const { subtotalCentavos } = getExpressoCartSummary();
+  const taxaObj = calcularTaxaEntregaExpresso(subtotalCentavos);
+  state.expressoTaxaEntregaCentavos = taxaObj.valorCentavos;
+
+  const totalGeral = subtotalCentavos + taxaObj.valorCentavos;
+
+  const subtotalEl = document.getElementById('expresso-modal-subtotal');
+  const taxaEl = document.getElementById('expresso-modal-taxa');
+  const totalEl = document.getElementById('expresso-modal-total');
+
+  if (subtotalEl) subtotalEl.textContent = fmt(subtotalCentavos);
+  if (taxaEl) {
+    taxaEl.textContent = taxaObj.label;
+    taxaEl.className = taxaObj.isGratis ? 'text-success' : '';
+  }
+  if (totalEl) totalEl.textContent = fmt(totalGeral);
+}
+
+function openExpressoCheckoutModal() {
+  const { items, totalItems, subtotalCentavos } = getExpressoCartSummary();
+  if (totalItems <= 0) {
+    toast('Selecione ao menos 1 item para continuar.', 'warning');
+    return;
+  }
+
+  const listEl = document.getElementById('expresso-modal-items-list');
+  if (listEl) {
+    listEl.innerHTML = items.map(i => `
+      <div class="eisl-item">
+        <div class="eisl-name-wrap">
+          <span class="eisl-qty">${i.qty}x</span>
+          <span class="eisl-name">${i.produto.nome}</span>
+        </div>
+        <span class="eisl-price">${fmt(i.valorTotalCentavos)}</span>
+      </div>
+    `).join('');
+  }
+
+  let savedClient = null;
+  try {
+    const raw = localStorage.getItem('fincore_expresso_cliente');
+    if (raw) savedClient = JSON.parse(raw);
+  } catch (_) {}
+
+  const nomeInput = document.getElementById('expresso-cliente-nome');
+  const phoneInput = document.getElementById('expresso-cliente-phone');
+  const cepInput = document.getElementById('expresso-cep');
+  const logrInput = document.getElementById('expresso-logradouro');
+  const numInput = document.getElementById('expresso-numero');
+  const bairInput = document.getElementById('expresso-bairro');
+  const cidInput = document.getElementById('expresso-cidade');
+  const compInput = document.getElementById('expresso-complemento');
+
+  if (nomeInput && !nomeInput.value) {
+    nomeInput.value = savedClient?.nome || state.profile?.nome || '';
+  }
+  if (phoneInput && !phoneInput.value) {
+    phoneInput.value = formatPhone(savedClient?.telefone || state.profile?.whatsapp || '');
+  }
+  if (cepInput && !cepInput.value) {
+    cepInput.value = savedClient?.cep || state.profile?.cep || '';
+  }
+  if (logrInput && !logrInput.value) {
+    logrInput.value = savedClient?.logradouro || state.profile?.logradouro || '';
+  }
+  if (numInput && !numInput.value) {
+    numInput.value = savedClient?.numero || state.profile?.numero || '';
+  }
+  if (bairInput && !bairInput.value) {
+    bairInput.value = savedClient?.bairro || state.profile?.bairro || '';
+  }
+  if (cidInput && !cidInput.value) {
+    cidInput.value = savedClient?.cidade || state.profile?.cidade || state.empresa?.cidade || 'Pouso Alegre';
+  }
+  if (compInput && !compInput.value) {
+    compInput.value = savedClient?.complemento || state.profile?.complemento || '';
+  }
+
+  const now = new Date();
+  const pe = calcularPrimeiraEntregaPossivel(now, state.horariosAtendimento);
+  const dataInput = document.getElementById('expresso-data');
+  const horaInput = document.getElementById('expresso-hora');
+  const scheduleBox = document.getElementById('expresso-schedule-info-box');
+
+  const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  if (dataInput && pe.dataStr) {
+    dataInput.value = pe.dataStr;
+    dataInput.min = toYmd(now);
+  }
+  if (horaInput && pe.horaStr) {
+    horaInput.value = pe.horaStr;
+  }
+
+  if (scheduleBox) {
+    if (pe.isHoje && pe.canOrder) {
+      scheduleBox.innerHTML = `✅ <strong>Atendimento ativo agora.</strong> Horário sugerido para envio imediato: <strong>${pe.horaFmt}</strong> (ou ajuste se preferir receber mais tarde).`;
+    } else {
+      const nextTxt = pe.isAmanha ? `amanhã às ${pe.horaFmt}` : `${pe.diaNome || 'próximo expediente'} às ${pe.horaFmt}`;
+      scheduleBox.innerHTML = `ℹ️ <strong>Fora do expediente comercial.</strong> Primeiro horário sugerido pela cozinha: <strong>${nextTxt}</strong>.`;
+    }
+  }
+
+  const retTxt = document.getElementById('expresso-retirada-endereco-text');
+  if (retTxt && state.empresa) {
+    const endLoja = [
+      state.empresa.logradouro ? `${state.empresa.logradouro}, ${state.empresa.numero || 'S/N'}` : '',
+      state.empresa.bairro,
+      state.empresa.cidade ? `${state.empresa.cidade} - ${state.empresa.estado || 'MG'}` : ''
+    ].filter(Boolean).join(' - ');
+    retTxt.textContent = endLoja || 'Retirada no balcão principal da loja.';
+  }
+
+  updateExpressoTotals();
+  document.getElementById('modal-expresso-checkout')?.classList.add('open');
+}
+
+function closeExpressoCheckoutModal() {
+  document.getElementById('modal-expresso-checkout')?.classList.remove('open');
+}
+
+async function finalizarPedidoExpresso(e) {
+  if (e) e.preventDefault();
+
+  const { items, totalItems, subtotalCentavos } = getExpressoCartSummary();
+  if (totalItems <= 0) {
+    toast('Selecione itens no pedido expresso.', 'warning');
+    return;
+  }
+
+  const nome = (document.getElementById('expresso-cliente-nome')?.value || '').trim();
+  const phone = (document.getElementById('expresso-cliente-phone')?.value || '').trim();
+  const cep = (document.getElementById('expresso-cep')?.value || '').trim();
+  const logr = (document.getElementById('expresso-logradouro')?.value || '').trim();
+  const num = (document.getElementById('expresso-numero')?.value || '').trim();
+  const bair = (document.getElementById('expresso-bairro')?.value || '').trim();
+  const cid = (document.getElementById('expresso-cidade')?.value || '').trim();
+  const comp = (document.getElementById('expresso-complemento')?.value || '').trim();
+  const data = (document.getElementById('expresso-data')?.value || '').trim();
+  const hora = (document.getElementById('expresso-hora')?.value || '').trim();
+  const obs = (document.getElementById('expresso-obs')?.value || '').trim();
+
+  if (!nome || nome.length < 2) {
+    toast('Por favor, informe seu Nome Completo.', 'error');
+    document.getElementById('expresso-cliente-nome')?.focus();
+    return;
+  }
+
+  const phoneVal = validatePhone(phone);
+  if (!phoneVal.valid) {
+    toast(phoneVal.error, 'error', 5000);
+    document.getElementById('expresso-cliente-phone')?.focus();
+    return;
+  }
+
+  if (state.expressoLogistica === 'Entrega') {
+    if (!logr || !num || !bair) {
+      toast('Para entrega, informe a Rua, o Número e o Bairro.', 'error');
+      if (!logr) document.getElementById('expresso-logradouro')?.focus();
+      else if (!num) document.getElementById('expresso-numero')?.focus();
+      else document.getElementById('expresso-bairro')?.focus();
+      return;
+    }
+  }
+
+  const scheduleVal = validateOrderSchedule(data, hora);
+  if (!scheduleVal.valid) {
+    toast(scheduleVal.message, 'error', 6000);
+    document.getElementById('expresso-hora')?.focus();
+    return;
+  }
+
+  try {
+    localStorage.setItem('fincore_expresso_cliente', JSON.stringify({
+      nome,
+      telefone: phoneVal.clean,
+      cep,
+      logradouro: logr,
+      numero: num,
+      bairro: bair,
+      cidade: cid,
+      complemento: comp
+    }));
+  } catch (_) {}
+
+  const taxaObj = calcularTaxaEntregaExpresso(subtotalCentavos);
+  const taxaEntrega = taxaObj.valorCentavos;
+  const totalFinal = subtotalCentavos + taxaEntrega;
+
+  let trocoCentavos = null;
+  if (state.expressoFormaPagamento === 'Dinheiro') {
+    const rawTroco = document.getElementById('expresso-troco')?.value.trim();
+    if (rawTroco) {
+      const trocoVal = parseFloat(rawTroco.replace(/\./g, '').replace(',', '.'));
+      if (!isNaN(trocoVal) && trocoVal > 0) {
+        trocoCentavos = Math.round(trocoVal * 100);
+        if (trocoCentavos < totalFinal) {
+          toast(`O valor informado para troco (${fmt(trocoCentavos)}) é menor que o total do pedido (${fmt(totalFinal)}).`, 'error');
+          document.getElementById('expresso-troco')?.focus();
+          return;
+        }
+      }
+    }
+  }
+
+  showLoading(true, 'Registrando seu pedido expresso...');
+
+  try {
+    const agora = new Date().toISOString();
+    const dataEntrega = `${data}T${hora}:00`;
+    const pedidoId = crypto.randomUUID();
+
+    let nextNumPed = 1001;
+    try {
+      const { data: maxPed } = await sb
+        .from('pedido')
+        .select('numeroPedido')
+        .eq('tenantId', state.tenantId || DEFAULT_TENANT_ID)
+        .order('numeroPedido', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (maxPed && maxPed.numeroPedido) {
+        nextNumPed = Number(maxPed.numeroPedido) + 1;
+      }
+    } catch (_) {}
+
+    const fullAddress = state.expressoLogistica === 'Entrega'
+      ? [
+          `${logr}, ${num}`,
+          comp ? `(${comp})` : '',
+          bair,
+          `${cid} - ${state.empresa?.estado || 'MG'}`,
+          cep ? `CEP: ${cep}` : ''
+        ].filter(Boolean).join(' - ')
+      : 'Retirada no Balcão da Loja';
+
+    const enderecoObj = state.expressoLogistica === 'Entrega' ? {
+      logradouro: logr,
+      numero: num,
+      bairro: bair,
+      cidade: cid,
+      uf: state.empresa?.estado || 'MG',
+      cep: cep || null,
+      complemento: comp || null,
+      enderecoCompleto: fullAddress
+    } : null;
+
+    let userIdValid = state.session?.user?.id || null;
+    let clienteLocalId = state.profile?.cliente_local_id || null;
+
+    // 1. Inserir Pedido na tabela 'pedido'
+    const pedidoPayload = {
+      id:                        pedidoId,
+      tenantId:                  state.tenantId || DEFAULT_TENANT_ID,
+      clienteId:                 clienteLocalId,
+      clienteNomeAvulso:         nome,
+      clienteTelefoneAvulso:     phoneVal.clean,
+      valorSubtotalCentavos:     subtotalCentavos,
+      valorTaxaEntregaCentavos:  taxaEntrega,
+      valorTotalCentavos:        totalFinal,
+      trocoParaCentavos:         trocoCentavos,
+      formaPagamentoId:          null,
+      formaPagamentoNome:        state.expressoFormaPagamento,
+      canalOrigem:                'expresso_web',
+      dataHoraCriacao:           agora,
+      dataHoraEntregaPrevista:   dataEntrega,
+      observacoes:               obs ? `[PEDIDO_EXPRESSO] ${obs}` : '[PEDIDO_EXPRESSO]',
+      enderecoJson:              state.expressoLogistica === 'Entrega' ? JSON.stringify(enderecoObj) : null,
+      numeroPedido:               nextNumPed,
+      status:                    'pendente'
+    };
+
+    const { error: pedErr } = await sb.from('pedido').insert(pedidoPayload);
+    if (pedErr) throw pedErr;
+
+    // 2. Inserir Itens na tabela 'item_pedido'
+    try {
+      const itensPayload = items.map(i => ({
+        id:                    crypto.randomUUID(),
+        pedidoId:              pedidoId,
+        produtoId:             i.produto.id,
+        nomeProduto:           i.produto.nome,
+        quantidade:            Number(i.qty),
+        valorUnitarioCentavos: i.valorUnitarioCentavos,
+        valorTotalCentavos:    i.valorTotalCentavos,
+        observacoes:           null,
+        tenantId:              state.tenantId || DEFAULT_TENANT_ID,
+        createdAt:             agora,
+        updatedAt:             agora,
+        createdBy:             userIdValid,
+        updatedBy:             userIdValid,
+        syncVersion:           1
+      }));
+      await sb.from('item_pedido').insert(itensPayload);
+    } catch (e) {
+      console.warn('Erro ao inserir item_pedido no expresso:', e);
+    }
+
+    // 3. Inserir Ordem de Preparo (Kanban da Central de Pedidos do PDV)
+    const ordemId = crypto.randomUUID();
+    try {
+      let pagDesc = state.expressoFormaPagamento;
+      if (state.expressoFormaPagamento === 'Dinheiro' && trocoCentavos) {
+        pagDesc += ` (Troco p/ ${fmt(trocoCentavos)})`;
+      }
+
+      let dataAgendadaTag = '';
+      if (data && hora) {
+        const [yyyy, mm, dd] = data.split('-');
+        dataAgendadaTag = `agendado: ${dd}/${mm}/${yyyy} ${hora}`;
+      }
+
+      const obsTags = [
+        `[DADOS_PEDIDO]`,
+        `cliente: ${nome}`,
+        `telefone: ${phoneVal.clean}`,
+        `tipo: ${state.expressoLogistica}`,
+        `pagamento: ${pagDesc}`,
+        `total: ${totalFinal}`,
+        `unidades: ${totalItems}`,
+        state.expressoLogistica === 'Entrega' ? `endereco: ${logr ? `${logr}, ${num}` : ''}` : '',
+        state.expressoLogistica === 'Entrega' && bair ? `bairro: ${bair}` : '',
+        dataAgendadaTag,
+        `modo: EXPRESSO`,
+        obs ? `obs: ${obs}` : '',
+        `[/DADOS_PEDIDO]`
+      ].filter(Boolean).join('\n');
+
+      const ordemPayload = {
+        id:                    ordemId,
+        tenantId:              state.tenantId || DEFAULT_TENANT_ID,
+        pedidoId:              pedidoId,
+        itensJson:             JSON.stringify(items.map(i => ({
+          produtoId:   i.produto.id,
+          nomeProduto: i.produto.nome,
+          quantidade:  Number(i.qty),
+          unidade:     i.produto.unidadeVenda || 'un',
+          observacoes: null
+        }))),
+        status:                'pendente',
+        prioridade:            'alta',
+        criadaEm:              agora,
+        createdAt:             agora,
+        updatedAt:             agora,
+        tempoEstimadoSegundos: 1200,
+        observacoes:           obsTags,
+        createdBy:             userIdValid,
+        updatedBy:             userIdValid,
+        syncVersion:           1
+      };
+
+      await sb.from('ordens_preparo').insert(ordemPayload);
+
+      try {
+        await sb.from('historicos_ordem_preparo').insert({
+          id:             crypto.randomUUID(),
+          tenantId:       state.tenantId || DEFAULT_TENANT_ID,
+          ordemPreparoId: ordemId,
+          titulo:         'Pedido Expresso Recebido via Cardápio Web',
+          descricao:      `Pedido pronto entrega nº ${nextNumPed} enviado pelo cliente com ${totalItems} un.`,
+          operadorNome:   nome,
+          criadaEm:       agora,
+          createdAt:      agora
+        });
+      } catch (_) {}
+    } catch (e) {
+      console.warn('Erro ao inserir ordem_preparo no expresso:', e);
+    }
+
+    const orderData = {
+      ...pedidoPayload,
+      item_pedido: items.map(i => ({
+        nomeProduto: i.produto.nome,
+        quantidade: i.qty,
+        valorUnitarioCentavos: i.valorUnitarioCentavos,
+        valorTotalCentavos: i.valorTotalCentavos
+      }))
+    };
+    state.currentOrder = orderData;
+    state.activeOrder = orderData;
+    localStorage.setItem('fincore_last_order_id', pedidoId);
+
+    const [yyyy, mm, dd] = data.split('-');
+    const dataFmt = `${dd}/${mm}/${yyyy}`;
+    const trackingUrl = `${window.location.origin}${window.location.pathname}?track=${pedidoId}`;
+
+    const itensTxt = items.map(i => `• ${i.qty}x ${i.produto.nome} — ${fmt(i.valorTotalCentavos)}`).join('\n');
+    let msgZap = `*⚡ NOVO PEDIDO EXPRESSO — Nº ${nextNumPed}*\n\n`;
+    msgZap += `*Cliente:* ${nome}\n`;
+    msgZap += `*WhatsApp:* ${phoneVal.clean}\n`;
+    msgZap += `*Modalidade:* ${state.expressoLogistica === 'Entrega' ? '🛵 Entrega' : '🏪 Retirada'}\n`;
+    if (state.expressoLogistica === 'Entrega') {
+      msgZap += `*Endereço:* ${fullAddress}\n`;
+    }
+    msgZap += `*Data/Hora Prevista:* ${dataFmt} às ${hora}\n`;
+    msgZap += `*Pagamento:* ${state.expressoFormaPagamento}${trocoCentavos ? ` (Troco para ${fmt(trocoCentavos)})` : ''}\n\n`;
+    msgZap += `*🛒 ITENS:*\n${itensTxt}\n\n`;
+    msgZap += `*Subtotal:* ${fmt(subtotalCentavos)}\n`;
+    if (taxaEntrega > 0) msgZap += `*Taxa de Entrega:* ${fmt(taxaEntrega)}\n`;
+    msgZap += `*TOTAL:* ${fmt(totalFinal)}\n`;
+    if (obs) msgZap += `*Obs:* ${obs}\n`;
+    msgZap += `\n*🔗 Acompanhar Pedido:* ${trackingUrl}`;
+
+    const phoneClean = getEmpresaWhatsAppClean();
+    let zapUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(msgZap)}`;
+    if (phoneClean) {
+      zapUrl = `https://api.whatsapp.com/send?phone=${phoneClean}&text=${encodeURIComponent(msgZap)}`;
+    }
+    window.open(zapUrl, '_blank');
+
+    state.expressoCart = {};
+    updateExpressoStickyBar();
+    closeExpressoCheckoutModal();
+
+    toast(`🎉 Pedido expresso nº ${nextNumPed} confirmado com sucesso!`, 'success', 5000);
+    renderConfirmationPage(orderData, nextNumPed, totalFinal);
+    showScreen('screen-confirmation');
+  } catch (err) {
+    console.error('Erro ao finalizar pedido expresso:', err);
+    toast('Erro ao registrar pedido expresso: ' + err.message, 'error', 6000);
+  } finally {
+    showLoading(false);
+  }
+}
+
 // ─── Drawer & Modais Auxiliares ──────────────────────────────────────
 function openDrawer() {
   document.getElementById('user-drawer')?.classList.add('open');
@@ -7030,6 +7798,65 @@ function initEventListeners() {
   document.getElementById('form-login')?.addEventListener('submit', handleLogin);
   document.getElementById('form-register')?.addEventListener('submit', handleRegister);
   document.getElementById('back-to-landing-btn')?.addEventListener('click', () => showScreen('screen-home'));
+
+  // Listeners do Modo Pedido Expresso
+  document.getElementById('btn-home-expresso-cta')?.addEventListener('click', () => showScreen('screen-expresso'));
+  document.getElementById('expresso-back-btn')?.addEventListener('click', () => showScreen('screen-home'));
+  document.getElementById('expresso-btn-ver-cardapio-completo')?.addEventListener('click', () => showScreen('screen-cardapio'));
+  document.getElementById('btn-expresso-empty-go-cardapio')?.addEventListener('click', () => showScreen('screen-cardapio'));
+  document.getElementById('btn-expresso-go-checkout')?.addEventListener('click', openExpressoCheckoutModal);
+  document.getElementById('expresso-modal-close-btn')?.addEventListener('click', closeExpressoCheckoutModal);
+  document.getElementById('btn-expresso-cancel')?.addEventListener('click', closeExpressoCheckoutModal);
+  document.getElementById('btn-expresso-edit-items')?.addEventListener('click', closeExpressoCheckoutModal);
+
+  // Alternador de Logística no Expresso
+  document.getElementById('expresso-btn-entrega')?.addEventListener('click', () => {
+    document.getElementById('expresso-btn-entrega')?.classList.add('active');
+    document.getElementById('expresso-btn-retirada')?.classList.remove('active');
+    state.expressoLogistica = 'Entrega';
+    const endBox = document.getElementById('expresso-address-box');
+    const retBox = document.getElementById('expresso-retirada-box');
+    if (endBox) endBox.style.display = 'block';
+    if (retBox) retBox.style.display = 'none';
+    updateExpressoTotals();
+  });
+
+  document.getElementById('expresso-btn-retirada')?.addEventListener('click', () => {
+    document.getElementById('expresso-btn-retirada')?.classList.add('active');
+    document.getElementById('expresso-btn-entrega')?.classList.remove('active');
+    state.expressoLogistica = 'Retirada';
+    const endBox = document.getElementById('expresso-address-box');
+    const retBox = document.getElementById('expresso-retirada-box');
+    if (endBox) endBox.style.display = 'none';
+    if (retBox) retBox.style.display = 'block';
+    updateExpressoTotals();
+  });
+
+  // CEP Lookup no Expresso
+  setupCepAutoFetch('expresso-cep', 'expresso');
+  document.getElementById('expresso-cep-btn')?.addEventListener('click', () => {
+    const val = document.getElementById('expresso-cep')?.value || '';
+    fetchViaCep(val, 'expresso');
+  });
+
+  // Recálculo ao digitar Bairro no Expresso
+  document.getElementById('expresso-bairro')?.addEventListener('input', updateExpressoTotals);
+
+  // Alternância de Formas de Pagamento no Expresso
+  document.querySelectorAll('input[name="expresso-payment"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      state.expressoFormaPagamento = e.target.value;
+      document.querySelectorAll('.expresso-pay-chip').forEach(c => c.classList.remove('active'));
+      e.target.closest('.expresso-pay-chip')?.classList.add('active');
+      const trocoBox = document.getElementById('expresso-troco-box');
+      if (trocoBox) {
+        trocoBox.style.display = state.expressoFormaPagamento === 'Dinheiro' ? 'block' : 'none';
+      }
+    });
+  });
+
+  // Submissão do Formulário de Checkout Expresso
+  document.getElementById('form-expresso-checkout')?.addEventListener('submit', finalizarPedidoExpresso);
 }
 
 // ─── Inicialização da Aplicação ───────────────────────────────────────
