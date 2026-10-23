@@ -1,5 +1,22 @@
 [
     {
+        "version":  "v1.8.14",
+        "buildNumber":  60,
+        "date":  "2026-10-23",
+        "timestamp":  "2026-10-23 17:37:52",
+        "gitCommit":  "08962a5",
+        "notes":  "Correcao de extracao de telefone em timestamps de WhatsApp, suporte a plurais na IA, sanitizacao de DDI no cardapio, bloqueio de duplicacao de PIX e idempotencia estrita no PDV Express.",
+        "folder":  "v1.8.14_2026-10-23",
+        "fullPackage":  "v1.8.14_2026-10-23/fincore_food",
+        "fullSize":  "46,65 MB",
+        "updatePackage":  "v1.8.14_2026-10-23/fincore_food_update",
+        "updateSize":  "42,96 MB",
+        "fullZip":  null,
+        "fullZipSize":  null,
+        "updateZip":  null,
+        "updateZipSize":  null
+    },
+    {
         "version":  "v1.8.13",
         "buildNumber":  59,
         "date":  "2026-10-23",
