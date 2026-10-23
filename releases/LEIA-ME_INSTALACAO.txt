@@ -1,0 +1,19 @@
+﻿=================================================================
+  FINCORE FOOD PLATFORM - v1.8.10 (2026-10-22)
+  GUIA DE INSTALACAO E ATUALIZACAO
+=================================================================
+
+1. INSTALACAO NOVA (Pasta 'fincore_food'):
+   - Copie a pasta 'fincore_food' inteira para onde desejar (ex: C:\fincore_food).
+   - As DLLs de runtime necessarias ja estao incluidas.
+   - Execute 'fincore_food_flutter.exe'.
+   - O banco local (DATA) e os logs (LOG) serao gerados automaticamente.
+   - Na primeira execucao, o arquivo .env sera protegido via DPAPI (.env.dpapi).
+
+2. ATUALIZACAO RAPIDA (Pasta 'fincore_food_update'):
+   - Feche o FINCORE Food caso esteja em execucao.
+   - Copie todo o conteudo da pasta 'fincore_food_update' (executavel, pasta data e DLLs)
+     diretamente para a pasta onde o FINCORE Food ja esta instalado, substituindo os arquivos.
+   - Seus dados de vendas (pasta DATA), configuracoes e banco local NUNCA sao afetados.
+   - Abra o 'fincore_food_flutter.exe' normalmente.
+=================================================================
