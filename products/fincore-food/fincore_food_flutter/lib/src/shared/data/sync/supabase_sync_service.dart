@@ -114,6 +114,18 @@ class SupabaseSyncService {
     'LancamentoFinanceiro': 'lancamento_financeiro',
   };
 
+  static bool _tableHasTenantId(String tableName) {
+    const noTenantTables = {
+      'empresa',
+      'empresas',
+      'usuarios',
+      'usuario',
+      'audit_logs',
+      'audit_log',
+    };
+    return !noTenantTables.contains(tableName);
+  }
+
   SupabaseSyncService({
     required SupabaseClient supabase,
     required TenantContext context,
@@ -600,23 +612,27 @@ class SupabaseSyncService {
       }
 
       if (entry.action == 'DELETE') {
-        await _supabase
+        var query = _supabase
             .from(tableName)
             .update({'deletedAt': DateTime.now().toUtc().toIso8601String()})
-            .eq('id', entry.entityId)
-            .eq('tenantId', _context.tenantId)
-            .timeout(const Duration(seconds: 10));
+            .eq('id', entry.entityId);
+        if (_tableHasTenantId(tableName)) {
+          query = query.eq('tenantId', _context.tenantId);
+        }
+        await query.timeout(const Duration(seconds: 10));
       } else if (entry.action.toLowerCase() == 'update') {
         final idCol = tableName == 'empresa_configuracao' ? 'tenantId' : 'id';
         int attempts = 0;
         while (attempts < 30) {
           try {
-            await _supabase
+            var query = _supabase
                 .from(tableName)
                 .update(payload)
-                .eq(idCol, entry.entityId)
-                .eq('tenantId', _context.tenantId)
-                .timeout(const Duration(seconds: 10));
+                .eq(idCol, entry.entityId);
+            if (_tableHasTenantId(tableName) && idCol != 'tenantId') {
+              query = query.eq('tenantId', _context.tenantId);
+            }
+            await query.timeout(const Duration(seconds: 10));
             break;
           } on PostgrestException catch (e) {
             attempts++;

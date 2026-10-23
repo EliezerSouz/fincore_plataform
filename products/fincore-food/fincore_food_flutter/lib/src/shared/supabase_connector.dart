@@ -32,7 +32,7 @@ class SupabaseConnector extends CoreServerConnector {
 
     try {
       final payload = jsonDecode(entry.payload) as Map<String, dynamic>;
-      final tableName = _tableNameFor(entry.entity);
+      final tableName = tableNameFor(entry.entity);
 
       switch (entry.action) {
         case 'create':
@@ -59,21 +59,57 @@ class SupabaseConnector extends CoreServerConnector {
 
   /// Mapeia a entidade de domínio para o nome da tabela pública no Supabase.
   ///
-  /// Convenção de nomenclatura: snake_case plural, conforme o schema público do Supabase.
-  String _tableNameFor(String entity) {
+  /// Convenção de nomenclatura: snake_case no singular para a grande maioria, conforme o schema público do Supabase.
+  String tableNameFor(String entity) {
     const mapping = <String, String>{
-      'Pedido': 'pedidos',
-      'Produto': 'produtos',
-      'Categoria': 'categorias',
-      'Cliente': 'clientes',
-      'Empresa': 'empresas',
+      'Pedido': 'pedido',
+      'pedidos': 'pedido',
+      'ItensPedido': 'item_pedido',
+      'itens_pedido': 'item_pedido',
+      'Produto': 'produto',
+      'produtos': 'produto',
+      'Categoria': 'categoria',
+      'categorias': 'categoria',
+      'Cliente': 'cliente',
+      'clientes': 'cliente',
+      'Empresa': 'empresa',
+      'empresas': 'empresa',
       'Usuario': 'usuarios',
-      'TabelaPrecificacao': 'tabelas_precificacao',
-      'ItemTabelaPrecificacao': 'itens_tabela_precificacao',
-      'ProdutoTabelaPrecificacao': 'produtos_tabelas_precificacao',
-      'FormaPagamento': 'formas_pagamento',
-      'LocalEntrega': 'locais_entrega',
-      'TaxaEntrega': 'taxas_entrega',
+      'usuarios': 'usuarios',
+      'usuario': 'usuarios',
+      'TabelaPrecificacao': 'tabela_precificacao',
+      'tabelas_precificacao': 'tabela_precificacao',
+      'ItemTabelaPrecificacao': 'item_tabela_precificacao',
+      'itens_tabela_precificacao': 'item_tabela_precificacao',
+      'ProdutoTabelaPrecificacao': 'produto_tabela_precificacao',
+      'produtos_tabelas_precificacao': 'produto_tabela_precificacao',
+      'CategoriaTabelaPrecificacao': 'categoria_tabela_precificacao',
+      'categorias_tabelas_precificacao': 'categoria_tabela_precificacao',
+      'FormaPagamento': 'forma_pagamento',
+      'formas_pagamento': 'forma_pagamento',
+      'LocalEntrega': 'local_entrega',
+      'locais_entrega': 'local_entrega',
+      'TaxaEntrega': 'taxa_entrega',
+      'taxas_entrega': 'taxa_entrega',
+      'OrdemPreparo': 'ordens_preparo',
+      'ordens_preparo': 'ordens_preparo',
+      'HistoricoOrdemPreparo': 'historicos_ordem_preparo',
+      'historicos_ordem_preparo': 'historicos_ordem_preparo',
+      'EstoqueProduto': 'estoque_produto',
+      'estoque_produto': 'estoque_produto',
+      'MovimentacaoEstoque': 'movimentacao_estoque',
+      'movimentacao_estoque': 'movimentacao_estoque',
+      'PlanejamentoProducao': 'planejamento_producao',
+      'planejamento_producao': 'planejamento_producao',
+      'SessaoCaixa': 'sessao_caixa',
+      'sessao_caixa': 'sessao_caixa',
+      'LancamentoFinanceiro': 'lancamento_financeiro',
+      'lancamento_financeiro': 'lancamento_financeiro',
+      'empresa_configuracao': 'empresa_configuracao',
+      'membro_empresa': 'membro_empresa',
+      'membros_empresa': 'membro_empresa',
+      'audit_log': 'audit_logs',
+      'audit_logs': 'audit_logs',
     };
     return mapping[entity] ?? entity.toLowerCase();
   }
