@@ -983,26 +983,36 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
       final bool isApiConectada = await EvolutionApiClient.isInstanciaConectada(tenantId: tenantId);
 
       if (isApiConectada) {
-        // Disparo Automático Silencioso via Evolution API (sem abrir telas/modais)
+        final String pedidoIdFinal = _controller.lastPedidoId ?? (numeroPedidoReal.isNotEmpty ? numeroPedidoReal : 'ped_${DateTime.now().millisecondsSinceEpoch}');
+        final keyConfirmacaoPdv = '$tenantId:$pedidoIdFinal:${WhatsAppService.kEventoPedidoCriadoPdv}:confirmacao';
+
+        // Disparo Automático Silencioso via Evolution API com chave de idempotência garantida
         final res = await WhatsAppService.enviarMensagem(
           rawPhone: tel,
           mensagem: msgInterpolada,
           tenantId: tenantId,
-          pedidoId: _controller.lastPedidoId ?? numeroPedidoReal,
+          pedidoId: pedidoIdFinal,
           eventoId: WhatsAppService.kEventoPedidoCriadoPdv,
-          isManualIntent: true,
+          idempotencyKey: keyConfirmacaoPdv,
+          isManualIntent: false,
         );
 
         // Se configurado para enviar Copia e Cola em 2ª mensagem e PIX pendente
-        if (pdvConfig.enviarPix2MsgPadrao && isPix && pixInfo != null && pixInfo.copiaECola.isNotEmpty) {
+        // Evita duplicidade se o template principal já contiver o código PIX ou a chave
+        final bool jaTemPixNaMsg = msgInterpolada.toUpperCase().contains('PIX') ||
+            (pixInfo != null && pixInfo.copiaECola.isNotEmpty && msgInterpolada.contains(pixInfo.copiaECola));
+
+        if (pdvConfig.enviarPix2MsgPadrao && isPix && pixInfo != null && pixInfo.copiaECola.isNotEmpty && !jaTemPixNaMsg) {
+          final keyPix2Msg = '$tenantId:$pedidoIdFinal:${WhatsAppService.kEventoPedidoCriadoPdv}:pix_copia_cola_2msg';
           await Future.delayed(const Duration(milliseconds: 1200));
           await WhatsAppService.enviarMensagem(
             rawPhone: tel,
             mensagem: pixInfo.copiaECola,
             tenantId: tenantId,
-            pedidoId: _controller.lastPedidoId ?? numeroPedidoReal,
+            pedidoId: pedidoIdFinal,
             eventoId: 'pix_copia_cola_2msg',
-            isManualIntent: true,
+            idempotencyKey: keyPix2Msg,
+            isManualIntent: false,
           );
         }
 
