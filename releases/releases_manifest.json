@@ -1,5 +1,22 @@
 [
     {
+        "version":  "v1.8.13",
+        "buildNumber":  59,
+        "date":  "2026-10-23",
+        "timestamp":  "2026-10-23 15:43:21",
+        "gitCommit":  "15fb9ee",
+        "notes":  "feat(expresso): pagina dedicada expresso.html, resolucao dinamica de tenant sem hardcode e rota vercel ",
+        "folder":  "v1.8.13_2026-10-23",
+        "fullPackage":  "v1.8.13_2026-10-23/fincore_food",
+        "fullSize":  "46,65 MB",
+        "updatePackage":  "v1.8.13_2026-10-23/fincore_food_update",
+        "updateSize":  "42,96 MB",
+        "fullZip":  null,
+        "fullZipSize":  null,
+        "updateZip":  null,
+        "updateZipSize":  null
+    },
+    {
         "version":  "v1.8.12",
         "buildNumber":  58,
         "date":  "2026-10-23",
