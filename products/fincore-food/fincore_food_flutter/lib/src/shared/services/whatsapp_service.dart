@@ -729,11 +729,11 @@ class WhatsAppService {
         isPadrao: true,
         evento: 'pedido_entregue',
         ordem: 7,
-        conteudo: '❤️ *Olá, {primeiro_nome}!* Esperamos que sua experiência tenha sido maravilhosa! ✨\n\n'
-            'Seu pedido *#{pedido}* foi entregue com muito carinho pela *$emp*! 🍲😋\n\n'
-            'Poderia nos avaliar em 15 segundos? Sua opinião é essencial para mantermos a qualidade do nosso atendimento:\n'
-            '⭐ *Avalie seu pedido aqui:* {link_avaliacao}\n\n'
-            'Muito obrigado pela confiança e até o próximo pedido! 🚀🍕',
+        conteudo: '⭐ *Olá, {primeiro_nome}!* Esperamos que sua experiência tenha sido excelente! ✨\n\n'
+            'Seu pedido *#{pedido}* foi entregue com muito carinho pela *$emp*! 📦✨\n\n'
+            'Poderia nos avaliar em menos de 1 minuto? Sua opinião é essencial para aprimorarmos continuamente nosso atendimento:\n'
+            '👉 *Avalie seu pedido aqui:* {link_avaliacao}\n\n'
+            'Agradecemos imensamente pela confiança e preferência! 🌟🤝',
       ),
       WhatsAppTemplate(
         id: 'pedido_cancelado',
