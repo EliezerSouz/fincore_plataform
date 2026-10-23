@@ -1,5 +1,22 @@
 [
     {
+        "version":  "v1.8.11",
+        "buildNumber":  57,
+        "date":  "2026-10-22",
+        "timestamp":  "2026-10-22 21:59:44",
+        "gitCommit":  "4983926",
+        "notes":  "fix(whatsapp,pdv,cardapio): anti-duplicidade, linkPreview condicional, parser WhatsApp resiliente e responsividade mobile ",
+        "folder":  "v1.8.11_2026-10-22",
+        "fullPackage":  "v1.8.11_2026-10-22/fincore_food",
+        "fullSize":  "46,61 MB",
+        "updatePackage":  "v1.8.11_2026-10-22/fincore_food_update",
+        "updateSize":  "42,93 MB",
+        "fullZip":  null,
+        "fullZipSize":  null,
+        "updateZip":  null,
+        "updateZipSize":  null
+    },
+    {
         "version":  "v1.8.10",
         "buildNumber":  56,
         "date":  "2026-10-22",
