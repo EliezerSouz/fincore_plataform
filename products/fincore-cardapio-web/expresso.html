@@ -848,8 +848,8 @@
   <!-- Banner de Destaque -->
   <div class="hero-banner">
     <div>
-      <div class="hero-title">⚡ Pronta Entrega & Envio Imediato</div>
-      <div class="hero-sub" id="hero-subtitle">Escolha os itens disponíveis em estoque agora e receba rapidinho sem complicação!</div>
+      <div class="hero-title" id="hero-title">⚡ Pronta Entrega & Envio Imediato</div>
+      <div class="hero-sub" id="hero-subtitle">Escolha os itens disponíveis e monte seu pedido de forma prática e rápida!</div>
     </div>
     <div class="hero-icon">🛵</div>
   </div>
@@ -864,16 +864,16 @@
   <main class="container">
     <div class="section-header">
       <div class="section-title">
-        <span>Itens Prontos em Estoque</span>
+        <span id="section-title-text">Itens Disponíveis</span>
       </div>
-      <span class="items-count" id="items-count">0 disponíveis</span>
+      <span class="items-count" id="items-count">Carregando...</span>
     </div>
 
     <!-- Lista de Produtos -->
     <div class="products-list" id="products-list">
       <div class="loading-state">
         <div class="spinner"></div>
-        <div>Localizando produtos disponíveis em estoque...</div>
+        <div>Localizando produtos disponíveis...</div>
       </div>
     </div>
   </main>
@@ -897,7 +897,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <div class="modal-title">
-          <span>⚡ Finalizar Pedido Rápido</span>
+          <span>⚡ Finalizar Pedido</span>
         </div>
         <button class="btn-close-modal" id="btn-close-modal">✕</button>
       </div>
@@ -956,10 +956,26 @@
           </div>
         </div>
 
-        <!-- 3. Horário Previsto -->
+        <!-- 3. Previsão ou Agendamento de Data/Hora -->
         <div class="form-group">
-          <label class="form-label">Previsão / Horário Desejado</label>
-          <input type="text" class="form-input" id="inp-horario" readonly style="background:#f8fafc; font-weight:600;" />
+          <label class="form-label">Previsão ou Agendamento do Pedido</label>
+          <div class="pill-group" style="margin-bottom:8px;">
+            <button class="pill-btn active" id="btn-modo-imediato" type="button">⚡ O quanto antes</button>
+            <button class="pill-btn" id="btn-modo-agendado" type="button">📅 Agendar Data & Hora</button>
+          </div>
+          <div id="block-imediato">
+            <input type="text" class="form-input" id="inp-horario" readonly style="background:#f8fafc; font-weight:600;" />
+          </div>
+          <div id="block-agendado" style="display:none; grid-template-columns:1fr 1fr; gap:8px;">
+            <div>
+              <label class="form-label" style="font-size:11px;">Data Desejada *</label>
+              <input type="date" class="form-input" id="inp-data-agendada" />
+            </div>
+            <div>
+              <label class="form-label" style="font-size:11px;">Horário Desejado *</label>
+              <input type="time" class="form-input" id="inp-hora-agendada" />
+            </div>
+          </div>
         </div>
 
         <!-- 4. Forma de Pagamento -->
@@ -1138,10 +1154,27 @@
           const { data: cfg } = await sb.from('empresa_configuracao').select('*').eq('tenantId', app.tenantId).maybeSingle();
           if (cfg) {
             app.config = cfg;
+
+            // Extrair modoExpresso e horários de horariosAtendimento / horarios_atendimento
+            let horariosObj = null;
+            const rawH = cfg.horariosAtendimento || cfg.horarios_atendimento;
+            if (rawH) {
+              try {
+                horariosObj = typeof rawH === 'string' ? JSON.parse(rawH) : rawH;
+              } catch (_) {}
+            }
+            if (horariosObj && horariosObj.modoExpresso) {
+              app.modoExpresso = horariosObj.modoExpresso;
+            }
+            if (horariosObj && horariosObj.prazoMinimoMinutos) {
+              app.prazoMinimoMinutos = Number(horariosObj.prazoMinimoMinutos);
+            }
+
             if (cfg.cardapio_prazo_minimo) {
               const parsedMin = parseInt(cfg.cardapio_prazo_minimo, 10);
               if (!isNaN(parsedMin) && parsedMin > 0) app.prazoMinimoMinutos = parsedMin;
             }
+
             if (cfg.pixKey) {
               try {
                 const dec = JSON.parse(cfg.pixKey);
@@ -1170,34 +1203,57 @@
           return;
         }
 
-        // Busca produtos ativos
-        const [{ data: prods, error: pErr }, { data: precs }, { data: regrasExpresso }] = await Promise.all([
+        // Aplica o título e subtítulo da vitrine configurados pelo estabelecimento
+        if (app.modoExpresso && app.modoExpresso.titulo) {
+          const t = app.modoExpresso.titulo.trim();
+          if (t) {
+            const hTitle = document.getElementById('hero-title');
+            if (hTitle) hTitle.textContent = `⚡ ${t}`;
+            const sTitle = document.getElementById('section-title-text');
+            if (sTitle) sTitle.textContent = t;
+            const hSub = document.getElementById('hero-subtitle');
+            if (hSub) {
+              if (t.toLowerCase().includes('agend') || t.toLowerCase().includes('pratic')) {
+                hSub.textContent = 'Escolha seus itens favoritos e agende sua entrega ou retirada com praticidade!';
+              } else {
+                hSub.textContent = 'Escolha os itens disponíveis e receba com rapidez e praticidade!';
+              }
+            }
+            document.title = `${t} — ${app.empresa?.nome_fantasia || 'Cardápio Digital'}`;
+          }
+        }
+
+        // Busca produtos ativos e regras de preço escalonado
+        const [{ data: prods, error: pErr }, { data: precs }] = await Promise.all([
           sb.from('vw_cardapio_produtos').select('*').eq('tenant_id', app.tenantId).order('nome'),
-          sb.from('vw_cardapio_precificacao').select('*').eq('tenant_id', app.tenantId),
-          sb.from('empresa_configuracao').select('cardapio_expresso').eq('tenantId', app.tenantId).maybeSingle()
+          sb.from('vw_cardapio_precificacao').select('*').eq('tenant_id', app.tenantId)
         ]);
 
         if (pErr) throw pErr;
 
         app.precificacao = precs || [];
 
-        // Filtro por estoque mínimo (padrão 1 ou configurado pelo PDV)
-        let estoqueMin = 1;
-        if (regrasExpresso && regrasExpresso.cardapio_expresso) {
-          try {
-            const expJson = typeof regrasExpresso.cardapio_expresso === 'string'
-              ? JSON.parse(regrasExpresso.cardapio_expresso)
-              : regrasExpresso.cardapio_expresso;
-            if (expJson.estoqueMinimo != null) estoqueMin = Number(expJson.estoqueMinimo);
-            if (expJson.titulo) document.getElementById('hero-subtitle').textContent = expJson.titulo;
-          } catch (_) {}
+        // Filtro por estoque mínimo configurado
+        let estoqueMin = 0;
+        if (app.modoExpresso && app.modoExpresso.estoqueMinimo != null) {
+          estoqueMin = Number(app.modoExpresso.estoqueMinimo);
         }
 
-        // Itens que possuem saldo disponível em pronta entrega
-        const disponiveis = (prods || []).filter(p => {
-          const saldo = Number(p.estoque_atual || p.estoqueAtual || p.estoque || 0);
-          return saldo >= estoqueMin;
+        // Itens ativos e disponíveis
+        let disponiveis = (prods || []).filter(p => {
+          if (p.status_comercial === 'esgotado' || p.status_comercial === 'pausado') return false;
+          const saldo = Number(p.estoque_atual || 0);
+          if (estoqueMin > 0) {
+            return saldo >= estoqueMin;
+          }
+          return true;
         });
+
+        // Resiliência de catálogo: se o filtro estrito esvaziar tudo (ex: produção sob demanda),
+        // exibe todos os produtos ativos para o cliente nunca ver a loja vazia!
+        if (disponiveis.length === 0 && prods && prods.length > 0) {
+          disponiveis = prods.filter(p => p.status_comercial !== 'esgotado' && p.status_comercial !== 'pausado');
+        }
 
         document.getElementById('items-count').textContent = `${disponiveis.length} disponíveis`;
 
@@ -1205,8 +1261,8 @@
           container.innerHTML = `
             <div class="empty-state">
               <div style="font-size:36px; margin-bottom:8px;">📦</div>
-              <div style="font-weight:700; font-size:15px; margin-bottom:4px;">Nenhum item pronto em estoque no momento</div>
-              <div style="font-size:12.5px;">Tudo o que foi produzido hoje já foi vendido! Em breve teremos novas fornadas.</div>
+              <div style="font-weight:700; font-size:15px; margin-bottom:4px;">Nenhum produto cadastrado no momento</div>
+              <div style="font-size:12.5px;">Em breve teremos novidades disponíveis em nosso cardápio!</div>
             </div>`;
           return;
         }
@@ -1221,14 +1277,14 @@
 
     // Calcula preço considerando regras de atacado por quantidade
     function calcularPrecoUnitario(prod, qty) {
-      const precoBase = Number(prod.preco_venda_centavos || prod.precoVendaCentavos || prod.preco_centavos || 0);
+      const precoBase = Number(prod.preco_venda_centavos || 0);
       const faixas = app.precificacao.filter(f => f.produto_id === prod.id || f.produtoId === prod.id);
 
       if (faixas.length > 0 && qty > 0) {
-        faixas.sort((a, b) => Number(b.quantidade_minima || 0) - Number(a.quantidade_minima || 0));
-        const faixaAplicavel = faixas.find(f => qty >= Number(f.quantidade_minima || 0));
+        faixas.sort((a, b) => Number(b.qtd_minima || b.quantidade_minima || 0) - Number(a.qtd_minima || a.quantidade_minima || 0));
+        const faixaAplicavel = faixas.find(f => qty >= Number(f.qtd_minima || f.quantidade_minima || 0));
         if (faixaAplicavel) {
-          return Number(faixaAplicavel.preco_centavos || faixaAplicavel.precoCentavos || precoBase);
+          return Number(faixaAplicavel.valor_unitario_centavos || faixaAplicavel.preco_centavos || precoBase);
         }
       }
       return precoBase;
@@ -1240,21 +1296,27 @@
       container.innerHTML = '';
 
       app.produtos.forEach(prod => {
-        const saldo = Number(prod.estoque_atual || prod.estoqueAtual || prod.estoque || 0);
-        const precoBase = Number(prod.preco_venda_centavos || prod.precoVendaCentavos || prod.preco_centavos || 0);
+        const saldo = Number(prod.estoque_atual || 0);
+        const precoBase = Number(prod.preco_venda_centavos || 0);
         const cartItem = app.carrinho[prod.id] || { qty: 0 };
 
         // Verifica se há faixa de atacado
         const faixas = app.precificacao.filter(f => f.produto_id === prod.id || f.produtoId === prod.id);
         let tierBadgeHtml = '';
         if (faixas.length > 0) {
-          const menorFaixa = faixas.sort((a, b) => Number(a.quantidade_minima || 0) - Number(b.quantidade_minima || 0))[0];
-          tierBadgeHtml = `<span class="badge-tier">✨ A partir de ${menorFaixa.quantidade_minima} un: ${formatMoeda(menorFaixa.preco_centavos)}</span>`;
+          const menorFaixa = faixas.sort((a, b) => Number(a.qtd_minima || a.quantidade_minima || 0) - Number(b.qtd_minima || b.quantidade_minima || 0))[0];
+          const minQtd = menorFaixa.qtd_minima || menorFaixa.quantidade_minima;
+          const valCents = menorFaixa.valor_unitario_centavos || menorFaixa.preco_centavos;
+          tierBadgeHtml = `<span class="badge-tier">✨ A partir de ${minQtd} un: ${formatMoeda(valCents)}</span>`;
         }
 
-        const thumbHtml = prod.imagem_url
-          ? `<img src="${prod.imagem_url}" alt="${prod.nome}" loading="lazy" />`
-          : `<span>🥪</span>`;
+        const stockBadgeHtml = saldo > 0 
+          ? `<span class="badge-stock">⚡ ${saldo} em estoque</span>`
+          : `<span class="badge-stock" style="background:#eff6ff; color:#2563eb; border-color:#bfdbfe;">✨ Sob encomenda</span>`;
+
+        const thumbHtml = (prod.imagem && prod.imagem.startsWith('http'))
+          ? `<img src="${prod.imagem}" alt="${prod.nome}" loading="lazy" />`
+          : `<span>🥟</span>`;
 
         const card = document.createElement('div');
         card.className = 'product-card';
@@ -1265,7 +1327,7 @@
             <div class="product-name">${prod.nome}</div>
             ${prod.descricao ? `<div class="product-desc">${prod.descricao}</div>` : ''}
             <div class="product-meta-row">
-              <span class="badge-stock">⚡ ${saldo} em estoque</span>
+              ${stockBadgeHtml}
               ${tierBadgeHtml}
             </div>
           </div>
@@ -1441,6 +1503,43 @@
         blockPix.style.display = 'none';
       });
 
+      // Alternância de Previsão / Agendamento de Data e Hora
+      app.modoHorario = 'imediato';
+      const btnImediato = document.getElementById('btn-modo-imediato');
+      const btnAgendado = document.getElementById('btn-modo-agendado');
+      const blockImediato = document.getElementById('block-imediato');
+      const blockAgendado = document.getElementById('block-agendado');
+      const inpDataAgendada = document.getElementById('inp-data-agendada');
+      const inpHoraAgendada = document.getElementById('inp-hora-agendada');
+
+      // Preenche valores iniciais para agendamento
+      const hojeStr = new Date().toISOString().split('T')[0];
+      if (inpDataAgendada) {
+        inpDataAgendada.min = hojeStr;
+        inpDataAgendada.value = hojeStr;
+      }
+      if (inpHoraAgendada) {
+        const dFutura = new Date();
+        dFutura.setMinutes(dFutura.getMinutes() + (app.prazoMinimoMinutos || 120));
+        inpHoraAgendada.value = `${String(dFutura.getHours()).padStart(2, '0')}:${String(dFutura.getMinutes()).padStart(2, '0')}`;
+      }
+
+      btnImediato.addEventListener('click', () => {
+        app.modoHorario = 'imediato';
+        btnImediato.classList.add('active');
+        btnAgendado.classList.remove('active');
+        blockImediato.style.display = 'block';
+        blockAgendado.style.display = 'none';
+      });
+
+      btnAgendado.addEventListener('click', () => {
+        app.modoHorario = 'agendado';
+        btnAgendado.classList.add('active');
+        btnImediato.classList.remove('active');
+        blockImediato.style.display = 'none';
+        blockAgendado.style.display = 'grid';
+      });
+
       // Busca Automática por CEP
       document.getElementById('btn-buscar-cep').addEventListener('click', buscarCep);
 
@@ -1567,6 +1666,26 @@
         // Número sequencial simples
         const numPedidoAleatorio = Math.floor(100000 + Math.random() * 900000);
 
+        let horarioPrevisaoFinal = document.getElementById('inp-horario').value;
+        let obsAdicional = '';
+
+        if (app.modoHorario === 'agendado') {
+          const dataAg = document.getElementById('inp-data-agendada').value;
+          const horaAg = document.getElementById('inp-hora-agendada').value;
+          if (!dataAg || !horaAg) {
+            btn.disabled = false;
+            btn.innerHTML = `<span>Confirmar Pedido</span> <span>➔</span>`;
+            alert('Por favor selecione a data e o horário desejados para o agendamento.');
+            return;
+          }
+          const [ano, mes, dia] = dataAg.split('-');
+          horarioPrevisaoFinal = `${dia}/${mes}/${ano} às ${horaAg}`;
+          obsAdicional = `[AGENDADO para ${dia}/${mes}/${ano} às ${horaAg}] `;
+        }
+
+        const obsUsuario = document.getElementById('inp-obs').value.trim();
+        const obsFinal = `${obsAdicional}${obsUsuario || 'Pedido via Vitrine Digital'}`.trim();
+
         // 1. Gravar em 'pedido'
         const pedidoRow = {
           id: pedidoId,
@@ -1586,8 +1705,8 @@
           formaPagamentoNome: app.formaPagamento,
           canalOrigem: 'web',
           dataHoraCriacao: agora,
-          dataHoraEntregaPrevista: document.getElementById('inp-horario').value,
-          observacoes: document.getElementById('inp-obs').value.trim() || 'Pedido Rápido (Pronta Entrega)',
+          dataHoraEntregaPrevista: horarioPrevisaoFinal,
+          observacoes: obsFinal,
           enderecoJson: enderecoObj ? JSON.stringify(enderecoObj) : null,
           numeroPedido: numPedidoAleatorio
         };

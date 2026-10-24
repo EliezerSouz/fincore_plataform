@@ -37,7 +37,9 @@ CREATE OR REPLACE VIEW public.vw_cardapio_empresa AS
   WHERE "deletedAt" IS NULL;
 
 -- ─── View pública de produtos do cardápio ────────────────────────────
-CREATE OR REPLACE VIEW public.vw_cardapio_produtos AS
+DROP VIEW IF EXISTS public.vw_cardapio_produtos CASCADE;
+
+CREATE VIEW public.vw_cardapio_produtos AS
   SELECT
     p.id,
     p."tenantId"         AS tenant_id,
@@ -54,12 +56,25 @@ CREATE OR REPLACE VIEW public.vw_cardapio_produtos AS
     c.nome               AS categoria_nome,
     c.icone              AS categoria_icone,
     c.cor                AS categoria_cor,
-    c."ordemExibicao"    AS categoria_ordem
+    c."ordemExibicao"    AS categoria_ordem,
+    COALESCE(ep."quantidadeAtual", 0)::numeric AS estoque_atual,
+    COALESCE(ep."quantidadeReservada", 0)::numeric AS estoque_reservado,
+    COALESCE(
+      (CASE 
+        WHEN p.metadata IS NOT NULL 
+             AND (p.metadata::jsonb ? 'preco_base') 
+             AND (p.metadata::jsonb->>'preco_base') ~ '^[0-9]+(\\.[0-9]+)?$' 
+        THEN (p.metadata::jsonb->>'preco_base')::numeric * 100 
+        ELSE 0 
+      END), 0)::integer AS preco_venda_centavos
   FROM public.produto p
   JOIN public.categoria c ON c.id = p."categoriaId"
+  LEFT JOIN public.estoque_produto ep ON ep."produtoId" = p.id AND ep."deletedAt" IS NULL
   WHERE p.ativo = true
     AND p."deletedAt" IS NULL
     AND c.ativo = true
     AND c."deletedAt" IS NULL
   ORDER BY c."ordemExibicao", p."ordemProducao";
+
+GRANT SELECT ON public.vw_cardapio_produtos TO anon, authenticated;
 
