@@ -1,5 +1,22 @@
 [
     {
+        "version":  "v1.8.15",
+        "buildNumber":  61,
+        "date":  "2026-10-24",
+        "timestamp":  "2026-10-24 16:53:55",
+        "gitCommit":  "5b6f779",
+        "notes":  "Vitrine Digital dinamica com suporte nativo a Agendamento de Pedidos e Entrega Imediata, integracao direta do titulo personalizado da loja e carregamento de produtos com estoque real e precificacao em atacado.",
+        "folder":  "v1.8.15_2026-10-24",
+        "fullPackage":  "v1.8.15_2026-10-24/fincore_food",
+        "fullSize":  "46,65 MB",
+        "updatePackage":  "v1.8.15_2026-10-24/fincore_food_update",
+        "updateSize":  "42,96 MB",
+        "fullZip":  null,
+        "fullZipSize":  null,
+        "updateZip":  null,
+        "updateZipSize":  null
+    },
+    {
         "version":  "v1.8.14",
         "buildNumber":  60,
         "date":  "2026-10-23",
