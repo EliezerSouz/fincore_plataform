@@ -283,16 +283,40 @@ class PdvExpressController extends ChangeNotifier {
   void setSplitPayments(List<PagamentoItemDraft> list) {
     _splitPayments.clear();
     _splitPayments.addAll(list);
+    if (_splitPayments.isNotEmpty) {
+      if (_splitPayments.length == 1) {
+        final p = _splitPayments.first;
+        _paymentMethod = p.formaPagamentoNome;
+        if (p.formaPagamentoId != null) {
+          final matched = _formasPagamento.where((f) => f.id == p.formaPagamentoId).firstOrNull;
+          if (matched != null) _selectedFormaPagamento = matched;
+        }
+      } else {
+        _paymentMethod = _splitPayments
+            .map((p) => '${p.formaPagamentoNome} (R\$ ${(p.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')})')
+            .join(' + ');
+      }
+    } else {
+      _paymentMethod = _selectedFormaPagamento?.nome ?? 'Dinheiro';
+    }
     notifyListeners();
   }
 
   void removeSplitPayment(String id) {
     _splitPayments.removeWhere((p) => p.id == id);
+    if (_splitPayments.isNotEmpty) {
+      _paymentMethod = _splitPayments
+          .map((p) => '${p.formaPagamentoNome} (R\$ ${(p.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')})')
+          .join(' + ');
+    } else {
+      _paymentMethod = _selectedFormaPagamento?.nome ?? 'Dinheiro';
+    }
     notifyListeners();
   }
 
   void clearSplitPayments() {
     _splitPayments.clear();
+    _paymentMethod = _selectedFormaPagamento?.nome ?? 'Dinheiro';
     notifyListeners();
   }
 
@@ -1333,8 +1357,23 @@ class PdvExpressController extends ChangeNotifier {
         'tempoDeslocamentoSegundos': tempoDeslocamentoSegundos,
       }) : null;
 
-      final formaPgtoId = _selectedFormaPagamento?.id ?? (await _resolveFormaPagamentoId(_paymentMethod));
-      final formaPgtoNome = _selectedFormaPagamento?.nome ?? _paymentMethod;
+      final String? formaPgtoId;
+      final String formaPgtoNome;
+      if (_splitPayments.isNotEmpty) {
+        if (_splitPayments.length == 1) {
+          formaPgtoId = _splitPayments.first.formaPagamentoId ?? _selectedFormaPagamento?.id;
+          formaPgtoNome = _splitPayments.first.formaPagamentoNome;
+        } else {
+          formaPgtoId = null;
+          formaPgtoNome = _splitPayments
+              .map((p) => '${p.formaPagamentoNome} (R\$ ${(p.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')})')
+              .join(' + ');
+        }
+      } else {
+        formaPgtoId = _selectedFormaPagamento?.id ?? (await _resolveFormaPagamentoId(_paymentMethod));
+        formaPgtoNome = _selectedFormaPagamento?.nome ?? _paymentMethod;
+      }
+
       final isUsoInterno = (_selectedFormaPagamento?.isUsoInterno ?? false) ||
           (_selectedFormaPagamento?.tipo == TipoFormaPagamento.consumoInterno) ||
           (_selectedFormaPagamento?.movimentaFinanceiro == false) ||
@@ -1364,7 +1403,7 @@ class PdvExpressController extends ChangeNotifier {
       final isAgendado = !isRetroativo && (isFuturo || isOutroDiaFuturo || _entrega.prioridade == 'Entrega Programada');
 
       // Se há justificativa de retroativo, acrescenta às observações
-      final obsBase = _entrega.observacoes ?? '';
+      final obsBase = _entrega.observacoes;
       final infoEstoqueRetroativo = isRetroativo
           ? ((_movimentarEstoqueRetroativo ?? false) ? 'Estoque: Baixado' : 'Estoque: Não movimentado')
           : '';
@@ -1431,7 +1470,7 @@ class PdvExpressController extends ChangeNotifier {
             'cliente': nomeClienteFinal ?? 'Consumidor',
             'valorTotalCentavos': pedido.valorTotalCentavos,
             'tipoLogistica': pedido.tipoLogistica,
-            'pagamento': _paymentMethod,
+            'pagamento': formaPgtoNome,
           },
         );
       } catch (e) {
@@ -1450,7 +1489,7 @@ class PdvExpressController extends ChangeNotifier {
                 ? '${_entrega.logradouro}, ${_entrega.numero}'
                 : null,
             bairro: _entrega.bairro,
-            formaPagamento: _paymentMethod,
+            formaPagamento: formaPgtoNome,
             totalCentavos: pedido.valorTotalCentavos,
             taxaEntregaCentavos: pedido.valorTaxaEntregaCentavos,
             taxaServicoCentavos: pedido.valorTaxaServicoCentavos,

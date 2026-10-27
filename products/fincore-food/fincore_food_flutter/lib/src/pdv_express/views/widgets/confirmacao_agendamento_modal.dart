@@ -508,7 +508,9 @@ class _ConfirmacaoAgendamentoModalState extends State<ConfirmacaoAgendamentoModa
                         style: TextStyle(color: FincoreColors.textMuted, fontSize: 13),
                       ),
                       Text(
-                        controller.paymentMethod,
+                        controller.isSplitPayment
+                            ? 'Dividido (${controller.splitPayments.length} fatias)'
+                            : controller.paymentMethod,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -517,6 +519,25 @@ class _ConfirmacaoAgendamentoModalState extends State<ConfirmacaoAgendamentoModa
                       ),
                     ],
                   ),
+                  if (controller.isSplitPayment) ...[
+                    const SizedBox(height: 6),
+                    ...controller.splitPayments.map((p) => Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '  • ${p.formaPagamentoNome}:',
+                            style: const TextStyle(color: FincoreColors.textMuted, fontSize: 12),
+                          ),
+                          Text(
+                            'R\$ ${(p.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')}',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    )),
+                  ],
                   if (isEntrega && entrega.taxaEntregaCentavos > 0) ...[
                     const SizedBox(height: 6),
                     Row(

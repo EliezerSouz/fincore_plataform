@@ -1,5 +1,22 @@
 [
     {
+        "version":  "v1.8.17",
+        "buildNumber":  63,
+        "date":  "2026-10-27",
+        "timestamp":  "2026-10-27 15:08:28",
+        "gitCommit":  "6035b56",
+        "notes":  "fix(cardapio-web): adicionar definirQtdManual/validarQtdManual, titulo dinamico imediato e filtro estrito de estoque minimo na vitrine expressa ",
+        "folder":  "v1.8.17_2026-10-27",
+        "fullPackage":  "v1.8.17_2026-10-27/fincore_food",
+        "fullSize":  "46,69 MB",
+        "updatePackage":  "v1.8.17_2026-10-27/fincore_food_update",
+        "updateSize":  "43,01 MB",
+        "fullZip":  null,
+        "fullZipSize":  null,
+        "updateZip":  null,
+        "updateZipSize":  null
+    },
+    {
         "version":  "v1.8.16",
         "buildNumber":  62,
         "date":  "2026-10-27",

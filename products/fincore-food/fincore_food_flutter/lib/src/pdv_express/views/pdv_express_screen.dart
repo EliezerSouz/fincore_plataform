@@ -825,7 +825,11 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
 
     final dataHora = entrega.dataHora;
     final dataStr = '${dataHora.day.toString().padLeft(2, '0')}/${dataHora.month.toString().padLeft(2, '0')}/${dataHora.year} às ${dataHora.hour.toString().padLeft(2, '0')}:${dataHora.minute.toString().padLeft(2, '0')}';
-    final formaPagtoStr = _controller.selectedFormaPagamento?.nome ?? 'Dinheiro';
+    final formaPagtoStr = _controller.isSplitPayment
+        ? _controller.splitPayments
+            .map((p) => '${p.formaPagamentoNome} (R\$ ${(p.valorCentavos / 100).toStringAsFixed(2).replaceAll('.', ',')})')
+            .join(' + ')
+        : (_controller.selectedFormaPagamento?.nome ?? 'Dinheiro');
     final enderecoStr = (entrega.tipo == 'Entrega' && (entrega.logradouro.isNotEmpty || entrega.bairro.isNotEmpty))
         ? '${entrega.logradouro}${entrega.numero.isNotEmpty ? ", ${entrega.numero}" : ""}${entrega.bairro.isNotEmpty ? " - ${entrega.bairro}" : ""}${entrega.cidade.isNotEmpty ? ", ${entrega.cidade}" : ""}${entrega.referencia.isNotEmpty ? " (Ref: ${entrega.referencia})" : ""}'
         : null;
@@ -869,8 +873,10 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
 
       final numeroPedidoReal = _controller.lastNumeroPedido != null ? '#${_controller.lastNumeroPedido}' : '';
 
-      final isPix = formaPagtoStr.toLowerCase().contains('pix') ||
-          (_controller.selectedFormaPagamento?.tipo == TipoFormaPagamento.pix);
+      final isPix = _controller.isSplitPayment
+          ? _controller.splitPayments.any((p) => p.formaPagamentoNome.toLowerCase().contains('pix'))
+          : (formaPagtoStr.toLowerCase().contains('pix') ||
+              (_controller.selectedFormaPagamento?.tipo == TipoFormaPagamento.pix));
 
       // ── Resolução Contextual de PIX (Chave, Favorecido e Copia e Cola) ──
       PixWhatsAppInfo? pixInfo;
@@ -902,13 +908,19 @@ class _PdvExpressScreenState extends State<PdvExpressScreen>
                       ? selectedForma.pixTipoBanco!
                       : ((empresaNome != null && empresaNome.isNotEmpty) ? empresaNome : 'Estabelecimento')));
 
+          final valorPixCentavos = _controller.isSplitPayment
+              ? _controller.splitPayments
+                  .where((p) => p.formaPagamentoNome.toLowerCase().contains('pix'))
+                  .fold<int>(0, (acc, p) => acc + p.valorCentavos)
+              : totalCentavos;
+
           String copiaCola = '';
           if (chavePix.isNotEmpty) {
             copiaCola = PixGenerator.gerarCopiaCola(
               chave: chavePix,
               favorecido: favorecido,
               cidade: 'Sorocaba',
-              valor: (totalCentavos / 100.0),
+              valor: (valorPixCentavos / 100.0),
               tipoChave: tipoPix,
             );
           }

@@ -369,139 +369,262 @@ class ContasReceberController extends ChangeNotifier {
         }
       }
 
+      // 5. Carrega fatias de pagamento (Split Payment AUD-006)
+      final pagamentosRows = await (_db.select(_db.pagamentosPedidoTable)
+            ..where((p) => p.tenantId.equals(tenantId) & p.deletedAt.isNull()))
+          .get();
+      final pagamentosPorPedido = <String, List<PagamentoPedidoData>>{};
+      for (final p in pagamentosRows) {
+        pagamentosPorPedido.putIfAbsent(p.pedidoId, () => []).add(p);
+      }
+
       final agora = DateTime.now();
       final List<TituloReceber> lista = [];
 
       for (final ped in pedidosRows) {
-        final forma = ped.formaPagamentoId != null ? formasMap[ped.formaPagamentoId] : null;
+        final fatias = pagamentosPorPedido[ped.id];
         final cliente = ped.clienteId != null ? clientesMap[ped.clienteId] : null;
-
-        final fpNome = ped.formaPagamentoNome ?? forma?.nome ?? 'Não informada';
-        final fpTipo = forma?.tipo;
-        final fpNomeLower = fpNome.toLowerCase();
-
-        // ── Dinheiro: entra no caixa à vista — NÃO gera contas a receber ───────
-        final isDinheiro = fpTipo == 'dinheiro' ||
-            fpNomeLower.contains('dinheiro') ||
-            fpNomeLower.contains('espécie') ||
-            fpNomeLower.contains('especie') ||
-            fpNomeLower == 'dinheiro';
-        if (isDinheiro) continue;
-
-        // ── Cartão de Crédito / Débito ────────────────────────────────────────
-        final isCartao = (fpTipo != null &&
-                (fpTipo.toLowerCase().contains('cartao') ||
-                 fpTipo.toLowerCase().contains('cart'))) ||
-            fpNomeLower.contains('cart') ||
-            fpNomeLower.contains('créd') ||
-            fpNomeLower.contains('cred') ||
-            fpNomeLower.contains('déb') ||
-            fpNomeLower.contains('deb');
-
-        // ── Nota a Prazo / Fiado ──────────────────────────────────────────────
-        final isNotaPrazo = fpTipo == 'notaPrazo' ||
-            fpNomeLower.contains('prazo') ||
-            fpNomeLower.contains('faturad') ||
-            (forma?.descricao != null &&
-             forma!.descricao!.toLowerCase().contains('prazo'));
-
-        // ── PIX: Transação eletrônica que exige validação de comprovante e crédito em conta ───
-        final isPix = fpTipo == 'pix' || fpNomeLower.contains('pix');
-
-        // Formas que NÃO devem gerar título de contas a receber:
-        // consumo interno, cortesia, bonificação, etc.
-        final isConsumoOuCortesia = fpTipo == 'consumoInterno' ||
-            fpNomeLower.contains('consumo') ||
-            fpNomeLower.contains('cortesia') ||
-            fpNomeLower.contains('bonif') ||
-            fpNomeLower.contains('interno');
-        if (isConsumoOuCortesia) continue;
-
-        // Determina se já está quitado/recebido/validado:
-        final lancamentos = lancamentosPorPedido[ped.id] ?? [];
-
-        // Para PIX: Só é considerado recebido/validado se houver lançamento financeiro de receita
-        // gerado pela validação bancária ou liquidação do título.
-        // Para Cartão ou Nota a Prazo: quitado via baixa explícita ou liquidação.
-        final temReceita = (isNotaPrazo || isCartao || isPix)
-            ? lancamentos.any((l) =>
-                l.tipo == 'receita' &&
-                (l.descricao.toLowerCase().contains('baixa') ||
-                 l.descricao.toLowerCase().contains('liquid') ||
-                 l.descricao.toLowerCase().contains('validad') ||
-                 l.descricao.toLowerCase().contains('recebimento') ||
-                 l.descricao.toLowerCase().contains('quitação') ||
-                 l.descricao.toLowerCase().contains('quitacao')))
-            : lancamentos.any((l) => l.tipo == 'receita');
-
-        // Data do Pedido e Data da Entrega
-        final dataEntrega = ped.dataHoraEntregaPrevista?.toLocal() ?? ped.dataHoraCriacao.toLocal();
-
-        final taxaMdr = isCartao ? _extrairTaxaMdr(forma?.descricao, fpNome) : 0.0;
-        final prazoRepasse = isCartao ? _extrairPrazoRepasse(forma?.descricao, fpTipo, fpNome) : (isNotaPrazo ? _extrairPrazoDias(forma?.descricao, fpNome) : 0);
-        final tipoDias = isCartao ? _extrairTipoDiasRepasse(forma?.descricao, fpTipo) : 'corridos';
-
-        // Cálculo de Vencimento / Previsão de Repasse:
-        DateTime dataVencimento = dataEntrega;
-        if (isCartao) {
-          if (tipoDias == 'úteis') {
-            dataVencimento = _adicionarDiasUteis(dataEntrega, prazoRepasse);
-          } else {
-            dataVencimento = dataEntrega.add(Duration(days: prazoRepasse));
-          }
-        } else if (isNotaPrazo) {
-          dataVencimento = dataEntrega.add(Duration(days: prazoRepasse));
-        }
-
-        StatusTituloReceber status;
-        DateTime? dataRecebimento;
-
-        if (temReceita) {
-          status = StatusTituloReceber.recebido;
-          final lancamentoReceita = lancamentos.where(
-            (l) => (isNotaPrazo || isCartao)
-                ? (l.tipo == 'receita' && l.descricao.toLowerCase().contains('baixa'))
-                : l.tipo == 'receita',
-          ).firstOrNull;
-          dataRecebimento = lancamentoReceita?.dataHora.toLocal() ?? ped.dataHoraCriacao.toLocal();
-        } else {
-          // Pendente: se já passou a data do vencimento, está atrasado
-          if (agora.isAfter(dataVencimento)) {
-            status = StatusTituloReceber.atrasado;
-          } else {
-            status = StatusTituloReceber.pendente;
-          }
-        }
-
         final tel = ped.clienteTelefoneAvulso ?? cliente?.telefone;
         final nome = ped.clienteNomeAvulso ?? cliente?.nome ?? 'Cliente Sem Nome';
+        final dataEntrega = ped.dataHoraEntregaPrevista?.toLocal() ?? ped.dataHoraCriacao.toLocal();
+        final lancamentos = lancamentosPorPedido[ped.id] ?? [];
 
-        lista.add(
-          TituloReceber(
-            id: ped.id,
-            pedidoId: ped.id,
-            numeroPedido: ped.numeroPedido,
-            clienteId: ped.clienteId,
-            clienteNome: nome,
-            clienteTelefone: tel,
-            formaPagamentoId: ped.formaPagamentoId,
-            formaPagamentoNome: fpNome,
-            formaPagamentoTipo: fpTipo,
-            pixChave: forma?.pixChave,
-            pixTipoChave: forma?.pixTipoChave,
-            valorTotalCentavos: ped.valorTotalCentavos,
-            taxaMdrPercentual: taxaMdr,
-            prazoRepasseDias: prazoRepasse,
-            tipoDiasRepasse: tipoDias,
-            status: status,
-            dataEmissao: ped.dataHoraCriacao.toLocal(),
-            dataEntrega: dataEntrega,
-            dataVencimento: dataVencimento,
-            dataRecebimento: dataRecebimento,
-            observacoes: ped.observacoes,
-            canalOrigem: ped.canalOrigem,
-          ),
-        );
+        if (fatias != null && fatias.isNotEmpty) {
+          // ── Pedido com divisão de pagamento (Split Payment): gera cobrança individual por fatia ──
+          for (final fatia in fatias) {
+            final forma = fatia.formaPagamentoId != null ? formasMap[fatia.formaPagamentoId] : null;
+            final fpNome = fatia.formaPagamentoNome.isNotEmpty
+                ? fatia.formaPagamentoNome
+                : (forma?.nome ?? 'Não informada');
+            final fpTipo = forma?.tipo;
+            final fpNomeLower = fpNome.toLowerCase();
+
+            // ── Dinheiro: já recebido no ato / no caixa — NÃO gera contas a receber ──
+            final isDinheiro = fpTipo == 'dinheiro' ||
+                fpNomeLower.contains('dinheiro') ||
+                fpNomeLower.contains('espécie') ||
+                fpNomeLower.contains('especie') ||
+                fpNomeLower == 'dinheiro';
+            if (isDinheiro) continue;
+
+            final isConsumoOuCortesia = fpTipo == 'consumoInterno' ||
+                fpNomeLower.contains('consumo') ||
+                fpNomeLower.contains('cortesia') ||
+                fpNomeLower.contains('bonif') ||
+                fpNomeLower.contains('interno');
+            if (isConsumoOuCortesia) continue;
+
+            final isCartao = (fpTipo != null &&
+                    (fpTipo.toLowerCase().contains('cartao') ||
+                     fpTipo.toLowerCase().contains('cart'))) ||
+                fpNomeLower.contains('cart') ||
+                fpNomeLower.contains('créd') ||
+                fpNomeLower.contains('cred') ||
+                fpNomeLower.contains('déb') ||
+                fpNomeLower.contains('deb');
+
+            final isNotaPrazo = fpTipo == 'notaPrazo' ||
+                fpNomeLower.contains('prazo') ||
+                fpNomeLower.contains('faturad') ||
+                (forma?.descricao != null && forma!.descricao!.toLowerCase().contains('prazo'));
+
+            final isPix = fpTipo == 'pix' || fpNomeLower.contains('pix');
+
+            final temReceita = (isNotaPrazo || isCartao || isPix)
+                ? lancamentos.any((l) =>
+                    l.tipo == 'receita' &&
+                    (l.descricao.toLowerCase().contains('baixa') ||
+                     l.descricao.toLowerCase().contains('liquid') ||
+                     l.descricao.toLowerCase().contains('validad') ||
+                     l.descricao.toLowerCase().contains('recebimento') ||
+                     l.descricao.toLowerCase().contains('quitação') ||
+                     l.descricao.toLowerCase().contains('quitacao')) &&
+                    (lancamentos.length == 1 ||
+                     l.descricao.toLowerCase().contains(fpNomeLower) ||
+                     l.valorCentavos == fatia.valorCentavos ||
+                     (isCartao && (l.valorCentavos - fatia.valorCentavos).abs() < 500)))
+                : lancamentos.any((l) => l.tipo == 'receita');
+
+            final taxaMdr = isCartao ? _extrairTaxaMdr(forma?.descricao, fpNome) : 0.0;
+            final prazoRepasse = isCartao ? _extrairPrazoRepasse(forma?.descricao, fpTipo, fpNome) : (isNotaPrazo ? _extrairPrazoDias(forma?.descricao, fpNome) : 0);
+            final tipoDias = isCartao ? _extrairTipoDiasRepasse(forma?.descricao, fpTipo) : 'corridos';
+
+            DateTime dataVencimento = dataEntrega;
+            if (isCartao) {
+              if (tipoDias == 'úteis') {
+                dataVencimento = _adicionarDiasUteis(dataEntrega, prazoRepasse);
+              } else {
+                dataVencimento = dataEntrega.add(Duration(days: prazoRepasse));
+              }
+            } else if (isNotaPrazo) {
+              dataVencimento = dataEntrega.add(Duration(days: prazoRepasse));
+            }
+
+            StatusTituloReceber status;
+            DateTime? dataRecebimento;
+
+            if (temReceita) {
+              status = StatusTituloReceber.recebido;
+              final lancamentoReceita = lancamentos.where(
+                (l) => (isNotaPrazo || isCartao)
+                    ? (l.tipo == 'receita' && l.descricao.toLowerCase().contains('baixa'))
+                    : l.tipo == 'receita',
+              ).firstOrNull;
+              dataRecebimento = lancamentoReceita?.dataHora.toLocal() ?? ped.dataHoraCriacao.toLocal();
+            } else {
+              if (agora.isAfter(dataVencimento)) {
+                status = StatusTituloReceber.atrasado;
+              } else {
+                status = StatusTituloReceber.pendente;
+              }
+            }
+
+            lista.add(
+              TituloReceber(
+                id: fatia.id,
+                pedidoId: ped.id,
+                numeroPedido: ped.numeroPedido,
+                clienteId: ped.clienteId,
+                clienteNome: nome,
+                clienteTelefone: tel,
+                formaPagamentoId: fatia.formaPagamentoId,
+                formaPagamentoNome: fpNome,
+                formaPagamentoTipo: fpTipo,
+                pixChave: forma?.pixChave,
+                pixTipoChave: forma?.pixTipoChave,
+                valorTotalCentavos: fatia.valorCentavos,
+                taxaMdrPercentual: taxaMdr,
+                prazoRepasseDias: prazoRepasse,
+                tipoDiasRepasse: tipoDias,
+                status: status,
+                dataEmissao: ped.dataHoraCriacao.toLocal(),
+                dataEntrega: dataEntrega,
+                dataVencimento: dataVencimento,
+                dataRecebimento: dataRecebimento,
+                observacoes: fatia.observacao ?? ped.observacoes,
+                canalOrigem: ped.canalOrigem,
+              ),
+            );
+          }
+        } else {
+          // ── Pedido com forma única (legado): mantém avaliação tradicional ──
+          final forma = ped.formaPagamentoId != null ? formasMap[ped.formaPagamentoId] : null;
+          final fpNome = ped.formaPagamentoNome ?? forma?.nome ?? 'Não informada';
+          final fpTipo = forma?.tipo;
+          final fpNomeLower = fpNome.toLowerCase();
+
+          // ── Dinheiro: entra no caixa à vista — NÃO gera contas a receber ───────
+          final isDinheiro = fpTipo == 'dinheiro' ||
+              fpNomeLower.contains('dinheiro') ||
+              fpNomeLower.contains('espécie') ||
+              fpNomeLower.contains('especie') ||
+              fpNomeLower == 'dinheiro';
+          if (isDinheiro) continue;
+
+          // ── Cartão de Crédito / Débito ────────────────────────────────────────
+          final isCartao = (fpTipo != null &&
+                  (fpTipo.toLowerCase().contains('cartao') ||
+                   fpTipo.toLowerCase().contains('cart'))) ||
+              fpNomeLower.contains('cart') ||
+              fpNomeLower.contains('créd') ||
+              fpNomeLower.contains('cred') ||
+              fpNomeLower.contains('déb') ||
+              fpNomeLower.contains('deb');
+
+          // ── Nota a Prazo / Fiado ──────────────────────────────────────────────
+          final isNotaPrazo = fpTipo == 'notaPrazo' ||
+              fpNomeLower.contains('prazo') ||
+              fpNomeLower.contains('faturad') ||
+              (forma?.descricao != null &&
+               forma!.descricao!.toLowerCase().contains('prazo'));
+
+          // ── PIX: Transação eletrônica que exige validação de comprovante e crédito em conta ───
+          final isPix = fpTipo == 'pix' || fpNomeLower.contains('pix');
+
+          // Formas que NÃO devem gerar título de contas a receber:
+          // consumo interno, cortesia, bonificação, etc.
+          final isConsumoOuCortesia = fpTipo == 'consumoInterno' ||
+              fpNomeLower.contains('consumo') ||
+              fpNomeLower.contains('cortesia') ||
+              fpNomeLower.contains('bonif') ||
+              fpNomeLower.contains('interno');
+          if (isConsumoOuCortesia) continue;
+
+          // Determina se já está quitado/recebido/validado:
+          final temReceita = (isNotaPrazo || isCartao || isPix)
+              ? lancamentos.any((l) =>
+                  l.tipo == 'receita' &&
+                  (l.descricao.toLowerCase().contains('baixa') ||
+                   l.descricao.toLowerCase().contains('liquid') ||
+                   l.descricao.toLowerCase().contains('validad') ||
+                   l.descricao.toLowerCase().contains('recebimento') ||
+                   l.descricao.toLowerCase().contains('quitação') ||
+                   l.descricao.toLowerCase().contains('quitacao')))
+              : lancamentos.any((l) => l.tipo == 'receita');
+
+          final taxaMdr = isCartao ? _extrairTaxaMdr(forma?.descricao, fpNome) : 0.0;
+          final prazoRepasse = isCartao ? _extrairPrazoRepasse(forma?.descricao, fpTipo, fpNome) : (isNotaPrazo ? _extrairPrazoDias(forma?.descricao, fpNome) : 0);
+          final tipoDias = isCartao ? _extrairTipoDiasRepasse(forma?.descricao, fpTipo) : 'corridos';
+
+          // Cálculo de Vencimento / Previsão de Repasse:
+          DateTime dataVencimento = dataEntrega;
+          if (isCartao) {
+            if (tipoDias == 'úteis') {
+              dataVencimento = _adicionarDiasUteis(dataEntrega, prazoRepasse);
+            } else {
+              dataVencimento = dataEntrega.add(Duration(days: prazoRepasse));
+            }
+          } else if (isNotaPrazo) {
+            dataVencimento = dataEntrega.add(Duration(days: prazoRepasse));
+          }
+
+          StatusTituloReceber status;
+          DateTime? dataRecebimento;
+
+          if (temReceita) {
+            status = StatusTituloReceber.recebido;
+            final lancamentoReceita = lancamentos.where(
+              (l) => (isNotaPrazo || isCartao)
+                  ? (l.tipo == 'receita' && l.descricao.toLowerCase().contains('baixa'))
+                  : l.tipo == 'receita',
+            ).firstOrNull;
+            dataRecebimento = lancamentoReceita?.dataHora.toLocal() ?? ped.dataHoraCriacao.toLocal();
+          } else {
+            // Pendente: se já passou a data do vencimento, está atrasado
+            if (agora.isAfter(dataVencimento)) {
+              status = StatusTituloReceber.atrasado;
+            } else {
+              status = StatusTituloReceber.pendente;
+            }
+          }
+
+          lista.add(
+            TituloReceber(
+              id: ped.id,
+              pedidoId: ped.id,
+              numeroPedido: ped.numeroPedido,
+              clienteId: ped.clienteId,
+              clienteNome: nome,
+              clienteTelefone: tel,
+              formaPagamentoId: ped.formaPagamentoId,
+              formaPagamentoNome: fpNome,
+              formaPagamentoTipo: fpTipo,
+              pixChave: forma?.pixChave,
+              pixTipoChave: forma?.pixTipoChave,
+              valorTotalCentavos: ped.valorTotalCentavos,
+              taxaMdrPercentual: taxaMdr,
+              prazoRepasseDias: prazoRepasse,
+              tipoDiasRepasse: tipoDias,
+              status: status,
+              dataEmissao: ped.dataHoraCriacao.toLocal(),
+              dataEntrega: dataEntrega,
+              dataVencimento: dataVencimento,
+              dataRecebimento: dataRecebimento,
+              observacoes: ped.observacoes,
+              canalOrigem: ped.canalOrigem,
+            ),
+          );
+        }
       }
 
       _titulos = lista;
@@ -589,8 +712,8 @@ class ContasReceberController extends ChangeNotifier {
       final fpIdUsada = formaPagamentoQuitacaoId ?? titulo.formaPagamentoId;
 
       final descReceita = titulo.isCartao
-          ? 'Baixa Adquirente Cartão ${titulo.tipoModalidadePadronizada} ${titulo.friendlyNumeroPedido} - ${titulo.clienteNome}'
-          : 'Baixa Contas a Receber ${titulo.friendlyNumeroPedido} - ${titulo.clienteNome}${observacao != null && observacao.isNotEmpty ? ' ($observacao)' : ''}';
+          ? 'Baixa Adquirente Cartão ${titulo.tipoModalidadePadronizada} [${titulo.formaPagamentoNome}] ${titulo.friendlyNumeroPedido} - ${titulo.clienteNome}'
+          : 'Baixa Contas a Receber ${titulo.friendlyNumeroPedido} [${titulo.formaPagamentoNome}] - ${titulo.clienteNome}${observacao != null && observacao.isNotEmpty ? ' ($observacao)' : ''}';
 
       await _db.into(_db.lancamentosFinanceirosTable).insert(
         LancamentosFinanceirosTableCompanion.insert(
@@ -705,18 +828,23 @@ class ContasReceberController extends ChangeNotifier {
     String? formaPagamentoQuitacaoId,
     String? formaPagamentoQuitacaoNome,
   }) async {
-    final t = _titulos.cast<TituloReceber?>().firstWhere(
-      (item) => item?.pedidoId == pedidoId,
-      orElse: () => null,
-    );
-    if (t != null) {
-      return await darBaixa(
-        t,
-        observacao: observacao,
-        dataBaixa: dataBaixa,
-        formaPagamentoQuitacaoId: formaPagamentoQuitacaoId,
-        formaPagamentoQuitacaoNome: formaPagamentoQuitacaoNome,
-      );
+    final titulosDoPedido = _titulos.where(
+      (item) => item.pedidoId == pedidoId && item.status != StatusTituloReceber.recebido,
+    ).toList();
+
+    if (titulosDoPedido.isNotEmpty) {
+      bool allOk = true;
+      for (final t in titulosDoPedido) {
+        final ok = await darBaixa(
+          t,
+          observacao: observacao,
+          dataBaixa: dataBaixa,
+          formaPagamentoQuitacaoId: formaPagamentoQuitacaoId,
+          formaPagamentoQuitacaoNome: formaPagamentoQuitacaoNome,
+        );
+        if (!ok) allOk = false;
+      }
+      return allOk;
     }
 
     // Se ainda não estiver carregado na lista em memória, tenta recuperar do banco local
