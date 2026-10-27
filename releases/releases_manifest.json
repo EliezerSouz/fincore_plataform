@@ -1,5 +1,22 @@
 [
     {
+        "version":  "v1.8.16",
+        "buildNumber":  62,
+        "date":  "2026-10-27",
+        "timestamp":  "2026-10-27 13:27:40",
+        "gitCommit":  "3f84a73",
+        "notes":  "Quantidade digitavel no cardapio expresso, avaliacoes e depoimentos de clientes na home do cardapio digital, avaliacao pos-venda no detalhe do pedido, indice de satisfacao no cadastro do cliente e bloco NPS no dashboard",
+        "folder":  "v1.8.16_2026-10-27",
+        "fullPackage":  "v1.8.16_2026-10-27/fincore_food",
+        "fullSize":  "46,68 MB",
+        "updatePackage":  "v1.8.16_2026-10-27/fincore_food_update",
+        "updateSize":  "42,99 MB",
+        "fullZip":  null,
+        "fullZipSize":  null,
+        "updateZip":  null,
+        "updateZipSize":  null
+    },
+    {
         "version":  "v1.8.15",
         "buildNumber":  61,
         "date":  "2026-10-24",
