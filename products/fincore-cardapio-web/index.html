@@ -65,7 +65,10 @@
       <div class="header-logo-img" id="header-logo-img">🍽️</div>
       <div class="header-brand-info">
         <span class="header-store-name" id="header-store-name">Cardápio Digital</span>
-        <span class="header-store-pill" id="header-status-pill"><span class="pulse-dot"></span> Aberto</span>
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+          <span class="header-store-pill" id="header-status-pill"><span class="pulse-dot"></span> Aberto</span>
+          <span class="header-rating-badge" id="header-rating-badge" style="display:none; cursor:pointer;" onclick="scrollParaAvaliacoesHome()">⭐ <strong id="header-rating-val">5.0</strong> (<span id="header-rating-cnt">0</span>)</span>
+        </div>
       </div>
     </div>
 
@@ -301,6 +304,24 @@
       </div>
       <div class="pricing-tiers-summary-box" id="home-pricing-tiers-box">
         <!-- Renderizado dinamicamente com as faixas reais cadastradas -->
+      </div>
+    </section>
+
+    <!-- 8.1 AVALIAÇÕES & PROVA SOCIAL DOS CLIENTES -->
+    <section class="home-section" id="home-reviews-section" style="display:none">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">⭐ O Que Dizem Nossos Clientes</h2>
+          <p class="section-subtitle">Opinião real de quem já comprou conosco</p>
+        </div>
+        <div class="home-reviews-score-badge" id="home-reviews-score-badge">
+          <span class="hr-score-val" id="home-reviews-score-val">5.0</span>
+          <span class="hr-score-stars" id="home-reviews-score-stars">⭐⭐⭐⭐⭐</span>
+          <span class="hr-score-total" id="home-reviews-score-total">100% de aprovação</span>
+        </div>
+      </div>
+      <div class="home-reviews-carousel" id="home-reviews-carousel">
+        <!-- Renderizado dinamicamente via JS com dados do Supabase -->
       </div>
     </section>
 

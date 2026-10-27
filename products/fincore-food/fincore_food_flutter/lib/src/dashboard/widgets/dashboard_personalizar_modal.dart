@@ -21,6 +21,7 @@ class _DashboardPersonalizarModalState extends State<DashboardPersonalizarModal>
     'Entregas Futuras',
     'Vendas',
     'Produtos Mais Vendidos',
+    'Satisfação & Avaliações',
     'Próximos Dias',
     'Recomendações',
   ];

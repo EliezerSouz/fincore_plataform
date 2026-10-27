@@ -5604,6 +5604,141 @@ body {
   box-shadow: 0 6px 24px rgba(234, 88, 12, 0.55);
 }
 
+/* ══════ Avaliações & Depoimentos na Home do Cardápio ══════ */
+.header-rating-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.15s, background-color 0.15s;
+}
+
+.header-rating-badge:hover {
+  background: #fef3c7;
+  transform: scale(1.03);
+}
+
+.home-reviews-score-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.hr-score-val {
+  font-size: 18px;
+  font-weight: 900;
+  color: #b45309;
+  line-height: 1;
+}
+
+.hr-score-stars {
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.hr-score-total {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.home-reviews-carousel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.home-review-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.home-review-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.home-review-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.home-review-author {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-review-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #ecfdf5;
+  color: #059669;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.home-review-date {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.home-review-stars {
+  font-size: 13px;
+  color: #f59e0b;
+}
+
+.home-review-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.home-review-tag {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.home-review-comment {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.45;
+  font-style: italic;
+  background: var(--surface-card, #f8fafc);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid var(--primary, #e11d48);
+}
+
+
 
 
 

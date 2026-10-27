@@ -53,6 +53,7 @@ class DashboardController extends ChangeNotifier {
     'Entregas Futuras',
     'Vendas',
     'Produtos Mais Vendidos',
+    'Satisfação & Avaliações',
     'Próximos Dias',
     'Recomendações',
   ];

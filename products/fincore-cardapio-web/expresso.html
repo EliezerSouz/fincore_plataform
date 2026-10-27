@@ -298,9 +298,10 @@
         width: 26px;
         height: 26px;
       }
-      .qty-val {
-        min-width: 24px;
-        font-size: 12.5px;
+      .qty-input {
+        width: 38px;
+        height: 26px;
+        font-size: 13px;
       }
     }
 
@@ -430,12 +431,201 @@
       background: #e2e8f0;
     }
 
+    .qty-input {
+      width: 44px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      outline: none;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--text-main);
+      padding: 0 2px;
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+
+    .qty-input::-webkit-outer-spin-button,
+    .qty-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .qty-control:focus-within {
+      border-color: var(--brand-primary);
+      box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.15);
+      background: #ffffff;
+    }
+
     .qty-val {
       min-width: 28px;
       text-align: center;
       font-size: 13.5px;
       font-weight: 800;
       color: var(--text-main);
+    }
+
+    /* ══════ Avaliações & Prova Social ══════ */
+    .rating-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #b45309;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: transform 0.15s, background-color 0.15s;
+    }
+    .rating-badge:hover {
+      background: #fef3c7;
+      transform: scale(1.02);
+    }
+
+    .reviews-section {
+      margin-top: 32px;
+      margin-bottom: 24px;
+      background: white;
+      border-radius: 16px;
+      padding: 20px 16px;
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .reviews-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 14px;
+    }
+
+    .reviews-title-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .reviews-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .reviews-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .reviews-score-box {
+      text-align: right;
+    }
+
+    .score-num {
+      font-size: 20px;
+      font-weight: 900;
+      color: #b45309;
+      line-height: 1;
+    }
+
+    .score-stars {
+      font-size: 13px;
+      letter-spacing: 1px;
+      margin-top: 2px;
+    }
+
+    .score-total {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .reviews-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .review-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .review-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .review-author {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .review-verified {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      background: #ecfdf5;
+      color: #059669;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+
+    .review-date {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .review-stars {
+      font-size: 13px;
+      color: #f59e0b;
+    }
+
+    .review-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .review-tag-chip {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 6px;
+    }
+
+    .review-comment {
+      font-size: 13px;
+      color: #334155;
+      line-height: 1.45;
+      font-style: italic;
+      background: white;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border-left: 3px solid var(--brand-primary);
     }
 
     /* ── Estados Vazios / Carregamento ── */
@@ -836,6 +1026,7 @@
               <span id="status-text">Aberto</span>
             </span>
             <span id="brand-city">Delivery</span>
+            <span class="rating-badge" id="rating-badge" style="display:none; cursor:pointer;" onclick="scrollParaAvaliacoes()">⭐ <strong id="rating-score">5.0</strong> (<span id="rating-count">0</span>)</span>
           </div>
         </div>
       </div>
@@ -876,6 +1067,26 @@
         <div>Localizando produtos disponíveis...</div>
       </div>
     </div>
+  
+    <!-- Seção de Avaliações & Depoimentos Reais dos Clientes -->
+    <section class="reviews-section" id="reviews-section" style="display:none;">
+      <div class="reviews-header">
+        <div class="reviews-title-wrap">
+          <div class="reviews-title">
+            <span>⭐ Avaliações dos Clientes</span>
+          </div>
+          <span class="reviews-subtitle">Opinião real de quem já comprou conosco</span>
+        </div>
+        <div class="reviews-score-box">
+          <div class="score-num" id="reviews-avg-num">5.0</div>
+          <div class="score-stars" id="reviews-stars-visual">⭐⭐⭐⭐⭐</div>
+          <div class="score-total" id="reviews-total-text">100% de satisfação</div>
+        </div>
+      </div>
+      <div class="reviews-list" id="reviews-list">
+        <!-- Renderizado dinamicamente via JS -->
+      </div>
+    </section>
   </main>
 
   <!-- Barra Fixa de Finalização (Sticky Footer) -->
@@ -1110,6 +1321,7 @@
       app.tenantId = getTenantId();
       await carregarEmpresa();
       await carregarProdutosEPrecos();
+      carregarAvaliacoes();
       configurarEventos();
       calcularHorarioPrevisao();
     }
@@ -1333,10 +1545,21 @@
           </div>
           <div class="product-price-col">
             <div class="product-price" id="price-${prod.id}">${formatMoeda(precoBase)}</div>
-            <div class="qty-control">
-              <button class="qty-btn" onclick="alterarQtd('${prod.id}', -1)" type="button">−</button>
-              <span class="qty-val" id="qty-${prod.id}">${cartItem.qty}</span>
-              <button class="qty-btn" onclick="alterarQtd('${prod.id}', 1)" type="button">+</button>
+            <div class="qty-control" onclick="event.stopPropagation()">
+              <button class="qty-btn" onclick="alterarQtd('${prod.id}', -1)" type="button" aria-label="Diminuir">−</button>
+              <input type="number" 
+                     class="qty-input" 
+                     id="qty-${prod.id}" 
+                     value="${cartItem.qty}" 
+                     min="0" 
+                     max="${saldo > 0 ? saldo : 9999}" 
+                     inputmode="numeric" 
+                     pattern="[0-9]*"
+                     onfocus="this.select()"
+                     oninput="definirQtdManual('${prod.id}', this.value)"
+                     onchange="validarQtdManual('${prod.id}', this)"
+                     aria-label="Quantidade de ${prod.nome}" />
+              <button class="qty-btn" onclick="alterarQtd('${prod.id}', 1)" type="button" aria-label="Aumentar">+</button>
             </div>
           </div>
         `;
@@ -1369,7 +1592,7 @@
 
       // Atualiza na UI
       const qtyEl = document.getElementById(`qty-${prodId}`);
-      if (qtyEl) qtyEl.textContent = novaQtd;
+      if (qtyEl) { if ('value' in qtyEl) { qtyEl.value = novaQtd; } else { qtyEl.textContent = novaQtd; } }
 
       const priceEl = document.getElementById(`price-${prodId}`);
       if (priceEl) {

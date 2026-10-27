@@ -17,6 +17,7 @@ import '../widgets/bloco_ranking_produtos.dart';
 import '../widgets/bloco_projecao_dias.dart';
 import '../widgets/bloco_recomendacoes.dart';
 import '../widgets/bloco_atividade_recente.dart';
+import '../widgets/bloco_avaliacoes_nps.dart';
 import '../widgets/dashboard_personalizar_modal.dart';
 
 /// Dashboard principal do FINCORE Food — Centro de Comando Operacional.
@@ -259,6 +260,9 @@ class _DashboardPageState extends State<DashboardPage> {
           break;
         case 'Atividades Recentes':
           blockWidget = BlocoAtividadeRecente(controller: _controller);
+          break;
+        case 'Satisfação & Avaliações':
+          blockWidget = BlocoAvaliacoesNps(controller: _controller);
           break;
       }
 

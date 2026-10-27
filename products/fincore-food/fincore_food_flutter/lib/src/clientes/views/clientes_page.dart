@@ -22,6 +22,7 @@ import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
 import 'package:fincore_food_flutter/src/financeiro/controllers/contas_receber_controller.dart';
 import 'package:fincore_food_flutter/src/financeiro/widgets/dialog_baixa_titulo.dart';
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/pedido_mirror_dialog.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Tela de Gestão de Clientes do Fincore Food — Split View Premium baseada na Salgaderia
 /// Tabela master Gmail-style no lado esquerdo com resumo/estatísticas de topo,
@@ -2593,6 +2594,7 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
           Icons.repeat,
           Colors.blue,
         ),
+        _buildCardSatisfacaoCliente(c),
         const SizedBox(height: 16),
 
         const Text('Endereço Principal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: FincoreColors.textPrimary)),
@@ -3307,6 +3309,93 @@ class _ClientesPageState extends State<ClientesPage> with SingleTickerProviderSt
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCardSatisfacaoCliente(Cliente c) {
+    final tenantCtx = DependencyInjection().get<TenantContext>();
+    final tenantId = tenantCtx.hasContext ? tenantCtx.empresa.id : null;
+    if (tenantId == null) return const SizedBox.shrink();
+
+    final telClean = c.telefone.replaceAll(RegExp(r'\D'), '');
+
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: () async {
+        try {
+          var query = Supabase.instance.client
+              .from('avaliacoes_pedidos')
+              .select()
+              .eq('tenant_id', tenantId);
+
+          if (telClean.isNotEmpty) {
+            query = query.ilike('cliente_telefone', '%$telClean%');
+          } else {
+            query = query.eq('cliente_nome', c.nome);
+          }
+
+          final dynamic data = await query.order('created_at', ascending: false).limit(5);
+          return List<Map<String, dynamic>>.from(data as List);
+        } catch (_) {
+          return <Map<String, dynamic>>[];
+        }
+      }(),
+      builder: (context, snapshot) {
+        final list = snapshot.data ?? [];
+        if (list.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final total = list.length;
+        final soma = list.fold<num>(0, (acc, item) => acc + ((item['nota'] as num?) ?? 5));
+        final media = (soma / total).toStringAsFixed(1);
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEFCE8),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFDE047)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.star_rounded, color: Color(0xFFEAB308), size: 18),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Satisfação do Cliente: $media / 5.0',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF854D0E),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '($total ${total == 1 ? 'avaliação' : 'avaliações'})',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF854D0E), fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                if (list.first['comentario'] != null && list.first['comentario'].toString().trim().isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '“${list.first['comentario']}”',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontStyle: FontStyle.italic,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

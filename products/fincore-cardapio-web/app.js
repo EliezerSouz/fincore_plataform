@@ -2311,6 +2311,9 @@ async function renderHome() {
 
   // 8. Tabela de Preços por Quantidade (Lote)
   renderHomePricingTiersSection();
+
+  // 9. Avaliações & Prova Social dos Clientes
+  renderHomeReviewsSection();
 }
 
 function renderHomeScheduledOrders() {
@@ -2442,6 +2445,101 @@ function renderHomePricingTiersSection() {
     </div>
   `;
 }
+
+// ══════ 9. Avaliações & Depoimentos de Clientes na Home ══════
+async function renderHomeReviewsSection() {
+  const container = document.getElementById('home-reviews-section');
+  const carousel = document.getElementById('home-reviews-carousel');
+  const scoreVal = document.getElementById('home-reviews-score-val');
+  const scoreStars = document.getElementById('home-reviews-score-stars');
+  const scoreTotal = document.getElementById('home-reviews-score-total');
+  const headerBadge = document.getElementById('header-rating-badge');
+  const headerVal = document.getElementById('header-rating-val');
+  const headerCnt = document.getElementById('header-rating-cnt');
+
+  if (!container || !carousel || !state.tenantId) return;
+
+  try {
+    const { data, error } = await sb
+      .from('avaliacoes_pedidos')
+      .select('*')
+      .eq('tenant_id', state.tenantId)
+      .order('created_at', { ascending: false })
+      .limit(12);
+
+    if (error || !data || data.length === 0) {
+      container.style.display = 'none';
+      if (headerBadge) headerBadge.style.display = 'none';
+      return;
+    }
+
+    const total = data.length;
+    const soma = data.reduce((acc, a) => acc + (Number(a.nota) || 5), 0);
+    const media = (soma / total).toFixed(1);
+
+    if (headerBadge && headerVal && headerCnt) {
+      headerVal.textContent = media;
+      headerCnt.textContent = total;
+      headerBadge.style.display = 'inline-flex';
+    }
+
+    if (scoreVal) scoreVal.textContent = media;
+    if (scoreStars) {
+      const cnt = Math.min(5, Math.max(1, Math.round(Number(media))));
+      scoreStars.textContent = '⭐'.repeat(cnt);
+    }
+    if (scoreTotal) {
+      const promotores = data.filter(d => Number(d.nota) >= 4).length;
+      const pct = Math.round((promotores / total) * 100);
+      scoreTotal.textContent = `${pct}% de aprovação (${total} ${total === 1 ? 'avaliação' : 'avaliações'})`;
+    }
+
+    carousel.innerHTML = data.map(rev => {
+      const nota = Number(rev.nota) || 5;
+      const estrelas = '⭐'.repeat(nota);
+      const tags = Array.isArray(rev.tags) ? rev.tags : [];
+      const tagsHtml = tags.map(t => `<span class="home-review-tag">${t}</span>`).join('');
+
+      let dataStr = '';
+      if (rev.created_at) {
+        const d = new Date(rev.created_at);
+        dataStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      }
+
+      let autor = rev.cliente_nome || 'Cliente';
+      const partes = autor.split(' ');
+      if (partes.length > 2) {
+        autor = `${partes[0]} ${partes[1]}`;
+      }
+
+      return `
+        <div class="home-review-card">
+          <div class="home-review-top">
+            <div class="home-review-author">
+              <span>${autor}</span>
+              <span class="home-review-badge">✓ Compra verificada</span>
+            </div>
+            <div class="home-review-date">${dataStr}</div>
+          </div>
+          <div class="home-review-stars">${estrelas} <span style="font-size:12px; font-weight:700; color:var(--text-muted); margin-left:4px;">${nota}.0</span></div>
+          ${tagsHtml ? `<div class="home-review-tags">${tagsHtml}</div>` : ''}
+          ${rev.comentario ? `<div class="home-review-comment">“${rev.comentario}”</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    container.style.display = 'block';
+  } catch (err) {
+    console.warn('Erro ao carregar avaliações para a Home:', err);
+  }
+}
+
+window.scrollParaAvaliacoesHome = function() {
+  const el = document.getElementById('home-reviews-section');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth' });
+  }
+};
 
 // ─── Carrossel Horizontal de Categorias (Home) ───────────────────────
 function renderHomeCategories() {

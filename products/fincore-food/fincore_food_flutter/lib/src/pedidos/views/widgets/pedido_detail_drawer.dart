@@ -14,6 +14,7 @@ import 'package:fincore_food_flutter/src/shared/services/permissao_service.dart'
 import 'package:fincore_food_flutter/src/shared/presentation/widgets/whatsapp_dialog.dart';
 import 'package:fincore_food_flutter/src/shared/services/whatsapp_service.dart';
 import 'package:fincore_food_flutter/src/shared/services/pix_generator.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fincore_food_flutter/src/financeiro/controllers/contas_receber_controller.dart';
 
 /// Drawer de detalhes de um pedido — especialização de [EntityDetailDrawer].
@@ -85,6 +86,8 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
   DateTime? _dataPagamento;
   bool _loadingFinanceiro = true;
   bool _baixandoFinanceiro = false;
+  // Avaliação Pós-Venda do Cliente (NPS)
+  Map<String, dynamic>? _avaliacaoPedido;
 
   @override
   void initState() {
@@ -93,10 +96,54 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
     _carregarPrecosEfetivos();
     _carregarDadosWhatsApp();
     _carregarStatusFinanceiro();
+    _carregarAvaliacaoPedido();
     if (PermissaoService.podeVerTimeline(widget.userRole)) {
       _carregarHistorico();
     } else {
       _loadingHistorico = false;
+    }
+  }
+
+  Future<void> _carregarAvaliacaoPedido() async {
+    try {
+      final tenantCtx = DependencyInjection().get<TenantContext>();
+      final tenantId = tenantCtx.hasContext ? tenantCtx.empresa.id : null;
+      if (tenantId == null) {
+        return;
+      }
+
+      final pedidoId = widget.ordem.pedidoId;
+      final pedidoMemoria = widget.controller.pedidosMap[widget.ordem.pedidoId];
+      final numClean = pedidoMemoria?.numeroPedido?.toString() ?? '';
+
+      dynamic res;
+      if (pedidoId.isNotEmpty) {
+        res = await Supabase.instance.client
+            .from('avaliacoes_pedidos')
+            .select()
+            .eq('tenant_id', tenantId)
+            .eq('pedido_id', pedidoId)
+            .limit(1)
+            .maybeSingle();
+      }
+
+      if (res == null && numClean.isNotEmpty) {
+        res = await Supabase.instance.client
+            .from('avaliacoes_pedidos')
+            .select()
+            .eq('tenant_id', tenantId)
+            .eq('numero_pedido', numClean)
+            .limit(1)
+            .maybeSingle();
+      }
+
+      if (mounted) {
+        setState(() {
+          _avaliacaoPedido = res as Map<String, dynamic>?;
+        });
+      }
+    } catch (e) {
+      debugPrint('[PedidoDetailDrawer] Erro ao carregar avaliacao: $e');
     }
   }
 
@@ -1128,6 +1175,9 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
           ),
         ],
 
+        // --- Avaliação Pós-Venda do Cliente ---
+        _buildCardAvaliacaoCliente(),
+
         const SizedBox(height: 16),
 
         // --- Itens ---
@@ -1299,6 +1349,188 @@ class _PedidoDetailDrawerState extends State<PedidoDetailDrawer> {
                   ),
                 ],
               ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCardAvaliacaoCliente() {
+    if (_avaliacaoPedido == null) {
+      final isEntregue = widget.ordem.status == StatusOrdemPreparo.entregue;
+      if (!isEntregue) return const SizedBox.shrink();
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 16),
+          const DrawerSectionLabel(label: 'Avaliação Pós-Venda'),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: FincoreColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: FincoreColors.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.star_outline_rounded, color: FincoreColors.textMuted, size: 20),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Pedido ainda não avaliado pelo cliente.',
+                    style: TextStyle(fontSize: 12, color: FincoreColors.textSecondary),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () => _abrirWhatsApp(),
+                  icon: const Icon(Icons.send_rounded, size: 14),
+                  label: const Text('Solicitar (WhatsApp)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF25D366),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    final nota = (_avaliacaoPedido!['nota'] as num?)?.toInt() ?? 5;
+    final tags = (_avaliacaoPedido!['tags'] as List?)?.map((e) => e.toString()).toList() ?? [];
+    final comentario = _avaliacaoPedido!['comentario']?.toString().trim();
+    final dataRaw = _avaliacaoPedido!['created_at'];
+    final dataStr = dataRaw != null
+        ? DateFormat('dd/MM/yyyy HH:mm').format(DateTime.tryParse(dataRaw.toString())?.toLocal() ?? DateTime.now())
+        : '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        const DrawerSectionLabel(label: 'Avaliação do Cliente (Pós-Venda)'),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEFCE8),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFFDE047), width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.amber.withValues(alpha: 0.08),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Row(
+                    children: List.generate(5, (index) {
+                      return Icon(
+                        index < nota ? Icons.star_rounded : Icons.star_border_rounded,
+                        color: const Color(0xFFEAB308),
+                        size: 20,
+                      );
+                    }),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$nota.0 / 5.0',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                      color: Color(0xFF854D0E),
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDCFCE7),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF86EFAC)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.check_circle_outline, size: 12, color: Color(0xFF15803D)),
+                        const SizedBox(width: 4),
+                        Text(
+                          dataStr.isNotEmpty ? dataStr : 'Confirmado',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF15803D),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (tags.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (final tag in tags)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Text(
+                          tag,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF334155),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+              if (comentario != null && comentario.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.format_quote_rounded, size: 16, color: Color(0xFFEAB308)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          comentario,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontStyle: FontStyle.italic,
+                            color: Color(0xFF1E293B),
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
