@@ -1123,6 +1123,9 @@
         <div class="form-group">
           <label class="form-label">WhatsApp (para confirmação e rastreio) *</label>
           <input type="tel" class="form-input" id="inp-phone" placeholder="(00) 00000-0000" maxlength="15" />
+          <div id="found-customer-banner" style="display:none; margin-top:6px; font-size:12px; color:#15803d; background:#f0fdf4; border:1px solid #bbf7d0; padding:6px 10px; border-radius:8px; font-weight:600;">
+            ✨ Encontramos seu cadastro! Olá <strong id="found-customer-name"></strong>, seus dados foram preenchidos.
+          </div>
         </div>
 
         <!-- 2. Tipo de Pedido -->
@@ -1186,6 +1189,7 @@
               <label class="form-label" style="font-size:11px;">Horário Desejado *</label>
               <input type="time" class="form-input" id="inp-hora-agendada" />
             </div>
+            <div id="agendamento-aviso" style="display:none; grid-column:1 / -1; font-size:11.5px; padding:6px 10px; border-radius:8px; line-height:1.35;"></div>
           </div>
         </div>
 
@@ -1384,6 +1388,7 @@
                 horariosObj = typeof rawH === 'string' ? JSON.parse(rawH) : rawH;
               } catch (_) {}
             }
+            app.horariosAtendimento = horariosObj;
             if (horariosObj && horariosObj.modoExpresso) {
               app.modoExpresso = horariosObj.modoExpresso;
               if (app.modoExpresso.titulo) {
@@ -1814,14 +1819,421 @@
       }
     }
 
+    // ─── Funções de Data e Formatação Local ───
+    function toYmdLocal(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function toHhMmLocal(d) {
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+
+    // ─── Cálculo Operacional: Primeiro Horário de Entrega Possível ───
+    function calcularPrimeiraEntregaPossivel(agora = new Date(), h = app.horariosAtendimento) {
+      if (!h) {
+        const prazoMin = app.prazoMinimoMinutos || 120;
+        const cand = new Date(agora.getTime() + prazoMin * 60000);
+        const rem = cand.getMinutes() % 15;
+        if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+        else cand.setSeconds(0, 0);
+        return {
+          canOrder: true,
+          data: cand,
+          dataStr: toYmdLocal(cand),
+          horaStr: toHhMmLocal(cand),
+          isHoje: toYmdLocal(cand) === toYmdLocal(agora),
+          isAmanha: false,
+          diaNome: 'Hoje',
+          motivo: 'Recebendo pedidos normalmente'
+        };
+      }
+
+      if (h.status === 'fechado') {
+        return {
+          canOrder: false,
+          data: null,
+          motivo: h.mensagemFechado || 'A loja está fechada no momento para novos pedidos.'
+        };
+      }
+
+      const prazoMin = Math.max(30, parseInt(h.prazoMinimoMinutos || app.prazoMinimoMinutos || 120, 10));
+      const dayKeys = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+      const dayNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+
+      function isBlockedDate(d) {
+        if (!Array.isArray(h.bloqueios) || h.bloqueios.length === 0) return false;
+        const dateStr = toYmdLocal(d);
+        return h.bloqueios.some(b => {
+          if (!b || !b.data) return false;
+          const bStr = String(b.data).split('T')[0];
+          return bStr === dateStr && (b.diaTodo === true || b.dia_todo === true || (!b.inicio && !b.fim));
+        });
+      }
+
+      // 1. Verificar se hoje está no horário de atendimento e há tempo para preparo e entrega hoje
+      const todayKey = dayKeys[agora.getDay()];
+      const diaHoje = h.dias ? h.dias[todayKey] : null;
+
+      if (diaHoje && diaHoje.ativo && !isBlockedDate(agora)) {
+        const [abH, abM] = (diaHoje.abertura || '08:00').split(':').map(Number);
+        const [feH, feM] = (diaHoje.fechamento || '22:00').split(':').map(Number);
+        const openMin = abH * 60 + abM;
+        const closeMin = feH * 60 + feM;
+        const nowMin = agora.getHours() * 60 + agora.getMinutes();
+
+        const isOpenNow = (h.status === 'aberto') || (nowMin >= openMin && nowMin < closeMin);
+
+        if (isOpenNow) {
+          const cand = new Date(agora.getTime() + prazoMin * 60000);
+          const rem = cand.getMinutes() % 15;
+          if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+          else cand.setSeconds(0, 0);
+
+          const candMin = cand.getHours() * 60 + cand.getMinutes();
+          if (candMin <= closeMin && toYmdLocal(cand) === toYmdLocal(agora)) {
+            return {
+              canOrder: true,
+              data: cand,
+              dataStr: toYmdLocal(cand),
+              horaStr: toHhMmLocal(cand),
+              isHoje: true,
+              isAmanha: false,
+              diaNome: dayNames[cand.getDay()],
+              motivo: `Aprovação em horário de atendimento (entregas até ${diaHoje.fechamento})`
+            };
+          }
+        } else if (nowMin < openMin) {
+          // Antes de abrir hoje (ex: madrugada) - aprovação inicia na abertura
+          const cand = new Date(agora);
+          cand.setHours(abH, abM + prazoMin, 0, 0);
+          const rem = cand.getMinutes() % 15;
+          if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+
+          const candMin = cand.getHours() * 60 + cand.getMinutes();
+          if (candMin <= closeMin && toYmdLocal(cand) === toYmdLocal(agora)) {
+            return {
+              canOrder: true,
+              data: cand,
+              dataStr: toYmdLocal(cand),
+              horaStr: toHhMmLocal(cand),
+              isHoje: true,
+              isAmanha: false,
+              diaNome: dayNames[cand.getDay()],
+              motivo: `Aprovação a partir das ${diaHoje.abertura}`
+            };
+          }
+        }
+      }
+
+      // 2. Se não foi viável hoje, buscar o próximo dia útil a partir de amanhã (offset = 1 .. 14)
+      for (let offset = 1; offset <= 14; offset++) {
+        const nextDate = new Date(agora);
+        nextDate.setDate(agora.getDate() + offset);
+        nextDate.setHours(0, 0, 0, 0);
+
+        const dKey = dayKeys[nextDate.getDay()];
+        const diaCfg = h.dias ? h.dias[dKey] : null;
+
+        if (!diaCfg || !diaCfg.ativo || isBlockedDate(nextDate)) continue;
+
+        const [abH, abM] = (diaCfg.abertura || '08:00').split(':').map(Number);
+        const [feH, feM] = (diaCfg.fechamento || '22:00').split(':').map(Number);
+        const closeMin = feH * 60 + feM;
+
+        const cand = new Date(nextDate);
+        cand.setHours(abH, abM + prazoMin, 0, 0);
+        const rem = cand.getMinutes() % 15;
+        if (rem !== 0) cand.setMinutes(cand.getMinutes() + (15 - rem), 0, 0);
+
+        const candMin = cand.getHours() * 60 + cand.getMinutes();
+        if (candMin <= closeMin) {
+          return {
+            canOrder: true,
+            data: cand,
+            dataStr: toYmdLocal(cand),
+            horaStr: toHhMmLocal(cand),
+            isHoje: false,
+            isAmanha: offset === 1,
+            diaNome: dayNames[cand.getDay()],
+            motivo: `Aprovação a partir das ${diaCfg.abertura}`
+          };
+        }
+      }
+
+      return {
+        canOrder: false,
+        data: null,
+        motivo: 'Não há horários disponíveis para entrega no momento'
+      };
+    }
+
+    // ─── Validação de Horários de Atendimento & Prazo Mínimo ───
+    function validateOrderSchedule(data, hora) {
+      if (!data || !hora) {
+        return { valid: false, message: 'Informe a data e o horário previstos para o pedido.' };
+      }
+
+      const selectedDateTime = new Date(`${data}T${hora}:00`);
+      if (isNaN(selectedDateTime.getTime())) {
+        return { valid: false, message: 'Data ou horário inválidos.' };
+      }
+
+      const agora = new Date();
+      if (selectedDateTime <= agora) {
+        return { valid: false, message: 'A data e horário selecionados não podem ser retroativos. Escolha um horário futuro.' };
+      }
+
+      const h = app.horariosAtendimento;
+      if (!h) {
+        return { valid: true };
+      }
+
+      // 1. Validar se a loja está com status 'fechado' forçado
+      if (h.status === 'fechado') {
+        return { valid: false, message: h.mensagemFechado || 'A loja está fechada no momento para novos pedidos.' };
+      }
+
+      // 1.1 Validar Primeiro Horário Viável (Considera aprovação prévia e expediente da cozinha)
+      const primEntrega = calcularPrimeiraEntregaPossivel(agora, h);
+      if (!primEntrega.canOrder) {
+        return { valid: false, message: primEntrega.motivo || 'A loja está fechada no momento para novos pedidos.' };
+      }
+
+      if (primEntrega.data && selectedDateTime < primEntrega.data) {
+        const dataFmt = primEntrega.isHoje 
+          ? 'hoje' 
+          : (primEntrega.isAmanha ? 'amanhã' : `${primEntrega.diaNome} (${primEntrega.data.toLocaleDateString('pt-BR')})`);
+        return {
+          valid: false,
+          message: `Horário mais próximo disponível para entrega: ${dataFmt} a partir das ${primEntrega.horaStr}. Pedidos realizados fora do expediente aguardam aprovação da cozinha na abertura.`
+        };
+      }
+
+      // 2. Validar Bloqueios Específicos de Agendamento (Feriados / Compromissos / Datas Bloqueadas)
+      if (Array.isArray(h.bloqueios) && h.bloqueios.length > 0) {
+        const toIsoDate = (val) => {
+          if (!val) return '';
+          const s = String(val).trim().split('T')[0];
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+            const [d, m, y] = s.split('/');
+            return `${y}-${m}-${d}`;
+          }
+          return s;
+        };
+
+        const targetDateIso = toIsoDate(data);
+
+        for (const b of h.bloqueios) {
+          if (!b || !b.data) continue;
+          const blockDateIso = toIsoDate(b.data);
+
+          if (blockDateIso === targetDateIso) {
+            const parts = blockDateIso.split('-');
+            const dataFmt = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : b.data;
+            const motivo = b.motivo ? ` (Motivo: ${b.motivo})` : '';
+
+            const isDiaTodo = b.diaTodo === true || b.dia_todo === true || (!b.inicio && !b.fim);
+            if (isDiaTodo) {
+              return {
+                valid: false,
+                message: `Não estamos aceitando agendamentos para o dia ${dataFmt}${motivo}. Por favor, escolha outra data.`
+              };
+            } else {
+              const [bIniH, bIniM] = (b.inicio || '00:00').split(':').map(Number);
+              const [bFimH, bFimM] = (b.fim || '23:59').split(':').map(Number);
+              const blockStartMin = (bIniH || 0) * 60 + (bIniM || 0);
+              const blockEndMin = (bFimH || 0) * 60 + (bFimM || 0);
+              const selectedMin = selectedDateTime.getHours() * 60 + selectedDateTime.getMinutes();
+
+              if (selectedMin >= blockStartMin && selectedMin <= blockEndMin) {
+                return {
+                  valid: false,
+                  message: `No dia ${dataFmt}, não estamos aceitando agendamentos entre ${b.inicio} e ${b.fim}${motivo}. Por favor, selecione outro horário.`
+                };
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Validar Dia da Semana e Horário de Funcionamento para o dia agendado
+      if (h.dias) {
+        const dayKeys = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+        const selectedDayKey = dayKeys[selectedDateTime.getDay()];
+        const diaConfig = h.dias[selectedDayKey];
+
+        const dayNames = {
+          dom: 'Domingo',
+          seg: 'Segunda-feira',
+          ter: 'Terça-feira',
+          qua: 'Quarta-feira',
+          qui: 'Quinta-feira',
+          sex: 'Sexta-feira',
+          sab: 'Sábado'
+        };
+
+        if (!diaConfig || !diaConfig.ativo) {
+          return {
+            valid: false,
+            message: `Não realizamos entregas/atendimento aos(às) ${dayNames[selectedDayKey] || 'dias selecionados'}. Escolha outro dia de funcionamento.`
+          };
+        }
+
+        const selectedMinOfDay = selectedDateTime.getHours() * 60 + selectedDateTime.getMinutes();
+        const [abH, abM] = (diaConfig.abertura || '08:00').split(':').map(Number);
+        const [feH, feM] = (diaConfig.fechamento || '22:00').split(':').map(Number);
+        const openMin = abH * 60 + abM;
+        const closeMin = feH * 60 + feM;
+
+        if (selectedMinOfDay < openMin || selectedMinOfDay > closeMin) {
+          return {
+            valid: false,
+            message: `O horário selecionado (${hora}) está fora do horário de atendimento de ${dayNames[selectedDayKey]} (${diaConfig.abertura} às ${diaConfig.fechamento}).`
+          };
+        }
+      }
+
+      return { valid: true };
+    }
+
+    // ─── Atualização em Tempo Real do Aviso de Agendamento ───
+    function atualizarValidacaoAgendamento() {
+      const inpData = document.getElementById('inp-data-agendada');
+      const inpHora = document.getElementById('inp-hora-agendada');
+      const aviso = document.getElementById('agendamento-aviso');
+      if (!aviso || !inpData || !inpHora) return;
+
+      const d = inpData.value;
+      const h = inpHora.value;
+      if (!d || !h) {
+        aviso.style.display = 'none';
+        return;
+      }
+
+      const res = validateOrderSchedule(d, h);
+      if (!res.valid) {
+        aviso.style.display = 'block';
+        aviso.style.background = '#fef2f2';
+        aviso.style.border = '1px solid #fecaca';
+        aviso.style.color = '#b91c1c';
+        aviso.innerHTML = `⚠️ ${res.message}`;
+      } else {
+        aviso.style.display = 'block';
+        aviso.style.background = '#f0fdf4';
+        aviso.style.border = '1px solid #bbf7d0';
+        aviso.style.color = '#15803d';
+        aviso.innerHTML = `✅ Horário dentro do expediente de atendimento!`;
+      }
+    }
+
+    // ─── Busca e Identificação de Cliente pelo Telefone no ERP ───
+    async function buscarClientePorTelefone(rawPhone) {
+      if (!rawPhone) return null;
+      let digits = String(rawPhone).replace(/\D/g, '');
+      if (digits.length >= 12 && digits.startsWith('55')) digits = digits.substring(2);
+      if (digits.length < 10) return null;
+      if (!app.tenantId) return null;
+
+      try {
+        const { data: allClients, error } = await sb
+          .from('cliente')
+          .select('id, nome, telefone, email, observacoes')
+          .eq('tenantId', app.tenantId);
+
+        if (error || !allClients || allClients.length === 0) return null;
+
+        const matched = allClients.find(c => {
+          let cDigits = (c.telefone || '').replace(/\D/g, '');
+          if (cDigits.length >= 12 && cDigits.startsWith('55')) cDigits = cDigits.substring(2);
+          return cDigits === digits || (cDigits.length >= 10 && (cDigits.endsWith(digits) || digits.endsWith(cDigits)));
+        });
+
+        if (!matched) return null;
+
+        // Se encontrou o cliente, busca o endereço padrão em local_entrega
+        const { data: locais } = await sb
+          .from('local_entrega')
+          .select('*')
+          .eq('tenantId', app.tenantId)
+          .eq('clienteId', matched.id)
+          .eq('ativo', true)
+          .limit(1);
+
+        return {
+          cliente: matched,
+          endereco: (locais && locais.length > 0) ? locais[0] : null
+        };
+      } catch (err) {
+        console.warn('Erro ao identificar cliente por telefone:', err);
+        return null;
+      }
+    }
+
+    let lastSearchedPhone = '';
+    async function aplicarIdentificacaoCliente(digits) {
+      if (!digits || digits.length < 10) {
+        lastSearchedPhone = '';
+        app.clienteIdentificado = null;
+        const banner = document.getElementById('found-customer-banner');
+        if (banner) banner.style.display = 'none';
+        return;
+      }
+      if (digits === lastSearchedPhone) return;
+      lastSearchedPhone = digits;
+
+      const res = await buscarClientePorTelefone(digits);
+      const banner = document.getElementById('found-customer-banner');
+      const nameEl = document.getElementById('found-customer-name');
+      const inpNome = document.getElementById('inp-nome');
+
+      if (res && res.cliente) {
+        app.clienteIdentificado = res.cliente;
+        if (inpNome && (!inpNome.value || inpNome.value.trim() === '')) {
+          inpNome.value = res.cliente.nome || '';
+        } else if (inpNome && res.cliente.nome) {
+          inpNome.value = res.cliente.nome;
+        }
+
+        if (nameEl) nameEl.textContent = res.cliente.nome || '';
+        if (banner) banner.style.display = 'block';
+
+        if (res.endereco) {
+          const end = res.endereco;
+          const inpRua = document.getElementById('inp-rua');
+          const inpNum = document.getElementById('inp-num');
+          const inpBairro = document.getElementById('inp-bairro');
+          const inpCompl = document.getElementById('inp-compl');
+          const inpCep = document.getElementById('inp-cep');
+
+          if (inpRua && end.logradouro) inpRua.value = end.logradouro;
+          if (inpNum && end.numero) inpNum.value = end.numero;
+          if (inpBairro && end.bairro) inpBairro.value = end.bairro;
+          if (inpCompl && end.complemento) inpCompl.value = end.complemento;
+          if (inpCep && end.cep) inpCep.value = end.cep;
+
+          if (end.bairro) {
+            await calcularTaxaEntrega(end.bairro);
+          }
+        }
+      } else {
+        app.clienteIdentificado = null;
+        if (banner) banner.style.display = 'none';
+      }
+    }
+
     // ─── Previsão de Horário Inteligente ───
     function calcularHorarioPrevisao() {
-      const now = new Date();
-      now.setMinutes(now.getMinutes() + app.prazoMinimoMinutos);
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
+      const prim = calcularPrimeiraEntregaPossivel(new Date(), app.horariosAtendimento);
       const inp = document.getElementById('inp-horario');
-      if (inp) {
+      if (!inp) return;
+      if (prim.canOrder && prim.data) {
+        const diaTxt = prim.isHoje ? 'Hoje' : (prim.isAmanha ? 'Amanhã' : `${prim.diaNome}`);
+        inp.value = `${diaTxt} por volta das ${prim.horaStr} (aprox. ${app.prazoMinimoMinutos} min)`;
+      } else {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() + app.prazoMinimoMinutos);
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
         inp.value = `Hoje por volta das ${hh}:${mm} (${app.prazoMinimoMinutos} min)`;
       }
     }
@@ -1841,6 +2253,7 @@
         }
         modal.style.display = 'flex';
         atualizarResumoModal();
+        calcularHorarioPrevisao();
       });
 
       btnClose.addEventListener('click', () => {
@@ -1851,7 +2264,7 @@
         if (e.target === modal) modal.style.display = 'none';
       });
 
-      // Máscara de Telefone
+      // Máscara e Identificação Automática de Telefone
       const phoneInp = document.getElementById('inp-phone');
       phoneInp.addEventListener('input', (e) => {
         let v = e.target.value.replace(/\D/g, '');
@@ -1862,6 +2275,19 @@
           e.target.value = `(${v.slice(0, 2)}) ${v.slice(2)}`;
         } else if (v.length > 0) {
           e.target.value = `(${v}`;
+        }
+
+        if (v.length >= 10) {
+          aplicarIdentificacaoCliente(v);
+        } else {
+          aplicarIdentificacaoCliente('');
+        }
+      });
+
+      phoneInp.addEventListener('blur', (e) => {
+        const v = e.target.value.replace(/\D/g, '');
+        if (v.length >= 10) {
+          aplicarIdentificacaoCliente(v);
         }
       });
 
@@ -1932,15 +2358,9 @@
       const inpHoraAgendada = document.getElementById('inp-hora-agendada');
 
       // Preenche valores iniciais para agendamento
-      const hojeStr = new Date().toISOString().split('T')[0];
+      const hojeStr = toYmdLocal(new Date());
       if (inpDataAgendada) {
         inpDataAgendada.min = hojeStr;
-        inpDataAgendada.value = hojeStr;
-      }
-      if (inpHoraAgendada) {
-        const dFutura = new Date();
-        dFutura.setMinutes(dFutura.getMinutes() + (app.prazoMinimoMinutos || 120));
-        inpHoraAgendada.value = `${String(dFutura.getHours()).padStart(2, '0')}:${String(dFutura.getMinutes()).padStart(2, '0')}`;
       }
 
       btnImediato.addEventListener('click', () => {
@@ -1957,7 +2377,28 @@
         btnImediato.classList.remove('active');
         blockImediato.style.display = 'none';
         blockAgendado.style.display = 'grid';
+
+        // Preenche com a primeira data/hora viável
+        const prim = calcularPrimeiraEntregaPossivel(new Date(), app.horariosAtendimento);
+        if (prim.canOrder && prim.dataStr && prim.horaStr) {
+          if (!inpDataAgendada.value || inpDataAgendada.value < prim.dataStr) {
+            inpDataAgendada.value = prim.dataStr;
+          }
+          if (!inpHoraAgendada.value) {
+            inpHoraAgendada.value = prim.horaStr;
+          }
+        }
+        atualizarValidacaoAgendamento();
       });
+
+      if (inpDataAgendada) {
+        inpDataAgendada.addEventListener('change', atualizarValidacaoAgendamento);
+        inpDataAgendada.addEventListener('input', atualizarValidacaoAgendamento);
+      }
+      if (inpHoraAgendada) {
+        inpHoraAgendada.addEventListener('change', atualizarValidacaoAgendamento);
+        inpHoraAgendada.addEventListener('input', atualizarValidacaoAgendamento);
+      }
 
       // Busca Automática por CEP
       document.getElementById('btn-buscar-cep').addEventListener('click', buscarCep);
@@ -2072,6 +2513,41 @@
         };
       }
 
+      let horarioPrevisaoFinal = document.getElementById('inp-horario').value;
+      let dataHoraEntregaIso = null;
+      let obsAdicional = '';
+
+      if (app.modoHorario === 'agendado') {
+        const dataAg = document.getElementById('inp-data-agendada').value;
+        const horaAg = document.getElementById('inp-hora-agendada').value;
+        if (!dataAg || !horaAg) {
+          alert('Por favor selecione a data e o horário desejados para o agendamento.');
+          return;
+        }
+        const valRes = validateOrderSchedule(dataAg, horaAg);
+        if (!valRes.valid) {
+          alert(`⚠️ Horário Indisponível:\n\n${valRes.message}`);
+          return;
+        }
+        const [ano, mes, dia] = dataAg.split('-');
+        horarioPrevisaoFinal = `${dia}/${mes}/${ano} às ${horaAg}`;
+        dataHoraEntregaIso = new Date(`${dataAg}T${horaAg}:00`).toISOString();
+        obsAdicional = `[AGENDADO para ${dia}/${mes}/${ano} às ${horaAg}] `;
+      } else {
+        // Validação no modo imediato
+        const h = app.horariosAtendimento;
+        if (h && h.status === 'fechado') {
+          alert(`A loja está fechada no momento para novos pedidos imediatos:\n${h.mensagemFechado || 'Por favor, agende para outro momento.'}`);
+          return;
+        }
+        const prim = calcularPrimeiraEntregaPossivel(new Date(), h);
+        if (prim.data) {
+          dataHoraEntregaIso = prim.data.toISOString();
+        } else {
+          dataHoraEntregaIso = new Date(Date.now() + (app.prazoMinimoMinutos || 40) * 60000).toISOString();
+        }
+      }
+
       btn.disabled = true;
       btn.innerHTML = `<div class="spinner" style="width:20px; height:20px; margin:0 8px 0 0; border-width:2px;"></div> Enviando pedido...`;
 
@@ -2092,23 +2568,6 @@
         // Número sequencial simples
         const numPedidoAleatorio = Math.floor(100000 + Math.random() * 900000);
 
-        let horarioPrevisaoFinal = document.getElementById('inp-horario').value;
-        let obsAdicional = '';
-
-        if (app.modoHorario === 'agendado') {
-          const dataAg = document.getElementById('inp-data-agendada').value;
-          const horaAg = document.getElementById('inp-hora-agendada').value;
-          if (!dataAg || !horaAg) {
-            btn.disabled = false;
-            btn.innerHTML = `<span>Confirmar Pedido</span> <span>➔</span>`;
-            alert('Por favor selecione a data e o horário desejados para o agendamento.');
-            return;
-          }
-          const [ano, mes, dia] = dataAg.split('-');
-          horarioPrevisaoFinal = `${dia}/${mes}/${ano} às ${horaAg}`;
-          obsAdicional = `[AGENDADO para ${dia}/${mes}/${ano} às ${horaAg}] `;
-        }
-
         const obsUsuario = document.getElementById('inp-obs').value.trim();
         const obsFinal = `${obsAdicional}${obsUsuario || 'Pedido via Vitrine Digital'}`.trim();
 
@@ -2123,6 +2582,7 @@
           syncVersion: 1,
           status: 'novo',
           tipoLogistica: app.tipoLogistica,
+          clienteId: app.clienteIdentificado ? app.clienteIdentificado.id : null,
           clienteNomeAvulso: nome,
           clienteTelefoneAvulso: phone,
           valorSubtotalCentavos: subtotalCentavos,
@@ -2131,7 +2591,7 @@
           formaPagamentoNome: app.formaPagamento,
           canalOrigem: 'web',
           dataHoraCriacao: agora,
-          dataHoraEntregaPrevista: horarioPrevisaoFinal,
+          dataHoraEntregaPrevista: dataHoraEntregaIso,
           observacoes: obsFinal,
           enderecoJson: enderecoObj ? JSON.stringify(enderecoObj) : null,
           numeroPedido: numPedidoAleatorio
@@ -2208,7 +2668,7 @@
         exibirSucesso(numPedidoAleatorio, nome, totalFinalCentavos);
       } catch (e) {
         console.error('Erro ao enviar pedido:', e);
-        alert('Não foi possível enviar o pedido. Por favor tente novamente ou entre em contato pelo WhatsApp.');
+        alert('Não foi possível enviar o pedido: ' + (e.message || JSON.stringify(e)));
         btn.disabled = false;
         btn.innerHTML = `<span>🚀 Confirmar e Enviar Pedido</span>`;
       }
