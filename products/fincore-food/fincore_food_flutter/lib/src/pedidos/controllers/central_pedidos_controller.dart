@@ -16,6 +16,7 @@ import '../../shared/data/sync/supabase_sync_service.dart';
 import '../../shared/services/sound_service.dart';
 import '../../cap/printing/print_capability.dart';
 import '../../shared/services/whatsapp_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DeadlineInfo {
   final DateTime horarioEntrega;
@@ -99,7 +100,20 @@ class CentralPedidosController extends ChangeNotifier {
   Map<String, int> _precosProdutosMap = {};
   Map<String, int> _tempoPreparoProdutosMap = {};
   Map<String, PedidoData> _pedidosMap = {};
+  Map<String, Map<String, dynamic>> _avaliacoesMap = {};
   int _margemSegurancaMinutos = 10;
+
+  Map<String, Map<String, dynamic>> get avaliacoesMap => _avaliacoesMap;
+
+  Map<String, dynamic>? getAvaliacaoDoPedido(String pedidoId, [String? numeroPedido]) {
+    if (_avaliacoesMap.containsKey(pedidoId)) {
+      return _avaliacoesMap[pedidoId];
+    }
+    if (numeroPedido != null && _avaliacoesMap.containsKey('num_$numeroPedido')) {
+      return _avaliacoesMap['num_$numeroPedido'];
+    }
+    return null;
+  }
 
   bool _isLoading = true;
   String? _error;
@@ -465,6 +479,34 @@ class CentralPedidosController extends ChangeNotifier {
         _pedidosMap = {for (final row in pedidosRows) row.id: row};
       } else {
         _pedidosMap = {};
+      }
+
+      // 3. Carregar avaliações reais dos clientes registradas no Supabase
+      try {
+        final tenantCtx = DependencyInjection().get<TenantContext>();
+        final tenantId = tenantCtx.hasContext ? tenantCtx.empresa.id : null;
+        if (tenantId != null) {
+          final avaliacoesData = await Supabase.instance.client
+              .from('avaliacoes_pedidos')
+              .select()
+              .eq('tenant_id', tenantId);
+
+          final mapAv = <String, Map<String, dynamic>>{};
+          for (final raw in avaliacoesData) {
+            final item = Map<String, dynamic>.from(raw);
+            final pId = item['pedido_id']?.toString();
+            final numPed = item['numero_pedido']?.toString();
+            if (pId != null && pId.isNotEmpty) {
+              mapAv[pId] = item;
+            }
+            if (numPed != null && numPed.isNotEmpty) {
+              mapAv['num_$numPed'] = item;
+            }
+          }
+          _avaliacoesMap = mapAv;
+        }
+      } catch (avErr) {
+        debugPrint('[CentralPedidosController] Erro ao carregar avaliações do Supabase: $avErr');
       }
     } catch (e) {
       debugPrint('[CentralPedidosController] Erro ao carregar dados auxiliares: $e');

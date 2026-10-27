@@ -2909,10 +2909,22 @@ class _PedidosPageState extends State<PedidosPage> {
                             final statusLabel = p.status.toUpperCase();
                             final shortId = p.id.length > 8 ? p.id.substring(0, 8) : p.id;
                             final displayNum = p.numeroPedido != null ? '#${p.numeroPedido}' : '#$shortId';
+                            final avaliacao = _controller.getAvaliacaoDoPedido(p.id, p.numeroPedido?.toString());
 
                             return DataRow(
                               cells: [
-                                DataCell(Text(displayNum, style: const TextStyle(fontWeight: FontWeight.bold, color: FincoreColors.textPrimary))),
+                                DataCell(
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(displayNum, style: const TextStyle(fontWeight: FontWeight.bold, color: FincoreColors.textPrimary)),
+                                      if (avaliacao != null) ...[
+                                        const SizedBox(width: 6),
+                                        _buildAvaliacaoBadgeSmall(avaliacao),
+                                      ],
+                                    ],
+                                  ),
+                                ),
                                 DataCell(Text(p.clienteNomeAvulso ?? 'Consumidor Avulso', style: const TextStyle(color: FincoreColors.textPrimary))),
                                 DataCell(Text(dateStr, style: const TextStyle(color: FincoreColors.textSecondary))),
                                 DataCell(Text('${p.canalOrigem} / ${p.tipoLogistica}', style: const TextStyle(color: FincoreColors.textSecondary))),
@@ -3402,6 +3414,45 @@ class _PedidosPageState extends State<PedidosPage> {
         onDateSelected: (novaData) {
           _controller.setSelectedDate(novaData);
         },
+      ),
+    );
+  }
+
+  Widget _buildAvaliacaoBadgeSmall(Map<String, dynamic> av) {
+    final nota = av['nota'];
+    final notaStr = (nota is num) ? nota.toStringAsFixed(nota is int ? 0 : 1) : '$nota';
+    final comentario = av['comentario']?.toString();
+    final tags = av['tags'];
+    final tagsStr = (tags is List && tags.isNotEmpty) ? tags.join(', ') : null;
+
+    final tooltipLines = <String>['⭐ Avaliação do Cliente: $notaStr / 5'];
+    if (tagsStr != null && tagsStr.trim().isNotEmpty) tooltipLines.add('Destaques: $tagsStr');
+    if (comentario != null && comentario.trim().isNotEmpty) tooltipLines.add('Feedback: "$comentario"');
+
+    return Tooltip(
+      message: tooltipLines.join('\n'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF3C7),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('⭐', style: TextStyle(fontSize: 10)),
+            const SizedBox(width: 3),
+            Text(
+              notaStr,
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF92400E),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -4077,3 +4128,4 @@ class _CentralPedidosCalendarDialogState extends State<_CentralPedidosCalendarDi
     );
   }
 }
+

@@ -35,6 +35,46 @@ Widget _buildWebBadge({bool isPendente = false}) {
   );
 }
 
+// Badge ⭐ de avaliação do cliente — exibido quando há avaliação registrada
+Widget _buildAvaliacaoBadge(Map<String, dynamic> av) {
+  final nota = av['nota'];
+  final notaStr = (nota is num) ? nota.toStringAsFixed(nota is int ? 0 : 1) : '$nota';
+  final comentario = av['comentario']?.toString();
+  final tags = av['tags'];
+  final tagsStr = (tags is List && tags.isNotEmpty) ? tags.join(', ') : null;
+
+  final tooltipLines = <String>['⭐ Avaliação do Cliente: $notaStr / 5'];
+  if (tagsStr != null && tagsStr.trim().isNotEmpty) tooltipLines.add('Destaques: $tagsStr');
+  if (comentario != null && comentario.trim().isNotEmpty) tooltipLines.add('Feedback: "$comentario"');
+
+  return Tooltip(
+    message: tooltipLines.join('\n'),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF3C7),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('⭐', style: TextStyle(fontSize: 9.5)),
+          const SizedBox(width: 2.5),
+          Text(
+            notaStr,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF92400E),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Card compacto do Kanban para uma [OrdemPreparo], focado puramente em dados operacionais.
 class PedidoCard extends StatelessWidget {
   final OrdemPreparo ordem;
@@ -264,6 +304,20 @@ class PedidoCard extends StatelessWidget {
                           const SizedBox(width: 6),
                           _buildWebBadge(isPendente: controller.isPedidoAguardandoAprovacao(ordem)),
                         ],
+                        // Badge ⭐ Avaliação do Cliente (se houver avaliação registrada)
+                        Builder(
+                          builder: (_) {
+                            final av = controller.getAvaliacaoDoPedido(
+                              ordem.pedidoId,
+                              pedidoRow?.numeroPedido?.toString(),
+                            );
+                            if (av == null) return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.only(left: 6),
+                              child: _buildAvaliacaoBadge(av),
+                            );
+                          },
+                        ),
                         const Spacer(),
 
                         Container(

@@ -1,5 +1,22 @@
 [
     {
+        "version":  "v1.8.18",
+        "buildNumber":  64,
+        "date":  "2026-10-27",
+        "timestamp":  "2026-10-27 17:51:13",
+        "gitCommit":  "d889f1d",
+        "notes":  "fix(pdv/financeiro): corrigir pagamento dividido no PDV, envio de comprovante WhatsApp e faturamento individual no Contas a Receber (v1.8.17) ",
+        "folder":  "v1.8.18_2026-10-27",
+        "fullPackage":  "v1.8.18_2026-10-27/fincore_food",
+        "fullSize":  "46,69 MB",
+        "updatePackage":  "v1.8.18_2026-10-27/fincore_food_update",
+        "updateSize":  "43,01 MB",
+        "fullZip":  null,
+        "fullZipSize":  null,
+        "updateZip":  null,
+        "updateZipSize":  null
+    },
+    {
         "version":  "v1.8.17",
         "buildNumber":  63,
         "date":  "2026-10-27",

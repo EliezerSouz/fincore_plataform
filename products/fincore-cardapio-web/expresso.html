@@ -1318,12 +1318,21 @@
 
     // ─── Inicialização ───
     async function init() {
-      app.tenantId = getTenantId();
-      await carregarEmpresa();
-      await carregarProdutosEPrecos();
-      carregarAvaliacoes();
-      configurarEventos();
-      calcularHorarioPrevisao();
+      try {
+        app.tenantId = getTenantId();
+        await carregarEmpresa();
+        await carregarProdutosEPrecos();
+        await carregarAvaliacoes();
+      } catch (err) {
+        console.error('[Expresso] Erro no carregamento inicial:', err);
+      } finally {
+        try {
+          configurarEventos();
+          calcularHorarioPrevisao();
+        } catch (evErr) {
+          console.error('[Expresso] Erro ao vincular eventos:', evErr);
+        }
+      }
     }
 
     // ─── Carregar Empresa e Configurações ───
@@ -1501,19 +1510,124 @@
       }
     }
 
-    // Calcula preço considerando regras de atacado por quantidade
-    function calcularPrecoUnitario(prod, qty) {
-      const precoBase = Number(prod.preco_venda_centavos || 0);
-      const faixas = app.precificacao.filter(f => f.produto_id === prod.id || f.produtoId === prod.id);
+    // ─── Motor de Precificação por Quantidade Total de Categoria ───
+    function getFaixasDoProduto(prod) {
+      if (!prod || !app.precificacao) return [];
+      const pId = prod.id;
+      const cId = prod.categoria_id || prod.categoriaId;
 
-      if (faixas.length > 0 && qty > 0) {
-        faixas.sort((a, b) => Number(b.qtd_minima || b.quantidade_minima || 0) - Number(a.qtd_minima || a.quantidade_minima || 0));
-        const faixaAplicavel = faixas.find(f => qty >= Number(f.qtd_minima || f.quantidade_minima || 0));
-        if (faixaAplicavel) {
-          return Number(faixaAplicavel.valor_unitario_centavos || faixaAplicavel.preco_centavos || precoBase);
+      const raw = app.precificacao.filter(f =>
+        (f.produto_id && (f.produto_id === pId || f.produtoId === pId)) ||
+        (f.categoria_id && (f.categoria_id === cId || f.categoriaId === cId))
+      );
+
+      const unique = [];
+      const seen = new Set();
+      for (const t of raw) {
+        const minQ = Number(t.qtd_minima || t.quantidade_minima || 0);
+        const maxQ = t.qtd_maxima != null ? Number(t.qtd_maxima) : null;
+        const val = Number(t.valor_unitario_centavos || t.preco_centavos || 0);
+        const key = `${minQ}_${maxQ || ''}_${val}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push({
+            ...t,
+            qtd_minima: minQ,
+            qtd_maxima: maxQ,
+            valor_unitario_centavos: val
+          });
         }
       }
-      return precoBase;
+      return unique.sort((a, b) => a.qtd_minima - b.qtd_minima);
+    }
+
+    function getCategoryCartQty(categoriaId) {
+      if (!app.carrinho || !categoriaId) return 0;
+      return Object.values(app.carrinho)
+        .filter(i => (i.produto.categoria_id === categoriaId || i.produto.categoriaId === categoriaId))
+        .reduce((sum, i) => sum + Number(i.qty || 0), 0);
+    }
+
+    function getMinQtyForCategory(categoriaId) {
+      if (!app.precificacao || app.precificacao.length === 0 || !categoriaId) return 0;
+      const tiers = app.precificacao.filter(t => (t.categoria_id === categoriaId || t.categoriaId === categoriaId));
+      if (tiers.length === 0) return 0;
+      const minTiers = tiers.map(t => Number(t.qtd_minima || t.quantidade_minima || 0)).filter(q => q > 1);
+      return minTiers.length > 0 ? Math.min(...minTiers) : 0;
+    }
+
+    function calcularPrecoUnitario(prod, qtyOverride = null) {
+      if (!prod) return 0;
+      const precoBase = Number(prod.preco_venda_centavos || 0);
+      const faixas = getFaixasDoProduto(prod);
+
+      if (faixas.length === 0) return precoBase;
+
+      const cId = prod.categoria_id || prod.categoriaId;
+      const categoryCartQty = getCategoryCartQty(cId);
+      const currentInCartForProd = app.carrinho[prod.id]?.qty || 0;
+
+      const effectiveQty = qtyOverride !== null
+        ? (categoryCartQty - currentInCartForProd + qtyOverride)
+        : categoryCartQty;
+
+      const qtyToUse = Math.max(1, effectiveQty);
+
+      const match = faixas.slice().reverse().find(f => qtyToUse >= f.qtd_minima);
+      if (match) {
+        return match.valor_unitario_centavos;
+      }
+
+      if (precoBase > 0) return precoBase;
+      return faixas[0].valor_unitario_centavos;
+    }
+
+    function validarQuantidadesMinimas() {
+      const itens = Object.values(app.carrinho);
+      if (itens.length === 0) {
+        return { valido: false, erros: ['Seu carrinho está vazio. Adicione itens antes de continuar.'] };
+      }
+
+      const catTotals = new Map();
+      for (const item of itens) {
+        const cId = item.produto.categoria_id || item.produto.categoriaId;
+        const cName = item.produto.categoria_nome || item.produto.categoriaNome || 'Itens selecionados';
+        const atual = catTotals.get(cId) || { id: cId, nome: cName, qty: 0 };
+        atual.qty += Number(item.qty || 0);
+        catTotals.set(cId, atual);
+      }
+
+      const erros = [];
+      for (const [cId, cat] of catTotals.entries()) {
+        if (!cId) continue;
+        const minRequired = getMinQtyForCategory(cId);
+        if (minRequired > 0 && cat.qty < minRequired) {
+          const falta = minRequired - cat.qty;
+          erros.push({
+            categoriaId: cId,
+            categoriaNome: cat.nome,
+            qtdAtual: cat.qty,
+            qtdMinima: minRequired,
+            falta: falta,
+            mensagem: `A categoria "${cat.nome}" exige no mínimo ${minRequired} unidades somadas no pedido (atual: ${cat.qty} un. Faltam ${falta} un para atingir o mínimo).`
+          });
+        }
+      }
+
+      return {
+        valido: erros.length === 0,
+        erros: erros
+      };
+    }
+
+    function atualizarTodosOsPrecosNaTela() {
+      app.produtos.forEach(prod => {
+        const priceEl = document.getElementById(`price-${prod.id}`);
+        if (priceEl) {
+          const precoUn = calcularPrecoUnitario(prod);
+          priceEl.textContent = formatMoeda(precoUn);
+        }
+      });
     }
 
     // ─── Renderizar Lista de Produtos ───
@@ -1523,17 +1637,24 @@
 
       app.produtos.forEach(prod => {
         const saldo = Number(prod.estoque_atual || 0);
-        const precoBase = Number(prod.preco_venda_centavos || 0);
         const cartItem = app.carrinho[prod.id] || { qty: 0 };
+        const precoAtual = calcularPrecoUnitario(prod);
 
-        // Verifica se há faixa de atacado
-        const faixas = app.precificacao.filter(f => f.produto_id === prod.id || f.produtoId === prod.id);
+        // Regras de atacado / lote
+        const faixas = getFaixasDoProduto(prod);
+        const cId = prod.categoria_id || prod.categoriaId;
+        const minCat = getMinQtyForCategory(cId);
         let tierBadgeHtml = '';
+
         if (faixas.length > 0) {
-          const menorFaixa = faixas.sort((a, b) => Number(a.qtd_minima || a.quantidade_minima || 0) - Number(b.qtd_minima || b.quantidade_minima || 0))[0];
-          const minQtd = menorFaixa.qtd_minima || menorFaixa.quantidade_minima;
-          const valCents = menorFaixa.valor_unitario_centavos || menorFaixa.preco_centavos;
-          tierBadgeHtml = `<span class="badge-tier">✨ A partir de ${minQtd} un: ${formatMoeda(valCents)}</span>`;
+          const menorFaixa = faixas[0];
+          const minQtd = minCat > 0 ? minCat : menorFaixa.qtd_minima;
+          const valCents = menorFaixa.valor_unitario_centavos;
+          if (minCat > 0) {
+            tierBadgeHtml = `<span class="badge-tier" title="Exige quantidade mínima somada desta categoria no carrinho">✨ Mín. ${minCat} un: ${formatMoeda(valCents)}</span>`;
+          } else {
+            tierBadgeHtml = `<span class="badge-tier">✨ A partir de ${minQtd} un: ${formatMoeda(valCents)}</span>`;
+          }
         }
 
         const stockBadgeHtml = saldo > 0 
@@ -1558,7 +1679,7 @@
             </div>
           </div>
           <div class="product-price-col">
-            <div class="product-price" id="price-${prod.id}">${formatMoeda(precoBase)}</div>
+            <div class="product-price" id="price-${prod.id}">${formatMoeda(precoAtual)}</div>
             <div class="qty-control" onclick="event.stopPropagation()">
               <button class="qty-btn" onclick="alterarQtd('${prod.id}', -1)" type="button" aria-label="Diminuir">−</button>
               <input type="number" 
@@ -1608,12 +1729,8 @@
       const qtyEl = document.getElementById(`qty-${prodId}`);
       if (qtyEl) { if ('value' in qtyEl) { qtyEl.value = novaQtd; } else { qtyEl.textContent = novaQtd; } }
 
-      const priceEl = document.getElementById(`price-${prodId}`);
-      if (priceEl) {
-        const precoUn = calcularPrecoUnitario(prod, novaQtd || 1);
-        priceEl.textContent = formatMoeda(precoUn);
-      }
-
+      // Atualiza preços de todos os produtos na tela e totalizador
+      atualizarTodosOsPrecosNaTela();
       atualizarBarraFlutuante();
     };
 
@@ -1625,8 +1742,7 @@
       const raw = String(valStr || '').trim();
       if (raw === '') {
         delete app.carrinho[prodId];
-        const priceEl = document.getElementById(`price-${prodId}`);
-        if (priceEl) priceEl.textContent = formatMoeda(Number(prod.preco_venda_centavos || 0));
+        atualizarTodosOsPrecosNaTela();
         atualizarBarraFlutuante();
         return;
       }
@@ -1647,12 +1763,7 @@
         app.carrinho[prodId] = { produto: prod, qty: parsed };
       }
 
-      const priceEl = document.getElementById(`price-${prodId}`);
-      if (priceEl) {
-        const precoUn = calcularPrecoUnitario(prod, parsed || 1);
-        priceEl.textContent = formatMoeda(precoUn);
-      }
-
+      atualizarTodosOsPrecosNaTela();
       atualizarBarraFlutuante();
     };
 
@@ -1678,12 +1789,7 @@
         app.carrinho[prodId] = { produto: prod, qty: parsed };
       }
 
-      const priceEl = document.getElementById(`price-${prodId}`);
-      if (priceEl) {
-        const precoUn = calcularPrecoUnitario(prod, parsed || 1);
-        priceEl.textContent = formatMoeda(precoUn);
-      }
-
+      atualizarTodosOsPrecosNaTela();
       atualizarBarraFlutuante();
     };
 
@@ -1695,7 +1801,7 @@
 
       let totalCentavos = 0;
       itens.forEach(it => {
-        const unit = calcularPrecoUnitario(it.produto, it.qty);
+        const unit = calcularPrecoUnitario(it.produto);
         totalCentavos += unit * it.qty;
       });
 
@@ -1727,6 +1833,12 @@
       const btnClose = document.getElementById('btn-close-modal');
 
       btnOpen.addEventListener('click', () => {
+        const val = validarQuantidadesMinimas();
+        if (!val.valido) {
+          const msg = val.erros.map(e => typeof e === 'string' ? e : e.mensagem).join('\n\n');
+          alert(`⚠️ Quantidade Mínima Necessária:\n\n${msg}`);
+          return;
+        }
         modal.style.display = 'flex';
         atualizarResumoModal();
       });
@@ -1920,6 +2032,13 @@
 
     // ─── Enviar Pedido para o Supabase e Central de Pedidos ───
     async function enviarPedido() {
+      const val = validarQuantidadesMinimas();
+      if (!val.valido) {
+        const msg = val.erros.map(e => typeof e === 'string' ? e : e.mensagem).join('\n\n');
+        alert(`⚠️ Quantidade Mínima Necessária:\n\n${msg}`);
+        return;
+      }
+
       const btn = document.getElementById('btn-confirm-order');
       const nome = document.getElementById('inp-nome').value.trim();
       const phone = document.getElementById('inp-phone').value.trim();
@@ -2116,6 +2235,89 @@
         const btnWa = document.getElementById('btn-wa-confirm');
         btnWa.href = `https://wa.me/${cleanWa}?text=${msg}`;
         btnWa.style.display = 'inline-flex';
+      }
+    }
+
+    // ─── Avaliações & Depoimentos Reais dos Clientes ───
+    window.scrollParaAvaliacoes = function() {
+      const el = document.getElementById('reviews-section');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    async function carregarAvaliacoes() {
+      try {
+        if (!app.tenantId) return;
+        const { data, error } = await sb
+          .from('avaliacoes_pedidos')
+          .select('*')
+          .eq('tenant_id', app.tenantId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (error || !data || data.length === 0) return;
+
+        const total = data.length;
+        const soma = data.reduce((acc, a) => acc + (Number(a.nota) || 5), 0);
+        const media = (soma / total).toFixed(1);
+
+        // Atualizar badge no header
+        const badgeEl = document.getElementById('rating-badge');
+        const scoreEl = document.getElementById('rating-score');
+        const countEl = document.getElementById('rating-count');
+        if (badgeEl && scoreEl) {
+          scoreEl.textContent = media;
+          if (countEl) countEl.textContent = total;
+          badgeEl.style.display = 'inline-flex';
+        }
+
+        // Atualizar seção de depoimentos/avaliações
+        const sectionEl = document.getElementById('reviews-section');
+        const avgEl = document.getElementById('reviews-avg-num');
+        const starsEl = document.getElementById('reviews-stars-visual');
+        const totalEl = document.getElementById('reviews-total-text');
+        const listEl = document.getElementById('reviews-list');
+
+        if (sectionEl && listEl) {
+          if (avgEl) avgEl.textContent = media;
+          if (starsEl) {
+            const cnt = Math.min(5, Math.max(1, Math.round(Number(media))));
+            starsEl.textContent = '⭐'.repeat(cnt);
+          }
+          if (totalEl) {
+            const promotores = data.filter(d => Number(d.nota) >= 4).length;
+            const pct = Math.round((promotores / total) * 100);
+            totalEl.textContent = `${pct}% de aprovação (${total} ${total === 1 ? 'avaliação' : 'avaliações'})`;
+          }
+
+          listEl.innerHTML = data.map(rev => {
+            const nota = Number(rev.nota) || 5;
+            const estrelas = '⭐'.repeat(nota);
+            let autor = rev.cliente_nome || 'Cliente';
+            const partes = autor.split(' ');
+            if (partes.length > 2) autor = `${partes[0]} ${partes[1]}`;
+            const tags = Array.isArray(rev.tags) ? rev.tags : [];
+            const tagsHtml = tags.map(t => `<span class="review-tag" style="background:#f1f5f9; color:#475569; font-size:11px; padding:2px 8px; border-radius:12px; font-weight:600;">${t}</span>`).join('');
+            const comentario = rev.comentario ? `<div class="review-comment" style="font-size:13px; color:#334155; line-height:1.45; font-style:italic; background:white; padding:8px 10px; border-radius:8px; border-left:3px solid var(--primary); margin-top:6px;">"${rev.comentario}"</div>` : '';
+
+            return `
+              <div class="review-card" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:12px 14px; margin-bottom:10px;">
+                <div class="review-card-top" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <div class="review-author" style="display:flex; align-items:center; gap:6px;">
+                    <strong style="font-size:13px; color:#0f172a;">${autor}</strong>
+                    <span class="review-verified" style="font-size:10px; background:#f0fdf4; color:#16a34a; padding:1px 6px; border-radius:10px; font-weight:700;">✓ Compra verificada</span>
+                  </div>
+                  <span class="review-stars" style="font-size:13px;">${estrelas}</span>
+                </div>
+                ${comentario}
+                ${tagsHtml ? `<div class="review-tags" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">${tagsHtml}</div>` : ''}
+              </div>
+            `;
+          }).join('');
+
+          sectionEl.style.display = 'block';
+        }
+      } catch (e) {
+        console.warn('[Avaliações] Erro ao carregar:', e);
       }
     }
 
