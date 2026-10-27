@@ -854,6 +854,75 @@
       color: var(--primary);
     }
 
+    /* ── Cards de Endereços Cadastrados ── */
+    .address-card-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 12px;
+      background: #f8fafc;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .address-card-item:hover {
+      border-color: #cbd5e1;
+      background: #f1f5f9;
+    }
+    .address-card-item.selected {
+      border-color: var(--primary);
+      background: #fff7ed;
+      box-shadow: 0 0 0 1px var(--primary);
+    }
+    .address-card-radio {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid #94a3b8;
+      margin-top: 2px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .address-card-item.selected .address-card-radio {
+      border-color: var(--primary);
+      background: var(--primary);
+    }
+    .address-card-item.selected .address-card-radio::after {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: white;
+    }
+    .address-card-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .address-card-tag {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .address-card-street {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+      line-height: 1.35;
+    }
+    .address-card-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
     .delivery-calc-box {
       background: #f8fafc;
       border: 1px dashed #cbd5e1;
@@ -1123,8 +1192,14 @@
         <div class="form-group">
           <label class="form-label">WhatsApp (para confirmação e rastreio) *</label>
           <input type="tel" class="form-input" id="inp-phone" placeholder="(00) 00000-0000" maxlength="15" />
-          <div id="found-customer-banner" style="display:none; margin-top:6px; font-size:12px; color:#15803d; background:#f0fdf4; border:1px solid #bbf7d0; padding:6px 10px; border-radius:8px; font-weight:600;">
-            ✨ Encontramos seu cadastro! Olá <strong id="found-customer-name"></strong>, seus dados foram preenchidos.
+          <div id="found-customer-banner" style="display:none; margin-top:6px; font-size:12px; color:#15803d; background:#f0fdf4; border:1px solid #bbf7d0; padding:8px 12px; border-radius:10px; font-weight:600;">
+            ✨ Encontramos seu cadastro! Olá <strong id="found-customer-name"></strong>.
+          </div>
+          <!-- Seletor de Endereços Cadastrados no ERP -->
+          <div id="saved-addresses-wrapper" style="display:none; margin-top:10px;">
+            <div style="font-size:12px; font-weight:700; color:#334155; margin-bottom:6px;">Selecione o Endereço de Entrega:</div>
+            <div id="saved-addresses-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <button type="button" id="btn-use-custom-address" style="margin-top:6px; background:none; border:none; color:var(--primary); font-size:12px; font-weight:700; cursor:pointer; text-decoration:underline;">+ Usar outro endereço para esta entrega</button>
           </div>
         </div>
 
@@ -1170,17 +1245,17 @@
           </div>
         </div>
 
-        <!-- 3. Previsão ou Agendamento de Data/Hora -->
+        <!-- 3. Previsão ou Agendamento de Data/Hora (Padrão: Agendado) -->
         <div class="form-group">
           <label class="form-label">Previsão ou Agendamento do Pedido</label>
           <div class="pill-group" style="margin-bottom:8px;">
-            <button class="pill-btn active" id="btn-modo-imediato" type="button">⚡ O quanto antes</button>
-            <button class="pill-btn" id="btn-modo-agendado" type="button">📅 Agendar Data & Hora</button>
+            <button class="pill-btn active" id="btn-modo-agendado" type="button">📅 Agendar Data & Hora</button>
+            <button class="pill-btn" id="btn-modo-imediato" type="button">⚡ O quanto antes</button>
           </div>
-          <div id="block-imediato">
+          <div id="block-imediato" style="display:none;">
             <input type="text" class="form-input" id="inp-horario" readonly style="background:#f8fafc; font-weight:600;" />
           </div>
-          <div id="block-agendado" style="display:none; grid-template-columns:1fr 1fr; gap:8px;">
+          <div id="block-agendado" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <div>
               <label class="form-label" style="font-size:11px;">Data Desejada *</label>
               <input type="date" class="form-input" id="inp-data-agendada" />
@@ -1190,16 +1265,28 @@
               <input type="time" class="form-input" id="inp-hora-agendada" />
             </div>
             <div id="agendamento-aviso" style="display:none; grid-column:1 / -1; font-size:11.5px; padding:6px 10px; border-radius:8px; line-height:1.35;"></div>
+            
+            <!-- Aviso e Ciência de Aprovação Prévia da Cozinha -->
+            <div class="approval-alert-box" style="grid-column:1 / -1; background:#fffbeb; border:1px solid #fef08a; border-radius:10px; padding:10px 12px; display:flex; gap:10px; align-items:flex-start;">
+              <span style="font-size:18px; line-height:1;">⚠️</span>
+              <div style="font-size:11.5px; color:#854d0e; line-height:1.45;">
+                <strong>Necessita de aprovação prévia:</strong> Todo agendamento é transmitido à cozinha e passa por conferência e aprovação da nossa equipe antes do início do preparo. A confirmação do aceite será enviada pelo WhatsApp.
+              </div>
+            </div>
+            <div style="grid-column:1 / -1; margin-top:2px;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; color:#374151; cursor:pointer;">
+                <input type="checkbox" id="chk-ciente-aprovacao" checked />
+                <span>Estou ciente de que este pedido passará por aprovação da cozinha</span>
+              </label>
+            </div>
           </div>
         </div>
 
-        <!-- 4. Forma de Pagamento -->
+        <!-- 4. Forma de Pagamento Dinâmica (Carregada do ERP) -->
         <div class="form-group">
-          <label class="form-label">Forma de Pagamento</label>
-          <div class="pill-group">
-            <button class="pill-btn active" id="btn-pag-pix" type="button">🔑 PIX</button>
-            <button class="pill-btn" id="btn-pag-cartao" type="button">💳 Cartão</button>
-            <button class="pill-btn" id="btn-pag-dinheiro" type="button">💵 Dinheiro</button>
+          <label class="form-label">Forma de Pagamento *</label>
+          <div class="pill-group" id="payment-methods-list" style="flex-wrap:wrap; gap:8px;">
+            <div style="font-size:12px; color:#64748b;">Carregando formas de pagamento...</div>
           </div>
         </div>
 
@@ -1284,10 +1371,18 @@
       precificacao: [],
       carrinho: {}, // { [produtoId]: { produto, qty } }
       tipoLogistica: 'Entrega',
-      formaPagamento: 'PIX',
+      formaPagamentoId: null,
+      formaPagamentoNome: 'PIX',
+      formasPagamento: [],
+      taxasEntrega: [],
       taxaEntregaCentavos: 0,
+      taxaNomeRegra: '',
       prazoMinimoMinutos: 40,
+      modoHorario: 'agendado', // Agendamento por padrão com aprovação prévia
       isAberto: true,
+      clienteIdentificado: null,
+      clienteEnderecos: [],
+      selectedEnderecoId: null,
       lastOrder: null
     };
 
@@ -1374,9 +1469,28 @@
           }
         }
 
-        // Carregar configurações da empresa (horários, PIX, regras de estoque)
+        // Carregar configurações da empresa, regras reais de taxa de entrega e formas de pagamento
         if (app.tenantId) {
-          const { data: cfg } = await sb.from('empresa_configuracao').select('*').eq('tenantId', app.tenantId).maybeSingle();
+          const [{ data: cfg }, { data: taxasData }, { data: fpList }] = await Promise.all([
+            sb.from('empresa_configuracao').select('*').eq('tenantId', app.tenantId).maybeSingle(),
+            sb.from('taxa_entrega').select('*').eq('tenantId', app.tenantId).eq('ativo', true).is('deletedAt', null),
+            sb.from('forma_pagamento').select('*').eq('tenantId', app.tenantId).eq('ativo', true).is('deletedAt', null).order('ordem', { ascending: true })
+          ]);
+
+          app.taxasEntrega = taxasData || [];
+
+          // Filtra formas válidas para canal web (excluindo consumo interno e crediário/prazo)
+          app.formasPagamento = (fpList || []).filter(fp => {
+            if (!fp || !fp.ativo) return false;
+            const t = String(fp.tipo || '').toLowerCase();
+            const n = String(fp.nome || '').toLowerCase();
+            if (t === 'consumointerno' || t.includes('interno')) return false;
+            if (t === 'notaprazo' || t.includes('prazo') || n.includes('prazo') || n.includes('fiado')) return false;
+            return true;
+          });
+
+          renderizarFormasPagamento();
+
           if (cfg) {
             app.config = cfg;
 
@@ -2126,6 +2240,76 @@
       }
     }
 
+    // ─── Renderização Dinâmica de Formas de Pagamento do ERP ───
+    function renderizarFormasPagamento() {
+      const container = document.getElementById('payment-methods-list');
+      if (!container) return;
+
+      const fps = app.formasPagamento || [];
+      if (fps.length === 0) {
+        // Fallback básico
+        app.formasPagamento = [
+          { id: 'default-pix', nome: 'PIX', tipo: 'pix', permiteTroco: false },
+          { id: 'default-cartao', nome: 'Cartão', tipo: 'cartaoCredito', permiteTroco: false },
+          { id: 'default-dinheiro', nome: 'Dinheiro', tipo: 'DINHEIRO', permiteTroco: true }
+        ];
+      }
+
+      // Se ainda não escolheu, define a primeira (ou Pix se houver)
+      if (!app.formaPagamentoId) {
+        const pixDefault = app.formasPagamento.find(f => String(f.tipo || '').toLowerCase().includes('pix') || String(f.nome || '').toLowerCase().includes('pix'));
+        const chosen = pixDefault || app.formasPagamento[0];
+        app.formaPagamentoId = chosen.id;
+        app.formaPagamentoNome = chosen.nome;
+      }
+
+      container.innerHTML = app.formasPagamento.map(fp => {
+        const isSel = fp.id === app.formaPagamentoId;
+        const t = String(fp.tipo || '').toLowerCase();
+        const n = String(fp.nome || '').toLowerCase();
+        let icon = '💳';
+        if (t.includes('pix') || n.includes('pix')) icon = '🔑';
+        else if (t.includes('dinheiro') || n.includes('dinheiro')) icon = '💵';
+        else if (t.includes('vale') || n.includes('vale') || n.includes('refeicao')) icon = '🎫';
+
+        return `
+          <button class="pill-btn ${isSel ? 'active' : ''}" type="button" data-fpid="${fp.id}" onclick="selecionarFormaPagamento('${fp.id}')">
+            ${icon} ${fp.nome}
+          </button>
+        `;
+      }).join('');
+
+      atualizarVisibilidadeCamposPagamento();
+    }
+
+    window.selecionarFormaPagamento = function(fpId) {
+      const fp = app.formasPagamento.find(f => f.id === fpId);
+      if (!fp) return;
+      app.formaPagamentoId = fp.id;
+      app.formaPagamentoNome = fp.nome;
+
+      document.querySelectorAll('#payment-methods-list .pill-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.fpid === String(fpId));
+      });
+
+      atualizarVisibilidadeCamposPagamento();
+    };
+
+    function atualizarVisibilidadeCamposPagamento() {
+      const fp = app.formasPagamento.find(f => f.id === app.formaPagamentoId);
+      const blockTroco = document.getElementById('block-troco');
+      const blockPix = document.getElementById('block-pix-info');
+      if (!fp) return;
+
+      const t = String(fp.tipo || '').toLowerCase();
+      const n = String(fp.nome || '').toLowerCase();
+      const isDinheiro = t === 'dinheiro' || n.includes('dinheiro') || fp.permiteTroco === true;
+      const isPix = t.includes('pix') || n.includes('pix');
+
+      if (blockTroco) blockTroco.style.display = isDinheiro ? 'flex' : 'none';
+      if (blockPix) blockPix.style.display = isPix ? 'block' : 'none';
+    }
+
     // ─── Busca e Identificação de Cliente pelo Telefone no ERP ───
     async function buscarClientePorTelefone(rawPhone) {
       if (!rawPhone) return null;
@@ -2135,10 +2319,14 @@
       if (!app.tenantId) return null;
 
       try {
+        // Busca apenas clientes ATIVOS e NÃO DELETADOS
         const { data: allClients, error } = await sb
           .from('cliente')
-          .select('id, nome, telefone, email, observacoes')
-          .eq('tenantId', app.tenantId);
+          .select('id, nome, telefone, email, observacoes, ativo, deletedAt')
+          .eq('tenantId', app.tenantId)
+          .eq('ativo', true)
+          .is('deletedAt', null)
+          .order('updatedAt', { ascending: false });
 
         if (error || !allClients || allClients.length === 0) return null;
 
@@ -2150,18 +2338,19 @@
 
         if (!matched) return null;
 
-        // Se encontrou o cliente, busca o endereço padrão em local_entrega
+        // Busca TODOS os endereços ativos cadastrados para este cliente no local_entrega
         const { data: locais } = await sb
           .from('local_entrega')
           .select('*')
           .eq('tenantId', app.tenantId)
           .eq('clienteId', matched.id)
           .eq('ativo', true)
-          .limit(1);
+          .is('deletedAt', null)
+          .order('createdAt', { ascending: true });
 
         return {
           cliente: matched,
-          endereco: (locais && locais.length > 0) ? locais[0] : null
+          enderecos: locais || []
         };
       } catch (err) {
         console.warn('Erro ao identificar cliente por telefone:', err);
@@ -2174,8 +2363,11 @@
       if (!digits || digits.length < 10) {
         lastSearchedPhone = '';
         app.clienteIdentificado = null;
+        app.clienteEnderecos = [];
         const banner = document.getElementById('found-customer-banner');
         if (banner) banner.style.display = 'none';
+        const wrapper = document.getElementById('saved-addresses-wrapper');
+        if (wrapper) wrapper.style.display = 'none';
         return;
       }
       if (digits === lastSearchedPhone) return;
@@ -2188,38 +2380,92 @@
 
       if (res && res.cliente) {
         app.clienteIdentificado = res.cliente;
-        if (inpNome && (!inpNome.value || inpNome.value.trim() === '')) {
-          inpNome.value = res.cliente.nome || '';
-        } else if (inpNome && res.cliente.nome) {
-          inpNome.value = res.cliente.nome;
-        }
+        app.clienteEnderecos = res.enderecos || [];
 
+        // Preenche o nome completo do cliente
+        if (inpNome) inpNome.value = res.cliente.nome || '';
         if (nameEl) nameEl.textContent = res.cliente.nome || '';
         if (banner) banner.style.display = 'block';
 
-        if (res.endereco) {
-          const end = res.endereco;
-          const inpRua = document.getElementById('inp-rua');
-          const inpNum = document.getElementById('inp-num');
-          const inpBairro = document.getElementById('inp-bairro');
-          const inpCompl = document.getElementById('inp-compl');
-          const inpCep = document.getElementById('inp-cep');
-
-          if (inpRua && end.logradouro) inpRua.value = end.logradouro;
-          if (inpNum && end.numero) inpNum.value = end.numero;
-          if (inpBairro && end.bairro) inpBairro.value = end.bairro;
-          if (inpCompl && end.complemento) inpCompl.value = end.complemento;
-          if (inpCep && end.cep) inpCep.value = end.cep;
-
-          if (end.bairro) {
-            await calcularTaxaEntrega(end.bairro);
-          }
-        }
+        // Renderiza e seleciona endereço cadastrado
+        renderizarEnderecosCadastrados(app.clienteEnderecos);
       } else {
         app.clienteIdentificado = null;
+        app.clienteEnderecos = [];
         if (banner) banner.style.display = 'none';
+        const wrapper = document.getElementById('saved-addresses-wrapper');
+        if (wrapper) wrapper.style.display = 'none';
       }
     }
+
+    function renderizarEnderecosCadastrados(enderecos) {
+      const wrapper = document.getElementById('saved-addresses-wrapper');
+      const list = document.getElementById('saved-addresses-list');
+      if (!wrapper || !list) return;
+
+      if (!enderecos || enderecos.length === 0) {
+        wrapper.style.display = 'none';
+        return;
+      }
+
+      wrapper.style.display = 'block';
+
+      // Define o primeiro endereço ou o que tiver "principal" como padrão
+      let defaultEnd = enderecos.find(e => (e.nomeIdentificador || '').toLowerCase().includes('princ'));
+      if (!defaultEnd) defaultEnd = enderecos[0];
+      app.selectedEnderecoId = defaultEnd.id;
+
+      list.innerHTML = enderecos.map(loc => {
+        const isSel = loc.id === app.selectedEnderecoId;
+        const tag = loc.nomeIdentificador || 'Endereço';
+        const isCasa = tag.toLowerCase().includes('casa') || tag.toLowerCase().includes('princ');
+        const isTrab = tag.toLowerCase().includes('trab') || tag.toLowerCase().includes('emp');
+        const icon = isCasa ? '🏠' : (isTrab ? '💼' : '📍');
+        const street = `${loc.logradouro || ''}, ${loc.numero || 'S/N'}${loc.complemento ? ' (' + loc.complemento + ')' : ''}`;
+        const sub = `${loc.bairro || ''} - ${loc.cidade || ''}${loc.cep ? ' • CEP: ' + loc.cep : ''}${loc.referencia ? ' • Ref: ' + loc.referencia : ''}`;
+
+        return `
+          <div class="address-card-item ${isSel ? 'selected' : ''}" data-endid="${loc.id}" onclick="selecionarEnderecoCadastrado('${loc.id}')">
+            <div class="address-card-radio"></div>
+            <div class="address-card-body">
+              <div class="address-card-tag">${icon} ${tag}</div>
+              <div class="address-card-street">${street}</div>
+              <div class="address-card-sub">${sub}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Aplica os dados do endereço selecionado nos inputs do formulário
+      selecionarEnderecoCadastrado(app.selectedEnderecoId, false);
+    }
+
+    window.selecionarEnderecoCadastrado = function(locId, triggerRecalc = true) {
+      const end = (app.clienteEnderecos || []).find(e => String(e.id) === String(locId));
+      if (!end) return;
+
+      app.selectedEnderecoId = locId;
+
+      document.querySelectorAll('#saved-addresses-list .address-card-item').forEach(card => {
+        card.classList.toggle('selected', card.dataset.endid === String(locId));
+      });
+
+      const inpRua = document.getElementById('inp-rua');
+      const inpNum = document.getElementById('inp-num');
+      const inpBairro = document.getElementById('inp-bairro');
+      const inpCompl = document.getElementById('inp-compl');
+      const inpCep = document.getElementById('inp-cep');
+
+      if (inpRua) inpRua.value = end.logradouro || '';
+      if (inpNum) inpNum.value = end.numero || '';
+      if (inpBairro) inpBairro.value = end.bairro || '';
+      if (inpCompl) inpCompl.value = end.complemento || end.referencia || '';
+      if (inpCep) inpCep.value = end.cep || '';
+
+      if (triggerRecalc) {
+        calcularTaxaEntrega(end.bairro, end.cep);
+      }
+    };
 
     // ─── Previsão de Horário Inteligente ───
     function calcularHorarioPrevisao() {
@@ -2252,6 +2498,20 @@
           return;
         }
         modal.style.display = 'flex';
+
+        // Garante agendamento como modo padrão e sugere primeira entrega viável
+        const prim = calcularPrimeiraEntregaPossivel(new Date(), app.horariosAtendimento);
+        const inpDataAgendada = document.getElementById('inp-data-agendada');
+        const inpHoraAgendada = document.getElementById('inp-hora-agendada');
+        if (prim.canOrder && prim.dataStr && prim.horaStr) {
+          if (inpDataAgendada && (!inpDataAgendada.value || inpDataAgendada.value < prim.dataStr)) {
+            inpDataAgendada.value = prim.dataStr;
+          }
+          if (inpHoraAgendada && !inpHoraAgendada.value) {
+            inpHoraAgendada.value = prim.horaStr;
+          }
+        }
+        atualizarValidacaoAgendamento();
         atualizarResumoModal();
         calcularHorarioPrevisao();
       });
@@ -2302,7 +2562,7 @@
         btnRetirada.classList.remove('active');
         blockEnd.style.display = 'flex';
         document.getElementById('row-taxa-entrega').style.display = 'flex';
-        atualizarResumoModal();
+        calcularTaxaEntrega();
       });
 
       btnRetirada.addEventListener('click', () => {
@@ -2311,74 +2571,29 @@
         btnEntrega.classList.remove('active');
         blockEnd.style.display = 'none';
         document.getElementById('row-taxa-entrega').style.display = 'none';
-        atualizarResumoModal();
-      });
-
-      // Alternância de Forma de Pagamento
-      const btnPix = document.getElementById('btn-pag-pix');
-      const btnCartao = document.getElementById('btn-pag-cartao');
-      const btnDinheiro = document.getElementById('btn-pag-dinheiro');
-      const blockTroco = document.getElementById('block-troco');
-      const blockPix = document.getElementById('block-pix-info');
-
-      btnPix.addEventListener('click', () => {
-        app.formaPagamento = 'PIX';
-        btnPix.classList.add('active');
-        btnCartao.classList.remove('active');
-        btnDinheiro.classList.remove('active');
-        blockTroco.style.display = 'none';
-        blockPix.style.display = 'block';
-      });
-
-      btnCartao.addEventListener('click', () => {
-        app.formaPagamento = 'Cartão';
-        btnCartao.classList.add('active');
-        btnPix.classList.remove('active');
-        btnDinheiro.classList.remove('active');
-        blockTroco.style.display = 'none';
-        blockPix.style.display = 'none';
-      });
-
-      btnDinheiro.addEventListener('click', () => {
-        app.formaPagamento = 'Dinheiro';
-        btnDinheiro.classList.add('active');
-        btnPix.classList.remove('active');
-        btnCartao.classList.remove('active');
-        blockTroco.style.display = 'flex';
-        blockPix.style.display = 'none';
+        calcularTaxaEntrega();
       });
 
       // Alternância de Previsão / Agendamento de Data e Hora
-      app.modoHorario = 'imediato';
-      const btnImediato = document.getElementById('btn-modo-imediato');
       const btnAgendado = document.getElementById('btn-modo-agendado');
-      const blockImediato = document.getElementById('block-imediato');
+      const btnImediato = document.getElementById('btn-modo-imediato');
       const blockAgendado = document.getElementById('block-agendado');
+      const blockImediato = document.getElementById('block-imediato');
       const inpDataAgendada = document.getElementById('inp-data-agendada');
       const inpHoraAgendada = document.getElementById('inp-hora-agendada');
 
-      // Preenche valores iniciais para agendamento
       const hojeStr = toYmdLocal(new Date());
       if (inpDataAgendada) {
         inpDataAgendada.min = hojeStr;
       }
 
-      btnImediato.addEventListener('click', () => {
-        app.modoHorario = 'imediato';
-        btnImediato.classList.add('active');
-        btnAgendado.classList.remove('active');
-        blockImediato.style.display = 'block';
-        blockAgendado.style.display = 'none';
-      });
-
       btnAgendado.addEventListener('click', () => {
         app.modoHorario = 'agendado';
         btnAgendado.classList.add('active');
         btnImediato.classList.remove('active');
-        blockImediato.style.display = 'none';
         blockAgendado.style.display = 'grid';
+        blockImediato.style.display = 'none';
 
-        // Preenche com a primeira data/hora viável
         const prim = calcularPrimeiraEntregaPossivel(new Date(), app.horariosAtendimento);
         if (prim.canOrder && prim.dataStr && prim.horaStr) {
           if (!inpDataAgendada.value || inpDataAgendada.value < prim.dataStr) {
@@ -2391,6 +2606,14 @@
         atualizarValidacaoAgendamento();
       });
 
+      btnImediato.addEventListener('click', () => {
+        app.modoHorario = 'imediato';
+        btnImediato.classList.add('active');
+        btnAgendado.classList.remove('active');
+        blockImediato.style.display = 'block';
+        blockAgendado.style.display = 'none';
+      });
+
       if (inpDataAgendada) {
         inpDataAgendada.addEventListener('change', atualizarValidacaoAgendamento);
         inpDataAgendada.addEventListener('input', atualizarValidacaoAgendamento);
@@ -2398,6 +2621,32 @@
       if (inpHoraAgendada) {
         inpHoraAgendada.addEventListener('change', atualizarValidacaoAgendamento);
         inpHoraAgendada.addEventListener('input', atualizarValidacaoAgendamento);
+      }
+
+      // Botão para usar outro endereço (limpa seleção e foca no CEP)
+      const btnUseCustom = document.getElementById('btn-use-custom-address');
+      if (btnUseCustom) {
+        btnUseCustom.addEventListener('click', () => {
+          app.selectedEnderecoId = null;
+          document.querySelectorAll('#saved-addresses-list .address-card-item').forEach(card => card.classList.remove('selected'));
+          document.getElementById('inp-cep').value = '';
+          document.getElementById('inp-rua').value = '';
+          document.getElementById('inp-num').value = '';
+          document.getElementById('inp-bairro').value = '';
+          document.getElementById('inp-compl').value = '';
+          document.getElementById('inp-cep').focus();
+          calcularTaxaEntrega();
+        });
+      }
+
+      // Ouvintes nos inputs de endereço para recalcular taxa dinamicamente
+      const inpBairro = document.getElementById('inp-bairro');
+      if (inpBairro) {
+        inpBairro.addEventListener('blur', () => calcularTaxaEntrega());
+      }
+      const inpCep = document.getElementById('inp-cep');
+      if (inpCep) {
+        inpCep.addEventListener('blur', () => calcularTaxaEntrega());
       }
 
       // Busca Automática por CEP
@@ -2430,29 +2679,86 @@
         document.getElementById('inp-bairro').value = d.bairro || '';
         document.getElementById('inp-num').focus();
 
-        // Tenta calcular taxa de entrega se configurada no Supabase
-        await calcularTaxaEntrega(d.bairro);
+        // Calcula a taxa de entrega imediatamente após encontrar o CEP/Bairro
+        calcularTaxaEntrega(d.bairro, cep);
       } catch (e) {
         console.warn('Erro ao consultar CEP:', e);
       }
     }
 
-    async function calcularTaxaEntrega(bairro) {
-      if (!app.tenantId) return;
-      try {
-        const { data: taxas } = await sb.from('taxas_entrega').select('*').eq('tenantId', app.tenantId).eq('ativo', true);
-        if (taxas && taxas.length > 0) {
-          // Busca correspondência por bairro
-          const taxaBairro = taxas.find(t => t.nome && t.nome.toLowerCase().includes(bairro.toLowerCase()));
-          if (taxaBairro) {
-            app.taxaEntregaCentavos = Number(taxaBairro.valorCentavos || 0);
-          } else {
-            // Padrão geral da primeira taxa
-            app.taxaEntregaCentavos = Number(taxas[0].valorCentavos || 0);
-          }
-        }
+    // ─── Motor de Cálculo de Taxa de Entrega Baseado nas Regras Reais do ERP ───
+    function calcularTaxaEntrega(bairroInformado, cepInformado) {
+      if (app.tipoLogistica === 'Retirada') {
+        app.taxaEntregaCentavos = 0;
+        app.taxaNomeRegra = 'Retirada no Balcão';
         atualizarResumoModal();
-      } catch (_) {}
+        return;
+      }
+
+      const itensCart = Object.values(app.carrinho);
+      let subtotalCentavos = 0;
+      itensCart.forEach(it => {
+        const unit = calcularPrecoUnitario(it.produto, it.qty);
+        subtotalCentavos += unit * it.qty;
+      });
+
+      const regras = app.taxasEntrega || [];
+      const bInput = (bairroInformado || document.getElementById('inp-bairro')?.value || '').trim().toLowerCase();
+      const cInput = (cepInformado || document.getElementById('inp-cep')?.value || '').replace(/\D/g, '');
+
+      let taxaEncontrada = null;
+
+      // 1. Busca por Bairro (exato ou parcial)
+      if (bInput && regras.length > 0) {
+        taxaEncontrada = regras.find(r => {
+          if (r.ativo && (r.tipoRegra === 'bairro' || r.tipo_regra === 'bairro') && r.bairro) {
+            const rb = r.bairro.trim().toLowerCase();
+            return rb === bInput || bInput.includes(rb) || rb.includes(bInput);
+          }
+          return false;
+        });
+      }
+
+      // 2. Busca por Faixa de CEP
+      if (!taxaEncontrada && cInput.length === 8 && regras.length > 0) {
+        const cepNum = parseInt(cInput, 10);
+        taxaEncontrada = regras.find(r => {
+          if (r.ativo && (r.tipoRegra === 'cep' || r.tipo_regra === 'cep' || r.tipoRegra === 'faixa_cep') && r.cepInicial && r.cepFinal) {
+            const ini = parseInt(String(r.cepInicial).replace(/\D/g, ''), 10);
+            const fim = parseInt(String(r.cepFinal).replace(/\D/g, ''), 10);
+            return !isNaN(ini) && !isNaN(fim) && cepNum >= ini && cepNum <= fim;
+          }
+          return false;
+        });
+      }
+
+      // 3. Regra Padrão / Fixa da empresa
+      if (!taxaEncontrada && regras.length > 0) {
+        taxaEncontrada = regras.find(r => r.ativo && (r.tipoRegra === 'fixo' || r.tipoRegra === 'padrao' || (r.nome && r.nome.toLowerCase().includes('padrão'))));
+      }
+
+      if (taxaEncontrada) {
+        const valor = parseInt(taxaEncontrada.valorCentavos || 0, 10);
+        const minGratis = parseInt(taxaEncontrada.pedidoMinimoCentavos || 0, 10);
+        if (minGratis > 0 && subtotalCentavos >= minGratis) {
+          app.taxaEntregaCentavos = 0;
+          app.taxaNomeRegra = `${taxaEncontrada.nome} (Grátis acima de ${formatMoeda(minGratis)})`;
+        } else {
+          app.taxaEntregaCentavos = valor;
+          app.taxaNomeRegra = taxaEncontrada.nome || 'Taxa de Entrega';
+        }
+      } else {
+        // Fallback: se não tiver regras cadastradas ou bairro não corresponder, primeira taxa ativa ou 0
+        if (regras.length > 0 && regras[0].valorCentavos) {
+          app.taxaEntregaCentavos = Number(regras[0].valorCentavos || 0);
+          app.taxaNomeRegra = regras[0].nome || 'Taxa de Entrega';
+        } else {
+          app.taxaEntregaCentavos = 0;
+          app.taxaNomeRegra = 'Entrega Grátis';
+        }
+      }
+
+      atualizarResumoModal();
     }
 
     function atualizarResumoModal() {
@@ -2518,6 +2824,13 @@
       let obsAdicional = '';
 
       if (app.modoHorario === 'agendado') {
+        const chkCiente = document.getElementById('chk-ciente-aprovacao');
+        if (chkCiente && !chkCiente.checked) {
+          alert('Por favor confirme que está ciente de que o agendamento passará por aprovação da cozinha.');
+          chkCiente.focus();
+          return;
+        }
+
         const dataAg = document.getElementById('inp-data-agendada').value;
         const horaAg = document.getElementById('inp-hora-agendada').value;
         if (!dataAg || !horaAg) {
@@ -2532,7 +2845,7 @@
         const [ano, mes, dia] = dataAg.split('-');
         horarioPrevisaoFinal = `${dia}/${mes}/${ano} às ${horaAg}`;
         dataHoraEntregaIso = new Date(`${dataAg}T${horaAg}:00`).toISOString();
-        obsAdicional = `[AGENDADO para ${dia}/${mes}/${ano} às ${horaAg}] `;
+        obsAdicional = `[AGENDAMENTO PENDENTE DE APROVAÇÃO para ${dia}/${mes}/${ano} às ${horaAg}] `;
       } else {
         // Validação no modo imediato
         const h = app.horariosAtendimento;
@@ -2588,7 +2901,8 @@
           valorSubtotalCentavos: subtotalCentavos,
           valorTaxaEntregaCentavos: taxaCentavos,
           valorTotalCentavos: totalFinalCentavos,
-          formaPagamentoNome: app.formaPagamento,
+          formaPagamentoId: app.formaPagamentoId || null,
+          formaPagamentoNome: app.formaPagamentoNome || 'PIX',
           canalOrigem: 'web',
           dataHoraCriacao: agora,
           dataHoraEntregaPrevista: dataHoraEntregaIso,
@@ -2639,7 +2953,7 @@
           createdAt: agora,
           updatedAt: agora,
           tempoEstimadoSegundos: app.prazoMinimoMinutos * 60,
-          observacoes: `[PRONTA_ENTREGA]\nCliente: ${nome} (${phone})\nTipo: ${app.tipoLogistica}\nPagamento: ${app.formaPagamento}`,
+          observacoes: `[PRONTA_ENTREGA]\nCliente: ${nome} (${phone})\nTipo: ${app.tipoLogistica}\nPagamento: ${app.formaPagamentoNome}`,
           createdBy: 'web_expresso',
           updatedBy: 'web_expresso',
           syncVersion: 1
